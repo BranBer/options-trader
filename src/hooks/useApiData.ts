@@ -1,0 +1,113 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+
+export interface NewsEvent {
+  id: number;
+  headline: string;
+  source: string | null;
+  url: string | null;
+  publishedAt: string | null;
+  countryCode: string | null;
+  lat: number | null;
+  lng: number | null;
+  impactScore: number | null;
+  sentiment: string | null;
+  sectors: string | null;
+  tickers: string | null;
+  eventType: string | null;
+  rawSummary: string | null;
+  geminiAnalysis: string | null;
+  createdAt: string | null;
+}
+
+export interface WhaleAlert {
+  id: number;
+  ticker: string;
+  strike: number | null;
+  expiry: string | null;
+  callPut: string | null;
+  premium: number | null;
+  volume: number | null;
+  openInterest: number | null;
+  underlyingPrice: number | null;
+  sentiment: string | null;
+  source: string | null;
+  detectedAt: string | null;
+  createdAt: string | null;
+  currentPrice: number | null;
+  dayChangePct: number | null;
+}
+
+export interface Analysis {
+  id: number;
+  type: string | null;
+  inputRefs: Record<string, unknown> | null;
+  output: Record<string, unknown> | null;
+  confidence: number | null;
+  createdAt: string | null;
+}
+
+export function useNews(minImpact = 1, limit = 100) {
+  return useQuery<{ events: NewsEvent[]; count: number }>({
+    queryKey: ["news", minImpact, limit],
+    queryFn: async () => {
+      const res = await fetch(`/api/news?minImpact=${minImpact}&limit=${limit}`);
+      if (!res.ok) throw new Error("Failed to fetch news");
+      return res.json();
+    },
+  });
+}
+
+export function useWhaleAlerts(params?: {
+  ticker?: string;
+  minPremium?: number;
+  sentiment?: string;
+  limit?: number;
+}) {
+  const sp = new URLSearchParams();
+  if (params?.ticker) sp.set("ticker", params.ticker);
+  if (params?.minPremium) sp.set("minPremium", String(params.minPremium));
+  if (params?.sentiment) sp.set("sentiment", params.sentiment);
+  if (params?.limit) sp.set("limit", String(params.limit));
+
+  return useQuery<{ alerts: WhaleAlert[] }>({
+    queryKey: ["whaleAlerts", params],
+    queryFn: async () => {
+      const res = await fetch(`/api/whales?${sp.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch whale alerts");
+      return res.json();
+    },
+  });
+}
+
+export function useAnalyses(type?: string, limit = 20) {
+  const sp = new URLSearchParams();
+  if (type) sp.set("type", type);
+  sp.set("limit", String(limit));
+
+  return useQuery<{ analyses: Analysis[] }>({
+    queryKey: ["analyses", type, limit],
+    queryFn: async () => {
+      const res = await fetch(`/api/analysis?${sp.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch analyses");
+      return res.json();
+    },
+  });
+}
+
+export function useMarket(ticker?: string, limit = 10) {
+  const sp = new URLSearchParams();
+  if (ticker) sp.set("ticker", ticker);
+  sp.set("limit", String(limit));
+
+  return useQuery({
+    queryKey: ["market", ticker, limit],
+    queryFn: async () => {
+      const res = await fetch(`/api/market?${sp.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch market data");
+      return res.json();
+    },
+    enabled: !!ticker,
+  });
+}
