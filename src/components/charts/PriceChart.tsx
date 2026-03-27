@@ -16,7 +16,7 @@ import type { DeepDiveAnalysis } from "@/types/analysis";
 
 interface PriceChartProps {
   candles: Array<{
-    time: string;
+    time: string | number;
     open: number;
     high: number;
     low: number;
@@ -67,7 +67,7 @@ export default function PriceChart({
       },
       timeScale: {
         borderColor: "rgba(255,255,255,0.1)",
-        timeVisible: false,
+        timeVisible: typeof candles[0]?.time === "number",
       },
     });
 

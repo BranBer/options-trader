@@ -135,7 +135,7 @@ export interface CandleDataResponse {
   ticker: string;
   period: string;
   candles: Array<{
-    time: string;
+    time: string | number;
     open: number;
     high: number;
     low: number;

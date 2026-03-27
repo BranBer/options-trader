@@ -51,7 +51,7 @@ export type OptionsChainSummary = z.infer<typeof optionsChainSummarySchema>;
 
 // --- Historical candle data ---
 export interface CandleData {
-  time: string; // YYYY-MM-DD
+  time: string | number; // YYYY-MM-DD for daily, unix seconds for intraday
   open: number;
   high: number;
   low: number;

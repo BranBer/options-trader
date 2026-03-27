@@ -124,7 +124,11 @@ export async function fetchHistoricalData(
     const candles: CandleData[] = result.quotes
       .filter((q: any) => q.open != null && q.close != null)
       .map((q: any) => ({
-        time: new Date(q.date).toISOString().split("T")[0],
+        // Hourly candles need unix timestamp (seconds); daily use YYYY-MM-DD string
+        time:
+          interval === "1d"
+            ? new Date(q.date).toISOString().split("T")[0]
+            : Math.floor(new Date(q.date).getTime() / 1000),
         open: q.open,
         high: q.high,
         low: q.low,
