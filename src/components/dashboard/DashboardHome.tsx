@@ -172,7 +172,7 @@ export default function DashboardHome() {
                   No whale alerts yet. Run a pipeline refresh.
                 </p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3 pr-3">
                   {whales.slice(0, 8).map((w) => (
                     <div
                       key={w.id}

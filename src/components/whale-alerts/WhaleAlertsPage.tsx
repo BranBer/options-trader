@@ -68,101 +68,105 @@ export default function WhaleAlertsPage() {
           </CardHeader>
           <CardContent className="p-0">
             <ScrollArea className="h-[600px]">
-              <Table>
-                <caption className="sr-only">
-                  Whale alerts table. Select a row to view detailed options flow
-                  information.
-                </caption>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Ticker</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Strike</TableHead>
-                    <TableHead>Expiry</TableHead>
-                    <TableHead className="text-right">Premium</TableHead>
-                    <TableHead className="text-right">Volume</TableHead>
-                    <TableHead className="text-right">OI</TableHead>
-                    <TableHead>Sentiment</TableHead>
-                    <TableHead>Time</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {alerts.length === 0 && !isLoading ? (
+              <div className="pr-3">
+                <Table>
+                  <caption className="sr-only">
+                    Whale alerts table. Select a row to view detailed options
+                    flow information.
+                  </caption>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell
-                        colSpan={9}
-                        className="text-center text-muted-foreground py-8"
-                      >
-                        No whale alerts found. Run a pipeline refresh or adjust
-                        filters.
-                      </TableCell>
+                      <TableHead>Ticker</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Strike</TableHead>
+                      <TableHead>Expiry</TableHead>
+                      <TableHead className="text-right">Premium</TableHead>
+                      <TableHead className="text-right">Volume</TableHead>
+                      <TableHead className="text-right">OI</TableHead>
+                      <TableHead>Sentiment</TableHead>
+                      <TableHead>Time</TableHead>
                     </TableRow>
-                  ) : (
-                    alerts.map((alert) => (
-                      <TableRow
-                        key={alert.id}
-                        className={`cursor-pointer transition-colors ${
-                          selected?.id === alert.id
-                            ? "bg-muted"
-                            : "hover:bg-muted/50"
-                        }`}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`View details for ${alert.ticker} ${alert.callPut === "C" ? "call" : "put"} option`}
-                        onClick={() => setSelected(alert)}
-                        onKeyDown={(event) => handleRowKeyDown(event, alert)}
-                      >
-                        <TableCell className="font-mono font-medium">
-                          {alert.ticker}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              alert.callPut === "C" ? "default" : "destructive"
-                            }
-                            className="text-xs"
-                          >
-                            {alert.callPut === "C" ? "CALL" : "PUT"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {alert.strike ? formatCurrency(alert.strike) : "—"}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {alert.expiry ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {alert.premium ? formatPremium(alert.premium) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {alert.volume ? formatNumber(alert.volume) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {alert.openInterest
-                            ? formatNumber(alert.openInterest)
-                            : "—"}
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className={
-                              alert.sentiment === "bullish"
-                                ? "text-emerald-400"
-                                : alert.sentiment === "bearish"
-                                  ? "text-red-400"
-                                  : "text-muted-foreground"
-                            }
-                          >
-                            {alert.sentiment ?? "—"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {alert.detectedAt ? timeAgo(alert.detectedAt) : "—"}
+                  </TableHeader>
+                  <TableBody>
+                    {alerts.length === 0 && !isLoading ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={9}
+                          className="text-center text-muted-foreground py-8"
+                        >
+                          No whale alerts found. Run a pipeline refresh or
+                          adjust filters.
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ) : (
+                      alerts.map((alert) => (
+                        <TableRow
+                          key={alert.id}
+                          className={`cursor-pointer transition-colors ${
+                            selected?.id === alert.id
+                              ? "bg-muted"
+                              : "hover:bg-muted/50"
+                          }`}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`View details for ${alert.ticker} ${alert.callPut === "C" ? "call" : "put"} option`}
+                          onClick={() => setSelected(alert)}
+                          onKeyDown={(event) => handleRowKeyDown(event, alert)}
+                        >
+                          <TableCell className="font-mono font-medium">
+                            {alert.ticker}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                alert.callPut === "C"
+                                  ? "default"
+                                  : "destructive"
+                              }
+                              className="text-xs"
+                            >
+                              {alert.callPut === "C" ? "CALL" : "PUT"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {alert.strike ? formatCurrency(alert.strike) : "—"}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {alert.expiry ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {alert.premium ? formatPremium(alert.premium) : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {alert.volume ? formatNumber(alert.volume) : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {alert.openInterest
+                              ? formatNumber(alert.openInterest)
+                              : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={
+                                alert.sentiment === "bullish"
+                                  ? "text-emerald-400"
+                                  : alert.sentiment === "bearish"
+                                    ? "text-red-400"
+                                    : "text-muted-foreground"
+                              }
+                            >
+                              {alert.sentiment ?? "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {alert.detectedAt ? timeAgo(alert.detectedAt) : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </ScrollArea>
           </CardContent>
         </Card>
