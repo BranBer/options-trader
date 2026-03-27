@@ -1,8 +1,17 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { RawNewsArticle } from "@/types/news";
-import { type NewsClassification, newsClassificationSchema } from "@/types/news";
-import { type CrossReferenceAnalysis, crossReferenceAnalysisSchema } from "@/types/analysis";
-import { type TradeRecommendation, tradeRecommendationSchema } from "@/types/analysis";
+import {
+  type NewsClassification,
+  newsClassificationSchema,
+} from "@/types/news";
+import {
+  type CrossReferenceAnalysis,
+  crossReferenceAnalysisSchema,
+} from "@/types/analysis";
+import {
+  type TradeRecommendation,
+  tradeRecommendationSchema,
+} from "@/types/analysis";
 import type { Correlation } from "@/types/analysis";
 import {
   NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
@@ -43,7 +52,11 @@ async function callGeminiWithRetry<T>(
   userPrompt: string,
   responseSchema: object,
   zodSchema: { parse: (data: unknown) => T },
-  options: { temperature?: number; maxOutputTokens?: number; maxRetries?: number } = {}
+  options: {
+    temperature?: number;
+    maxOutputTokens?: number;
+    maxRetries?: number;
+  } = {},
 ): Promise<T> {
   const { temperature = 0.1, maxOutputTokens = 8192, maxRetries = 3 } = options;
   const ai = getGenAI();
@@ -67,7 +80,7 @@ async function callGeminiWithRetry<T>(
     } catch (error) {
       console.error(
         `[Gemini] Attempt ${attempt + 1}/${maxRetries} failed:`,
-        error instanceof Error ? error.message : error
+        error instanceof Error ? error.message : error,
       );
       if (attempt === maxRetries - 1) throw error;
       // Exponential backoff: 1s, 2s, 4s
@@ -84,7 +97,7 @@ async function callGeminiWithRetry<T>(
 const MAX_ARTICLES_PER_BATCH = 20;
 
 export async function classifyNews(
-  articles: RawNewsArticle[]
+  articles: RawNewsArticle[],
 ): Promise<NewsClassification> {
   if (articles.length === 0) {
     return {
@@ -105,7 +118,7 @@ export async function classifyNews(
   }
 
   console.log(
-    `[Gemini] Classifying ${articles.length} articles in ${batches.length} batch(es)`
+    `[Gemini] Classifying ${articles.length} articles in ${batches.length} batch(es)`,
   );
 
   const allClassified: NewsClassification["articles"] = [];
@@ -116,12 +129,12 @@ export async function classifyNews(
   for (const batch of batches) {
     const prompt = buildNewsClassifierPrompt(batch);
     const result = await callGeminiWithRetry(
-      "gemini-1.5-flash",
+      "gemini-3-flash-preview",
       NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
       prompt,
       NEWS_CLASSIFIER_RESPONSE_SCHEMA,
       newsClassificationSchema,
-      { temperature: 0.1, maxOutputTokens: 8192 }
+      { temperature: 0.1, maxOutputTokens: 8192 },
     );
 
     allClassified.push(...result.articles);
@@ -132,11 +145,11 @@ export async function classifyNews(
 
   // Filter: only keep articles with impact_score >= 3
   const relevant = allClassified.filter(
-    (a) => a.is_market_relevant && a.impact_score >= 3
+    (a) => a.is_market_relevant && a.impact_score >= 3,
   );
 
   console.log(
-    `[Gemini] Classification complete: ${totalInput} input, ${relevant.length} relevant (impact >= 3)`
+    `[Gemini] Classification complete: ${totalInput} input, ${relevant.length} relevant (impact >= 3)`,
   );
 
   return {
@@ -176,7 +189,7 @@ interface WhaleAlertForCorrelation {
 
 export async function crossReferenceAnalysis(
   newsEvents: NewsEventForCorrelation[],
-  whaleAlerts: WhaleAlertForCorrelation[]
+  whaleAlerts: WhaleAlertForCorrelation[],
 ): Promise<CrossReferenceAnalysis> {
   if (newsEvents.length === 0 || whaleAlerts.length === 0) {
     console.log("[Gemini] Skipping cross-reference: insufficient data");
@@ -194,25 +207,25 @@ export async function crossReferenceAnalysis(
   }
 
   console.log(
-    `[Gemini] Cross-referencing ${newsEvents.length} news events with ${whaleAlerts.length} whale alerts`
+    `[Gemini] Cross-referencing ${newsEvents.length} news events with ${whaleAlerts.length} whale alerts`,
   );
 
   const prompt = buildCrossReferencePrompt(
     JSON.stringify(newsEvents, null, 2),
-    JSON.stringify(whaleAlerts, null, 2)
+    JSON.stringify(whaleAlerts, null, 2),
   );
 
   const result = await callGeminiWithRetry(
-    "gemini-1.5-flash",
+    "gemini-3-flash-preview",
     CROSS_REFERENCE_SYSTEM_INSTRUCTION,
     prompt,
     CROSS_REFERENCE_RESPONSE_SCHEMA,
     crossReferenceAnalysisSchema,
-    { temperature: 0.2, maxOutputTokens: 8192 }
+    { temperature: 0.2, maxOutputTokens: 8192 },
   );
 
   console.log(
-    `[Gemini] Cross-reference complete: ${result.correlations.length} correlations found`
+    `[Gemini] Cross-reference complete: ${result.correlations.length} correlations found`,
   );
 
   return result;
@@ -232,7 +245,7 @@ interface MarketDataForRecommendation {
 
 export async function generateRecommendation(
   correlation: Correlation,
-  marketData: MarketDataForRecommendation
+  marketData: MarketDataForRecommendation,
 ): Promise<TradeRecommendation> {
   const ticker = correlation.whale_trade.ticker;
 
@@ -245,20 +258,20 @@ export async function generateRecommendation(
     marketData.ivRank,
     marketData.avgVolume,
     marketData.todayVolume,
-    marketData.optionsChainSummary
+    marketData.optionsChainSummary,
   );
 
   const result = await callGeminiWithRetry(
-    "gemini-1.5-flash",
+    "gemini-3-flash-preview",
     TRADE_ANALYZER_SYSTEM_INSTRUCTION,
     prompt,
     TRADE_ANALYZER_RESPONSE_SCHEMA,
     tradeRecommendationSchema,
-    { temperature: 0.3, maxOutputTokens: 4096 }
+    { temperature: 0.3, maxOutputTokens: 4096 },
   );
 
   console.log(
-    `[Gemini] Recommendation for ${ticker}: ${result.direction} (confidence: ${result.confidence})`
+    `[Gemini] Recommendation for ${ticker}: ${result.direction} (confidence: ${result.confidence})`,
   );
 
   return result;

@@ -1,11 +1,15 @@
 import YahooFinance from "yahoo-finance2";
 import type { MarketSnapshot, OptionsChainSummary } from "@/types/market";
 
-const yf = new YahooFinance();
+// yahoo-finance2 v3 class API — types export `never` but methods exist at runtime
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const yf = new YahooFinance() as any;
 
 // ---------- Market quotes ----------
 
-export async function fetchMarketData(tickers: string[]): Promise<MarketSnapshot[]> {
+export async function fetchMarketData(
+  tickers: string[],
+): Promise<MarketSnapshot[]> {
   if (tickers.length === 0) return [];
 
   const snapshots: MarketSnapshot[] = [];
@@ -26,13 +30,17 @@ export async function fetchMarketData(tickers: string[]): Promise<MarketSnapshot
     }
   }
 
-  console.log(`[market-fetcher] Fetched ${snapshots.length}/${tickers.length} market quotes`);
+  console.log(
+    `[market-fetcher] Fetched ${snapshots.length}/${tickers.length} market quotes`,
+  );
   return snapshots;
 }
 
 // ---------- Options chain ----------
 
-export async function fetchOptionsChain(ticker: string): Promise<OptionsChainSummary | null> {
+export async function fetchOptionsChain(
+  ticker: string,
+): Promise<OptionsChainSummary | null> {
   try {
     const chain = await yf.options(ticker);
     if (!chain?.options?.length) {
@@ -40,10 +48,12 @@ export async function fetchOptionsChain(ticker: string): Promise<OptionsChainSum
       return null;
     }
 
-    const expirations = chain.expirationDates?.map((d) => d.toISOString().split("T")[0]) ?? [];
+    const expirations =
+      chain.expirationDates?.map((d: Date) => d.toISOString().split("T")[0]) ??
+      [];
     const nearest = chain.options[0];
 
-    const mapContracts = (contracts: typeof nearest.calls) =>
+    const mapContracts = (contracts: any[]) =>
       contracts.map((c) => ({
         strike: c.strike,
         bid: c.bid ?? 0,
@@ -66,7 +76,10 @@ export async function fetchOptionsChain(ticker: string): Promise<OptionsChainSum
       },
     };
   } catch (error) {
-    console.error(`[market-fetcher] Options chain failed for ${ticker}:`, error);
+    console.error(
+      `[market-fetcher] Options chain failed for ${ticker}:`,
+      error,
+    );
     return null;
   }
 }
@@ -78,7 +91,11 @@ export async function fetchOptionsChain(ticker: string): Promise<OptionsChainSum
  * Requires historical IV data — for now, uses a heuristic based on
  * the options chain average IV vs. typical ranges.
  */
-export function computeIVRank(currentIV: number, low52w: number = 0.15, high52w: number = 0.80): number {
+export function computeIVRank(
+  currentIV: number,
+  low52w: number = 0.15,
+  high52w: number = 0.8,
+): number {
   if (high52w <= low52w) return 50;
   const rank = ((currentIV - low52w) / (high52w - low52w)) * 100;
   return Math.max(0, Math.min(100, Math.round(rank)));
@@ -87,19 +104,26 @@ export function computeIVRank(currentIV: number, low52w: number = 0.15, high52w:
 /**
  * Enrich a market snapshot with IV data from the options chain.
  */
-export async function enrichWithIV(snapshot: MarketSnapshot): Promise<MarketSnapshot> {
+export async function enrichWithIV(
+  snapshot: MarketSnapshot,
+): Promise<MarketSnapshot> {
   const chain = await fetchOptionsChain(snapshot.ticker);
   if (!chain) return snapshot;
 
   // Average IV from nearest-expiry ATM options (within 5% of price)
-  const allContracts = [...chain.nearestExpiry.calls, ...chain.nearestExpiry.puts];
+  const allContracts = [
+    ...chain.nearestExpiry.calls,
+    ...chain.nearestExpiry.puts,
+  ];
   const atmContracts = allContracts.filter(
-    (c) => Math.abs(c.strike - snapshot.price) / snapshot.price < 0.05 && c.iv > 0
+    (c) =>
+      Math.abs(c.strike - snapshot.price) / snapshot.price < 0.05 && c.iv > 0,
   );
 
   if (atmContracts.length === 0) return snapshot;
 
-  const avgIV = atmContracts.reduce((sum, c) => sum + c.iv, 0) / atmContracts.length;
+  const avgIV =
+    atmContracts.reduce((sum, c) => sum + c.iv, 0) / atmContracts.length;
   const ivRank = computeIVRank(avgIV);
 
   return { ...snapshot, iv: avgIV, ivRank };
