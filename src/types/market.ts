@@ -29,7 +29,7 @@ export const optionsChainSummarySchema = z.object({
         delta: z.number().optional(),
         gamma: z.number().optional(),
         theta: z.number().optional(),
-      })
+      }),
     ),
     puts: z.array(
       z.object({
@@ -42,7 +42,7 @@ export const optionsChainSummarySchema = z.object({
         delta: z.number().optional(),
         gamma: z.number().optional(),
         theta: z.number().optional(),
-      })
+      }),
     ),
   }),
 });

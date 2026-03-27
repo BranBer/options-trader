@@ -63,17 +63,21 @@ export default function OptionsStatsPanel({
         />
         <StatItem
           label="Unusual Activity"
-          value={optionsContext.unusual_activity_note.length > 50
-            ? optionsContext.unusual_activity_note.slice(0, 50) + "..."
-            : optionsContext.unusual_activity_note}
+          value={
+            optionsContext.unusual_activity_note.length > 50
+              ? optionsContext.unusual_activity_note.slice(0, 50) + "..."
+              : optionsContext.unusual_activity_note
+          }
           explanation={optionsContext.unusual_activity_note}
         />
         <div className="col-span-2 md:col-span-3">
           <StatItem
             label="Greeks Summary"
-            value={optionsContext.greeks_summary.length > 80
-              ? optionsContext.greeks_summary.slice(0, 80) + "..."
-              : optionsContext.greeks_summary}
+            value={
+              optionsContext.greeks_summary.length > 80
+                ? optionsContext.greeks_summary.slice(0, 80) + "..."
+                : optionsContext.greeks_summary
+            }
             explanation={optionsContext.greeks_summary}
           />
         </div>

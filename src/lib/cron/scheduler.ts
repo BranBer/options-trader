@@ -12,7 +12,10 @@ let isRunning = false;
  * Master pipeline — orchestrates all data ingestion + analysis.
  * Called every 30 minutes by cron and on-demand via /api/cron.
  */
-export async function runPipeline(): Promise<{ status: string; timestamp: string }> {
+export async function runPipeline(): Promise<{
+  status: string;
+  timestamp: string;
+}> {
   if (isRunning) {
     console.log("[Pipeline] Already running, skipping...");
     return { status: "skipped", timestamp: lastRefreshAt ?? "never" };
@@ -38,7 +41,9 @@ export async function runPipeline(): Promise<{ status: string; timestamp: string
       runWhalePipeline(),
     ]);
     progress.complete(0);
-    console.log(`[Pipeline] Phase 1 fetch: ${rawArticles.length} articles, ${whaleCount} whale alerts`);
+    console.log(
+      `[Pipeline] Phase 1 fetch: ${rawArticles.length} articles, ${whaleCount} whale alerts`,
+    );
 
     // Step 1: Classify news articles with Gemini
     progress.activate(1);
@@ -50,7 +55,9 @@ export async function runPipeline(): Promise<{ status: string; timestamp: string
 
     // Steps 2-4: Analysis (pipeline updates progress internally)
     const analysisCount = await runAnalysisPipeline();
-    console.log(`[Pipeline] Phase 2 complete: ${analysisCount} analyses stored`);
+    console.log(
+      `[Pipeline] Phase 2 complete: ${analysisCount} analyses stored`,
+    );
 
     lastRefreshAt = new Date().toISOString();
     const elapsed = Date.now() - startTime.getTime();

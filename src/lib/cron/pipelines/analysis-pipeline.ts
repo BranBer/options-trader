@@ -1,7 +1,20 @@
 import { db } from "@/lib/db/client";
-import { newsEvents, whaleAlerts, marketSnapshots, analyses } from "@/lib/db/schema";
-import { crossReferenceAnalysis, generateRecommendation, generateDeepDive } from "@/lib/services/gemini-analyzer";
-import { fetchMarketData, fetchOptionsChain, fetchHistoricalData } from "@/lib/services/market-fetcher";
+import {
+  newsEvents,
+  whaleAlerts,
+  marketSnapshots,
+  analyses,
+} from "@/lib/db/schema";
+import {
+  crossReferenceAnalysis,
+  generateRecommendation,
+  generateDeepDive,
+} from "@/lib/services/gemini-analyzer";
+import {
+  fetchMarketData,
+  fetchOptionsChain,
+  fetchHistoricalData,
+} from "@/lib/services/market-fetcher";
 import { desc, gte, and } from "drizzle-orm";
 import * as progress from "@/lib/cron/pipeline-progress";
 
@@ -28,7 +41,9 @@ export async function runAnalysisPipeline(): Promise<number> {
   const recentNews = await db
     .select()
     .from(newsEvents)
-    .where(and(gte(newsEvents.createdAt, since), gte(newsEvents.impactScore, 5)))
+    .where(
+      and(gte(newsEvents.createdAt, since), gte(newsEvents.impactScore, 5)),
+    )
     .orderBy(desc(newsEvents.createdAt))
     .limit(20);
 
@@ -42,7 +57,7 @@ export async function runAnalysisPipeline(): Promise<number> {
 
   if (recentNews.length === 0 || recentWhales.length === 0) {
     console.log(
-      `[AnalysisPipeline] Insufficient data: ${recentNews.length} news, ${recentWhales.length} whales — skipping`
+      `[AnalysisPipeline] Insufficient data: ${recentNews.length} news, ${recentWhales.length} whales — skipping`,
     );
     progress.complete(STEP_CROSS_REF);
     progress.complete(STEP_RECOMMENDATIONS);
@@ -72,7 +87,10 @@ export async function runAnalysisPipeline(): Promise<number> {
     sentiment: w.sentiment ?? "neutral",
   }));
 
-  const crossRef = await crossReferenceAnalysis(newsForCorrelation, whalesForCorrelation);
+  const crossRef = await crossReferenceAnalysis(
+    newsForCorrelation,
+    whalesForCorrelation,
+  );
 
   // Store cross-reference analysis
   let stored = 0;
@@ -84,9 +102,13 @@ export async function runAnalysisPipeline(): Promise<number> {
         whaleIds: recentWhales.map((w) => w.id),
       }),
       output: JSON.stringify(crossRef),
-      confidence: crossRef.correlations.length > 0
-        ? crossRef.correlations.reduce((sum, c) => sum + c.correlation_confidence, 0) / crossRef.correlations.length
-        : 0,
+      confidence:
+        crossRef.correlations.length > 0
+          ? crossRef.correlations.reduce(
+              (sum, c) => sum + c.correlation_confidence,
+              0,
+            ) / crossRef.correlations.length
+          : 0,
     });
     stored++;
   } catch (error) {
@@ -95,26 +117,33 @@ export async function runAnalysisPipeline(): Promise<number> {
 
   console.log(
     `[AnalysisPipeline] Cross-reference: ${crossRef.correlations.length} correlations, ` +
-    `${crossRef.uncorrelated_whales.length} uncorrelated whales`
+      `${crossRef.uncorrelated_whales.length} uncorrelated whales`,
   );
   progress.complete(STEP_CROSS_REF);
 
   // Step 4: Generate recommendations for high-confidence correlations
   const highConfCorrelations = crossRef.correlations.filter(
-    (c) => c.correlation_confidence >= MIN_CORRELATION_CONFIDENCE
+    (c) => c.correlation_confidence >= MIN_CORRELATION_CONFIDENCE,
   );
 
-  progress.activate(STEP_RECOMMENDATIONS, highConfCorrelations.length > 0
-    ? `0/${highConfCorrelations.length} tickers`
-    : "skipped");
+  progress.activate(
+    STEP_RECOMMENDATIONS,
+    highConfCorrelations.length > 0
+      ? `0/${highConfCorrelations.length} tickers`
+      : "skipped",
+  );
 
   if (highConfCorrelations.length > 0) {
     console.log(
-      `[AnalysisPipeline] Generating recommendations for ${highConfCorrelations.length} high-confidence correlations`
+      `[AnalysisPipeline] Generating recommendations for ${highConfCorrelations.length} high-confidence correlations`,
     );
 
     let recsDone = 0;
-    for (let i = 0; i < highConfCorrelations.length; i += RECOMMEND_CONCURRENCY) {
+    for (
+      let i = 0;
+      i < highConfCorrelations.length;
+      i += RECOMMEND_CONCURRENCY
+    ) {
       const chunk = highConfCorrelations.slice(i, i + RECOMMEND_CONCURRENCY);
       const results = await Promise.allSettled(
         chunk.map(async (correlation) => {
@@ -145,7 +174,9 @@ export async function runAnalysisPipeline(): Promise<number> {
                 ivRank: marketData.ivRank ?? null,
                 dayChangePct: marketData.dayChangePct,
               });
-            } catch { /* ignore duplicate snapshot */ }
+            } catch {
+              /* ignore duplicate snapshot */
+            }
           }
 
           // Store recommendation
@@ -161,7 +192,7 @@ export async function runAnalysisPipeline(): Promise<number> {
 
           console.log(
             `[AnalysisPipeline] Recommendation for ${ticker}: ${recommendation.direction} ` +
-            `(${recommendation.primary_strategy.name}, confidence: ${recommendation.confidence})`
+              `(${recommendation.primary_strategy.name}, confidence: ${recommendation.confidence})`,
           );
           return 1;
         }),
@@ -169,10 +200,17 @@ export async function runAnalysisPipeline(): Promise<number> {
 
       for (const result of results) {
         if (result.status === "fulfilled") stored += result.value;
-        else console.error("[AnalysisPipeline] Recommendation failed:", result.reason);
+        else
+          console.error(
+            "[AnalysisPipeline] Recommendation failed:",
+            result.reason,
+          );
       }
       recsDone += chunk.length;
-      progress.updateDetail(STEP_RECOMMENDATIONS, `${recsDone}/${highConfCorrelations.length} tickers`);
+      progress.updateDetail(
+        STEP_RECOMMENDATIONS,
+        `${recsDone}/${highConfCorrelations.length} tickers`,
+      );
     }
   }
   progress.complete(STEP_RECOMMENDATIONS);
@@ -194,7 +232,11 @@ export async function runAnalysisPipeline(): Promise<number> {
       openInterest?: number;
       sentiment?: string;
     };
-    correlatedEvent?: { headline: string; impact_score: number; event_type: string };
+    correlatedEvent?: {
+      headline: string;
+      impact_score: number;
+      event_type: string;
+    };
   }> = [];
 
   // Add correlated tickers first (sorted by confidence desc)
@@ -220,7 +262,8 @@ export async function runAnalysisPipeline(): Promise<number> {
 
   // Fill remaining slots with uncorrelated whales
   for (const u of crossRef.uncorrelated_whales ?? []) {
-    if (seenTickers.has(u.ticker) || deepDiveQueue.length >= MAX_DEEP_DIVES) continue;
+    if (seenTickers.has(u.ticker) || deepDiveQueue.length >= MAX_DEEP_DIVES)
+      continue;
     seenTickers.add(u.ticker);
     // Find matching whale alert for full trade details
     const whaleRow = recentWhales.find((w) => w.ticker === u.ticker);
@@ -265,7 +308,9 @@ export async function runAnalysisPipeline(): Promise<number> {
 
           const currentPrice = marketSnap?.price ?? 0;
           if (currentPrice === 0) {
-            console.warn(`[AnalysisPipeline] No price data for ${item.ticker}, skipping deep dive`);
+            console.warn(
+              `[AnalysisPipeline] No price data for ${item.ticker}, skipping deep dive`,
+            );
             return 0;
           }
 
@@ -295,10 +340,14 @@ export async function runAnalysisPipeline(): Promise<number> {
 
       for (const result of results) {
         if (result.status === "fulfilled") stored += result.value;
-        else console.error("[AnalysisPipeline] Deep dive failed:", result.reason);
+        else
+          console.error("[AnalysisPipeline] Deep dive failed:", result.reason);
       }
       divesDone += chunk.length;
-      progress.updateDetail(STEP_DEEP_DIVES, `${divesDone}/${deepDiveQueue.length} tickers`);
+      progress.updateDetail(
+        STEP_DEEP_DIVES,
+        `${divesDone}/${deepDiveQueue.length} tickers`,
+      );
     }
   }
   progress.complete(STEP_DEEP_DIVES);

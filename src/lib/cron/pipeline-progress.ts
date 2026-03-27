@@ -29,7 +29,10 @@ export function getProgress(): PipelineProgress {
 export function init(labels: string[]): void {
   state.active = true;
   state.startedAt = new Date().toISOString();
-  state.steps = labels.map((label) => ({ label, status: "pending" as StepStatus }));
+  state.steps = labels.map((label) => ({
+    label,
+    status: "pending" as StepStatus,
+  }));
 }
 
 export function activate(index: number, detail?: string): void {

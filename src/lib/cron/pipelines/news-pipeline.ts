@@ -48,7 +48,7 @@ export async function classifyAndStoreNews(
   // Enrich lat/lng from original raw articles where available
   for (const row of rows) {
     const original = rawArticles.find(
-      (raw) => raw.headline === row.headline || raw.url === row.url
+      (raw) => raw.headline === row.headline || raw.url === row.url,
     );
     if (original?.lat != null && original?.lng != null) {
       row.lat = original.lat;
@@ -67,7 +67,7 @@ export async function classifyAndStoreNews(
   }
 
   console.log(
-    `[NewsPipeline] Classified & stored: ${rawArticles.length} fetched → ${classification.articles.length} classified → ${stored} stored`
+    `[NewsPipeline] Classified & stored: ${rawArticles.length} fetched → ${classification.articles.length} classified → ${stored} stored`,
   );
   return stored;
 }

@@ -52,7 +52,9 @@ export function useNews(minImpact = 1, limit = 100) {
   return useQuery<{ events: NewsEvent[]; count: number }>({
     queryKey: ["news", minImpact, limit],
     queryFn: async () => {
-      const res = await fetch(`/api/news?minImpact=${minImpact}&limit=${limit}`);
+      const res = await fetch(
+        `/api/news?minImpact=${minImpact}&limit=${limit}`,
+      );
       if (!res.ok) throw new Error("Failed to fetch news");
       return res.json();
     },

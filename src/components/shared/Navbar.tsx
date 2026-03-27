@@ -46,7 +46,13 @@ const navLinks = [
   { href: "/analysis", label: "Analysis", icon: BarChart3 },
 ];
 
-function NavItems({ pathname, onMobileClose }: { pathname: string; onMobileClose?: () => void }) {
+function NavItems({
+  pathname,
+  onMobileClose,
+}: {
+  pathname: string;
+  onMobileClose?: () => void;
+}) {
   return (
     <>
       {navLinks.map((link) => {
@@ -74,10 +80,14 @@ function NavItems({ pathname, onMobileClose }: { pathname: string; onMobileClose
 
 function StepIcon({ status }: { status: PipelineStep["status"] }) {
   switch (status) {
-    case "done": return <Check className="h-3 w-3 text-green-500" />;
-    case "active": return <Loader2 className="h-3 w-3 text-primary animate-spin" />;
-    case "error": return <X className="h-3 w-3 text-destructive" />;
-    default: return <Circle className="h-3 w-3 text-muted-foreground/40" />;
+    case "done":
+      return <Check className="h-3 w-3 text-green-500" />;
+    case "active":
+      return <Loader2 className="h-3 w-3 text-primary animate-spin" />;
+    case "error":
+      return <X className="h-3 w-3 text-destructive" />;
+    default:
+      return <Circle className="h-3 w-3 text-muted-foreground/40" />;
   }
 }
 
@@ -124,12 +134,17 @@ export default function Navbar() {
             // Keep countdown synced
           }
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
 
     poll();
     const interval = setInterval(poll, 2000);
-    return () => { active = false; clearInterval(interval); };
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, []);
 
   // Countdown timer
@@ -152,8 +167,6 @@ export default function Navbar() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-
-
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-sm">
       <div className="flex h-14 items-center px-4 gap-4">
@@ -173,7 +186,10 @@ export default function Navbar() {
           </SheetTrigger>
           <SheetContent side="left" className="w-64 p-4">
             <div className="flex flex-col gap-1 mt-6">
-              <NavItems pathname={pathname} onMobileClose={() => setMobileOpen(false)} />
+              <NavItems
+                pathname={pathname}
+                onMobileClose={() => setMobileOpen(false)}
+              />
             </div>
           </SheetContent>
         </Sheet>
@@ -219,7 +235,9 @@ export default function Navbar() {
                   onClick={triggerRefresh}
                   disabled={pipelineActive}
                   aria-label={
-                    pipelineActive ? "Pipeline running" : "Trigger manual refresh"
+                    pipelineActive
+                      ? "Pipeline running"
+                      : "Trigger manual refresh"
                   }
                   title="Trigger manual refresh"
                 >
@@ -230,12 +248,20 @@ export default function Navbar() {
               </TooltipTrigger>
               {pipelineActive && pipeline?.steps && (
                 <TooltipContent side="bottom" align="end" className="w-64 p-3">
-                  <p className="text-xs font-semibold mb-2">Pipeline Progress</p>
+                  <p className="text-xs font-semibold mb-2">
+                    Pipeline Progress
+                  </p>
                   <div className="space-y-1.5">
                     {pipeline.steps.map((step, i) => (
                       <div key={i} className="flex items-center gap-2 text-xs">
                         <StepIcon status={step.status} />
-                        <span className={step.status === "active" ? "text-foreground font-medium" : "text-muted-foreground"}>
+                        <span
+                          className={
+                            step.status === "active"
+                              ? "text-foreground font-medium"
+                              : "text-muted-foreground"
+                          }
+                        >
                           {step.label}
                         </span>
                         {step.detail && (

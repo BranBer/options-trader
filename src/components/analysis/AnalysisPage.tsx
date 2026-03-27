@@ -175,8 +175,8 @@ function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
                         {c.whale_trade.ticker}
                       </span>
                       <Badge variant="outline" className="text-xs">
-                        {c.whale_trade.type.toUpperCase()} ${c.whale_trade.strike}{" "}
-                        {c.whale_trade.expiry}
+                        {c.whale_trade.type.toUpperCase()} $
+                        {c.whale_trade.strike} {c.whale_trade.expiry}
                       </Badge>
                       <Badge
                         variant={
@@ -208,9 +208,7 @@ function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
                   </p>
                   <p className="text-sm">{c.thesis}</p>
                 </button>
-                {isExpanded && (
-                  <WhaleDeepDive ticker={c.whale_trade.ticker} />
-                )}
+                {isExpanded && <WhaleDeepDive ticker={c.whale_trade.ticker} />}
               </div>
             );
           })}

@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
 
   // Filter by ticker at DB level via JSON substring match on input_refs
   if (ticker) {
-    conditions.push(like(analyses.inputRefs, `%"ticker":"${ticker.toUpperCase()}"%`));
+    conditions.push(
+      like(analyses.inputRefs, `%"ticker":"${ticker.toUpperCase()}"%`),
+    );
   }
 
   let query = db.select().from(analyses);
@@ -28,9 +30,7 @@ export async function GET(req: NextRequest) {
     ) as typeof query;
   }
 
-  const results = await query
-    .orderBy(desc(analyses.createdAt))
-    .limit(limit);
+  const results = await query.orderBy(desc(analyses.createdAt)).limit(limit);
 
   const parsed = results.map((a) => ({
     ...a,

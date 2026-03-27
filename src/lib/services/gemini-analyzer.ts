@@ -166,7 +166,9 @@ export async function classifyNews(
 
     batchesDone += chunk.length;
     onBatchProgress?.(batchesDone, batches.length);
-    console.log(`[Gemini] Classification progress: ${batchesDone}/${batches.length} batches`);
+    console.log(
+      `[Gemini] Classification progress: ${batchesDone}/${batches.length} batches`,
+    );
   }
 
   // Filter: only keep articles with impact_score >= 3
@@ -322,7 +324,11 @@ interface DeepDiveInput {
   historicalData: CandleData[];
   optionsChain: OptionsChainSummary | null;
   currentPrice: number;
-  correlatedEvent?: { headline: string; impact_score: number; event_type: string };
+  correlatedEvent?: {
+    headline: string;
+    impact_score: number;
+    event_type: string;
+  };
   newsContext?: Array<{ headline: string; sentiment: string }>;
 }
 
@@ -334,15 +340,16 @@ export async function generateDeepDive(
 
   // Build historical summary (last N candles as compact table)
   const recentCandles = input.historicalData.slice(-60);
-  const historicalSummary = recentCandles.length > 0
-    ? `Date | Open | High | Low | Close | Volume\n` +
-      recentCandles
-        .map(
-          (c) =>
-            `${c.time} | ${c.open.toFixed(2)} | ${c.high.toFixed(2)} | ${c.low.toFixed(2)} | ${c.close.toFixed(2)} | ${c.volume}`,
-        )
-        .join("\n")
-    : "No historical data available.";
+  const historicalSummary =
+    recentCandles.length > 0
+      ? `Date | Open | High | Low | Close | Volume\n` +
+        recentCandles
+          .map(
+            (c) =>
+              `${c.time} | ${c.open.toFixed(2)} | ${c.high.toFixed(2)} | ${c.low.toFixed(2)} | ${c.close.toFixed(2)} | ${c.volume}`,
+          )
+          .join("\n")
+      : "No historical data available.";
 
   // Build options chain summary
   let chainSummary = "No options chain data available.";
@@ -354,17 +361,21 @@ export async function generateDeepDive(
     const totalPutVol = allPuts.reduce((s, c) => s + c.volume, 0);
     const totalCallOI = allCalls.reduce((s, c) => s + c.openInterest, 0);
     const totalPutOI = allPuts.reduce((s, c) => s + c.openInterest, 0);
-    const pcRatio = totalCallVol > 0 ? (totalPutVol / totalCallVol).toFixed(2) : "N/A";
+    const pcRatio =
+      totalCallVol > 0 ? (totalPutVol / totalCallVol).toFixed(2) : "N/A";
 
     // ATM options (within 5% of price)
     const atmCalls = allCalls.filter(
-      (c) => Math.abs(c.strike - input.currentPrice) / input.currentPrice < 0.05,
+      (c) =>
+        Math.abs(c.strike - input.currentPrice) / input.currentPrice < 0.05,
     );
     const atmPuts = allPuts.filter(
-      (c) => Math.abs(c.strike - input.currentPrice) / input.currentPrice < 0.05,
+      (c) =>
+        Math.abs(c.strike - input.currentPrice) / input.currentPrice < 0.05,
     );
-    const avgIV =
-      [...atmCalls, ...atmPuts].filter((c) => c.iv > 0).reduce((s, c, _, a) => s + c.iv / a.length, 0);
+    const avgIV = [...atmCalls, ...atmPuts]
+      .filter((c) => c.iv > 0)
+      .reduce((s, c, _, a) => s + c.iv / a.length, 0);
 
     chainSummary = `Nearest expiry: ${chain.nearestExpiry.date}
 Expirations available: ${chain.expirations.length}

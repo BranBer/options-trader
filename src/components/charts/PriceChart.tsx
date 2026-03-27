@@ -117,9 +117,7 @@ export default function PriceChart({
     if (supportResistance && supportResistance.length > 0) {
       for (const sr of supportResistance) {
         const color =
-          sr.type === "support"
-            ? "rgba(34,197,94,0.5)"
-            : "rgba(239,68,68,0.5)";
+          sr.type === "support" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)";
         const lineWidth =
           sr.strength === "strong" ? 2 : sr.strength === "moderate" ? 1 : 1;
         const lineStyle = sr.strength === "weak" ? 2 : 0; // 2 = dashed, 0 = solid

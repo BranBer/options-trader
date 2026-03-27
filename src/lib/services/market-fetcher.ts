@@ -1,5 +1,9 @@
 import YahooFinance from "yahoo-finance2";
-import type { MarketSnapshot, OptionsChainSummary, CandleData } from "@/types/market";
+import type {
+  MarketSnapshot,
+  OptionsChainSummary,
+  CandleData,
+} from "@/types/market";
 
 // yahoo-finance2 v3 class API — types export `never` but methods exist at runtime
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

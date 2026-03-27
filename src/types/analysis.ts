@@ -49,7 +49,9 @@ export const crossReferenceAnalysisSchema = z.object({
   }),
 });
 
-export type CrossReferenceAnalysis = z.infer<typeof crossReferenceAnalysisSchema>;
+export type CrossReferenceAnalysis = z.infer<
+  typeof crossReferenceAnalysisSchema
+>;
 
 // --- Trade Recommendation Strategy Leg ---
 export const strategyLegSchema = z.object({

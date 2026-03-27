@@ -11,7 +11,10 @@ export async function GET() {
   }
   // Fire-and-forget: start pipeline without blocking the response
   runPipeline().catch(console.error);
-  return NextResponse.json({ status: "started", timestamp: new Date().toISOString() });
+  return NextResponse.json({
+    status: "started",
+    timestamp: new Date().toISOString(),
+  });
 }
 
 export async function HEAD() {

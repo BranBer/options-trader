@@ -213,9 +213,7 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
               </p>
             </div>
             <div>
-              <span className="text-xs text-muted-foreground">
-                Entry Range
-              </span>
+              <span className="text-xs text-muted-foreground">Entry Range</span>
               <p className="font-medium">
                 ${deepDive.entry_exit.entry_price_range.low.toFixed(2)} – $
                 {deepDive.entry_exit.entry_price_range.high.toFixed(2)}
@@ -275,7 +273,8 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
         <div className="flex items-center gap-2">
           <RiskBadge risk={deepDive.risk_assessment.overall_risk} />
           <span className="text-xs text-muted-foreground">
-            Max allocation: {deepDive.risk_assessment.max_recommended_allocation}
+            Max allocation:{" "}
+            {deepDive.risk_assessment.max_recommended_allocation}
           </span>
         </div>
         <ul className="list-disc list-inside text-xs text-muted-foreground space-y-0.5">
@@ -325,7 +324,9 @@ function PatternIcon({ type }: { type: string }) {
     case "bearish":
       return <TrendingDown className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />;
     default:
-      return <Minus className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />;
+      return (
+        <Minus className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+      );
   }
 }
 
