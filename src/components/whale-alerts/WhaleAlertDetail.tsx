@@ -6,7 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { type WhaleAlert } from "@/hooks/useApiData";
-import { formatPremium, formatCurrency, formatNumber, formatDateTime } from "@/lib/utils/formatters";
+import {
+  formatPremium,
+  formatCurrency,
+  formatNumber,
+  formatDateTime,
+} from "@/lib/utils/formatters";
 
 interface Props {
   alert: WhaleAlert;
@@ -37,15 +42,23 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
         {/* Sentiment */}
         <div className="flex items-center gap-2">
           {alert.sentiment === "bullish" ? (
-            <TrendingUp className="h-5 w-5 text-emerald-400" aria-hidden="true" />
+            <TrendingUp
+              className="h-5 w-5 text-emerald-400"
+              aria-hidden="true"
+            />
           ) : alert.sentiment === "bearish" ? (
             <TrendingDown className="h-5 w-5 text-red-400" aria-hidden="true" />
           ) : (
-            <Minus className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+            <Minus
+              className="h-5 w-5 text-muted-foreground"
+              aria-hidden="true"
+            />
           )}
           <span
             className={`text-lg font-semibold ${
-              alert.sentiment === "bullish" ? "text-emerald-400" : "text-red-400"
+              alert.sentiment === "bullish"
+                ? "text-emerald-400"
+                : "text-red-400"
             }`}
           >
             {alert.sentiment?.toUpperCase()}
@@ -58,7 +71,9 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
             <p className="text-muted-foreground text-xs">Strike</p>
-            <p className="font-medium">{alert.strike ? formatCurrency(alert.strike) : "—"}</p>
+            <p className="font-medium">
+              {alert.strike ? formatCurrency(alert.strike) : "—"}
+            </p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs">Expiry</p>
@@ -66,11 +81,15 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
           </div>
           <div>
             <p className="text-muted-foreground text-xs">Premium</p>
-            <p className="font-medium">{alert.premium ? formatPremium(alert.premium) : "—"}</p>
+            <p className="font-medium">
+              {alert.premium ? formatPremium(alert.premium) : "—"}
+            </p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs">Volume</p>
-            <p className="font-medium">{alert.volume ? formatNumber(alert.volume) : "—"}</p>
+            <p className="font-medium">
+              {alert.volume ? formatNumber(alert.volume) : "—"}
+            </p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs">Open Interest</p>
@@ -91,7 +110,9 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
           <div>
             <p className="text-muted-foreground text-xs">Underlying Price</p>
             <p className="font-medium">
-              {alert.underlyingPrice ? formatCurrency(alert.underlyingPrice) : "—"}
+              {alert.underlyingPrice
+                ? formatCurrency(alert.underlyingPrice)
+                : "—"}
             </p>
           </div>
           <div>
@@ -101,7 +122,9 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
               {alert.dayChangePct != null && (
                 <span
                   className={`ml-1 text-xs ${
-                    alert.dayChangePct >= 0 ? "text-emerald-400" : "text-red-400"
+                    alert.dayChangePct >= 0
+                      ? "text-emerald-400"
+                      : "text-red-400"
                   }`}
                 >
                   ({alert.dayChangePct >= 0 ? "+" : ""}
@@ -116,7 +139,9 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
 
         <div className="text-xs text-muted-foreground">
           <p>Source: {alert.source ?? "unknown"}</p>
-          {alert.detectedAt && <p>Detected: {formatDateTime(alert.detectedAt)}</p>}
+          {alert.detectedAt && (
+            <p>Detected: {formatDateTime(alert.detectedAt)}</p>
+          )}
         </div>
       </CardContent>
     </Card>

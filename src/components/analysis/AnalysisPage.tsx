@@ -51,7 +51,11 @@ export default function AnalysisPage() {
 
         <TabsContent value="correlations" className="mt-4">
           {xrefLoading ? (
-            <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+            <p
+              className="text-sm text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
               Loading cross-reference analyses...
             </p>
           ) : crossRefs.length === 0 ? (
@@ -67,7 +71,11 @@ export default function AnalysisPage() {
 
         <TabsContent value="recommendations" className="mt-4">
           {recLoading ? (
-            <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+            <p
+              className="text-sm text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
               Loading trade recommendations...
             </p>
           ) : recommendations.length === 0 ? (

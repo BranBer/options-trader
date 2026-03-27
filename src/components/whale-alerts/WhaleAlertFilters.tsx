@@ -17,13 +17,18 @@ interface Props {
 
 export default function WhaleAlertFilters({ filters, onChange }: Props) {
   return (
-    <fieldset className="flex flex-wrap items-center gap-3" aria-label="Whale alert filters">
+    <fieldset
+      className="flex flex-wrap items-center gap-3"
+      aria-label="Whale alert filters"
+    >
       <legend className="sr-only">Filter whale alerts</legend>
       <Input
         aria-label="Filter by ticker"
         placeholder="Filter by ticker (e.g. AAPL)"
         value={filters.ticker ?? ""}
-        onChange={(e) => onChange({ ...filters, ticker: e.target.value.toUpperCase() })}
+        onChange={(e) =>
+          onChange({ ...filters, ticker: e.target.value.toUpperCase() })
+        }
         className="w-48"
       />
       <Input
@@ -33,7 +38,10 @@ export default function WhaleAlertFilters({ filters, onChange }: Props) {
         placeholder="Min premium ($)"
         value={filters.minPremium ?? ""}
         onChange={(e) =>
-          onChange({ ...filters, minPremium: e.target.value ? Number(e.target.value) : undefined })
+          onChange({
+            ...filters,
+            minPremium: e.target.value ? Number(e.target.value) : undefined,
+          })
         }
         className="w-40"
       />
@@ -41,14 +49,18 @@ export default function WhaleAlertFilters({ filters, onChange }: Props) {
         {(["all", "bullish", "bearish"] as const).map((s) => (
           <Button
             key={s}
-            aria-pressed={(s === "all" && !filters.sentiment) || filters.sentiment === s}
+            aria-pressed={
+              (s === "all" && !filters.sentiment) || filters.sentiment === s
+            }
             variant={
               (s === "all" && !filters.sentiment) || filters.sentiment === s
                 ? "default"
                 : "outline"
             }
             size="sm"
-            onClick={() => onChange({ ...filters, sentiment: s === "all" ? undefined : s })}
+            onClick={() =>
+              onChange({ ...filters, sentiment: s === "all" ? undefined : s })
+            }
           >
             {s === "all" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
           </Button>

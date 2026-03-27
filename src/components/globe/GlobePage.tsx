@@ -41,7 +41,9 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
   SA: [23.8859, 45.0792],
 };
 
-function getEventCoordinates(event: NewsEvent): { lat: number; lng: number } | null {
+function getEventCoordinates(
+  event: NewsEvent,
+): { lat: number; lng: number } | null {
   if (event.lat != null && event.lng != null) {
     return { lat: event.lat, lng: event.lng };
   }
@@ -57,7 +59,9 @@ function parseStringArray(input: string | null | undefined): string[] {
   if (!input) return [];
   try {
     const parsed = JSON.parse(input) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((value) => typeof value === "string") : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((value) => typeof value === "string")
+      : [];
   } catch {
     return [];
   }
@@ -83,24 +87,32 @@ export default function GlobePage() {
             event: e,
           };
         })
-        .filter((p): p is { lat: number; lng: number; size: number; color: string; event: NewsEvent } => p !== null),
-    [events]
+        .filter(
+          (
+            p,
+          ): p is {
+            lat: number;
+            lng: number;
+            size: number;
+            color: string;
+            event: NewsEvent;
+          } => p !== null,
+        ),
+    [events],
   );
 
-  const handlePointClick = useCallback(
-    (point: unknown) => {
-      const p = point as { event: NewsEvent };
-      setSelectedEvent(p.event);
-    },
-    []
-  );
+  const handlePointClick = useCallback((point: unknown) => {
+    const p = point as { event: NewsEvent };
+    setSelectedEvent(p.event);
+  }, []);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Global News Globe</h1>
         <p className="text-muted-foreground text-sm">
-          Geospatial visualization of market-moving events. Click a point to see details.
+          Geospatial visualization of market-moving events. Click a point to see
+          details.
         </p>
       </div>
 
@@ -109,7 +121,11 @@ export default function GlobePage() {
         <Card className="lg:col-span-2 overflow-hidden">
           <CardContent className="p-0 h-[600px] relative">
             {isLoading ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground" role="status" aria-live="polite">
+              <div
+                className="flex items-center justify-center h-full text-muted-foreground"
+                role="status"
+                aria-live="polite"
+              >
                 Loading globe data...
               </div>
             ) : (
@@ -127,7 +143,11 @@ export default function GlobePage() {
                   const p = d as { event: NewsEvent };
                   return `<div style="max-width:200px;font-size:12px;color:#fff">${p.event.headline}</div>`;
                 }}
-                width={typeof window !== "undefined" ? Math.min(window.innerWidth * 0.6, 800) : 800}
+                width={
+                  typeof window !== "undefined"
+                    ? Math.min(window.innerWidth * 0.6, 800)
+                    : 800
+                }
                 height={600}
                 animateIn
               />
@@ -145,7 +165,10 @@ export default function GlobePage() {
           <CardContent>
             <ScrollArea className="h-[540px]">
               {selectedEvent ? (
-                <EventDetail event={selectedEvent} onBack={() => setSelectedEvent(null)} />
+                <EventDetail
+                  event={selectedEvent}
+                  onBack={() => setSelectedEvent(null)}
+                />
               ) : (
                 <EventsList events={events} onSelect={setSelectedEvent} />
               )}
@@ -174,7 +197,13 @@ export default function GlobePage() {
   );
 }
 
-function EventDetail({ event, onBack }: { event: NewsEvent; onBack: () => void }) {
+function EventDetail({
+  event,
+  onBack,
+}: {
+  event: NewsEvent;
+  onBack: () => void;
+}) {
   const sectors = parseStringArray(event.sectors);
   const tickers = parseStringArray(event.tickers);
 
@@ -195,8 +224,8 @@ function EventDetail({ event, onBack }: { event: NewsEvent; onBack: () => void }
             event.sentiment === "bullish"
               ? "default"
               : event.sentiment === "bearish"
-              ? "destructive"
-              : "secondary"
+                ? "destructive"
+                : "secondary"
           }
         >
           {event.sentiment}

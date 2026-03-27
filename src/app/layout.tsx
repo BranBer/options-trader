@@ -44,7 +44,10 @@ export default function RootLayout({
         <QueryProvider>
           <TooltipProvider>
             <Navbar />
-            <main id="main-content" className="flex-1 container mx-auto px-4 py-6">
+            <main
+              id="main-content"
+              className="flex-1 container mx-auto px-4 py-6"
+            >
               {children}
             </main>
           </TooltipProvider>

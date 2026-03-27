@@ -96,10 +96,16 @@ export default function Navbar() {
         {/* Mobile menu */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger
-            aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-label={
+              mobileOpen ? "Close navigation menu" : "Open navigation menu"
+            }
             className="md:hidden inline-flex items-center justify-center rounded-md text-sm font-medium h-9 w-9 hover:bg-muted transition-colors"
           >
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {mobileOpen ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <Menu className="h-5 w-5" />
+            )}
           </SheetTrigger>
           <SheetContent side="left" className="w-64 p-4">
             <div className="flex flex-col gap-1 mt-6">
@@ -117,7 +123,10 @@ export default function Navbar() {
         <Separator orientation="vertical" className="h-6 hidden md:block" />
 
         {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-1" aria-label="Primary navigation">
+        <nav
+          className="hidden md:flex items-center gap-1"
+          aria-label="Primary navigation"
+        >
           <NavItems />
         </nav>
 
@@ -133,7 +142,9 @@ export default function Navbar() {
             size="icon"
             onClick={triggerRefresh}
             disabled={isRefreshing}
-            aria-label={isRefreshing ? "Refreshing market data" : "Trigger manual refresh"}
+            aria-label={
+              isRefreshing ? "Refreshing market data" : "Trigger manual refresh"
+            }
             title="Trigger manual refresh"
           >
             <RefreshCw

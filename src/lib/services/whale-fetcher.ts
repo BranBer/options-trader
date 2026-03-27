@@ -25,16 +25,21 @@ export async function fetchUnusualWhales(): Promise<WhaleAlert[]> {
   }
 
   try {
-    const res = await fetch("https://api.unusualwhales.com/api/option-trades/flow", {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
+    const res = await fetch(
+      "https://api.unusualwhales.com/api/option-trades/flow",
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(15_000),
       },
-      signal: AbortSignal.timeout(15_000),
-    });
+    );
 
     if (!res.ok) {
-      console.error(`[whale-fetcher] UW API error: ${res.status} ${res.statusText}`);
+      console.error(
+        `[whale-fetcher] UW API error: ${res.status} ${res.statusText}`,
+      );
       return [];
     }
 
@@ -52,7 +57,11 @@ export async function fetchUnusualWhales(): Promise<WhaleAlert[]> {
         volume: item.volume,
         openInterest: item.open_interest,
         underlyingPrice: item.underlying_price,
-        sentiment: item.sentiment ?? (item.option_type === "call" ? ("bullish" as const) : ("bearish" as const)),
+        sentiment:
+          item.sentiment ??
+          (item.option_type === "call"
+            ? ("bullish" as const)
+            : ("bearish" as const)),
         source: "unusual_whales",
         detectedAt: item.created_at || new Date().toISOString(),
       }));
@@ -95,7 +104,20 @@ interface PolygonOptionSnapshot {
  * Fetch options snapshots from Polygon and detect unusual activity.
  * "Unusual" = day volume > 5x open interest (whale-like activity).
  */
-export async function fetchPolygonOptions(tickers: string[] = ["SPY", "QQQ", "AAPL", "NVDA", "TSLA", "AMZN", "MSFT", "META", "GOOGL", "AMD"]): Promise<WhaleAlert[]> {
+export async function fetchPolygonOptions(
+  tickers: string[] = [
+    "SPY",
+    "QQQ",
+    "AAPL",
+    "NVDA",
+    "TSLA",
+    "AMZN",
+    "MSFT",
+    "META",
+    "GOOGL",
+    "AMD",
+  ],
+): Promise<WhaleAlert[]> {
   const apiKey = process.env.MASSIVE_API_KEY ?? process.env.POLYGON_API_KEY;
   if (!apiKey || apiKey === "your_key_here") {
     console.warn("[whale-fetcher] No Massive API key configured");
@@ -111,7 +133,7 @@ export async function fetchPolygonOptions(tickers: string[] = ["SPY", "QQQ", "AA
     try {
       const res = await fetch(
         `https://api.massive.com/v3/snapshot/options/${ticker}?limit=50&apiKey=${encodeURIComponent(apiKey)}`,
-        { signal: AbortSignal.timeout(10_000) }
+        { signal: AbortSignal.timeout(10_000) },
       );
 
       if (!res.ok) {
@@ -147,7 +169,8 @@ export async function fetchPolygonOptions(tickers: string[] = ["SPY", "QQQ", "AA
           volume: vol,
           openInterest: oi,
           underlyingPrice: snap.underlying_asset?.price,
-          sentiment: snap.details.contract_type === "call" ? "bullish" : "bearish",
+          sentiment:
+            snap.details.contract_type === "call" ? "bullish" : "bearish",
           source: "polygon",
           detectedAt: new Date().toISOString(),
         });
@@ -169,7 +192,9 @@ export async function fetchPolygonOptions(tickers: string[] = ["SPY", "QQQ", "AA
   Object.entries(statusCounts)
     .filter(([status]) => status !== "403")
     .forEach(([status, count]) => {
-      console.warn(`[whale-fetcher] Massive HTTP ${status} for ${count} ticker(s)`);
+      console.warn(
+        `[whale-fetcher] Massive HTTP ${status} for ${count} ticker(s)`,
+      );
     });
 
   if (networkFailures.length > 0) {
@@ -194,6 +219,8 @@ export async function fetchWhaleAlerts(): Promise<WhaleAlert[]> {
     alerts = await fetchUnusualWhales();
   }
 
-  console.log(`[whale-fetcher] Fetched ${alerts.length} whale alerts (premium >= $${WHALE_PREMIUM_THRESHOLD.toLocaleString()})`);
+  console.log(
+    `[whale-fetcher] Fetched ${alerts.length} whale alerts (premium >= $${WHALE_PREMIUM_THRESHOLD.toLocaleString()})`,
+  );
   return alerts;
 }

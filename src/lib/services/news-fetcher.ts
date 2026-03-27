@@ -26,7 +26,7 @@ export async function fetchFinnhubNews(): Promise<RawNewsArticle[]> {
   try {
     const res = await fetch(
       `https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(apiKey)}`,
-      { signal: AbortSignal.timeout(15000) }
+      { signal: AbortSignal.timeout(15000) },
     );
 
     if (!res.ok) {
@@ -43,7 +43,12 @@ export async function fetchFinnhubNews(): Promise<RawNewsArticle[]> {
       publishedAt: new Date(item.datetime * 1000).toISOString(),
       summary: item.summary || undefined,
       preTags: item.related
-        ? { tickers: item.related.split(",").map((t) => t.trim()).filter(Boolean) }
+        ? {
+            tickers: item.related
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean),
+          }
         : undefined,
     }));
   } catch (error) {
@@ -108,14 +113,19 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
   NO: [60.472, 8.4689],
 };
 
-function gdeltCountryToCoords(countryCode: string): { lat?: number; lng?: number } {
+function gdeltCountryToCoords(countryCode: string): {
+  lat?: number;
+  lng?: number;
+} {
   const code = countryCode?.toUpperCase().slice(0, 2);
   const coords = COUNTRY_COORDS[code];
   return coords ? { lat: coords[0], lng: coords[1] } : {};
 }
 
 export async function fetchGdeltEvents(): Promise<RawNewsArticle[]> {
-  const query = encodeURIComponent("market OR economy OR crisis OR war OR tariff OR sanctions OR trade deal");
+  const query = encodeURIComponent(
+    "market OR economy OR crisis OR war OR tariff OR sanctions OR trade deal",
+  );
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=artlist&format=json&maxrecords=50&timespan=30min&sourcelang=english`;
 
   try {
@@ -173,7 +183,9 @@ function parseGdeltDate(seendate: string): string {
       const hour = seendate.slice(9, 11) || "00";
       const min = seendate.slice(11, 13) || "00";
       const sec = seendate.slice(13, 15) || "00";
-      return new Date(`${year}-${month}-${day}T${hour}:${min}:${sec}Z`).toISOString();
+      return new Date(
+        `${year}-${month}-${day}T${hour}:${min}:${sec}Z`,
+      ).toISOString();
     }
   } catch {
     // fall through
@@ -217,7 +229,7 @@ export async function fetchMarketauxNews(): Promise<RawNewsArticle[]> {
   try {
     const res = await fetch(
       `https://api.marketaux.com/v1/news/all?filter_entities=true&language=en&api_token=${encodeURIComponent(apiKey)}`,
-      { signal: AbortSignal.timeout(15000) }
+      { signal: AbortSignal.timeout(15000) },
     );
 
     if (!res.ok) {
@@ -286,7 +298,9 @@ export async function fetchAllNews(): Promise<RawNewsArticle[]> {
       console.log(`[News] ${sourceNames[i]}: ${result.value.length} articles`);
       articles.push(...result.value);
     } else {
-      console.warn(`[News] ${sourceNames[i]} failed: ${summarizeError(result.reason)}`);
+      console.warn(
+        `[News] ${sourceNames[i]} failed: ${summarizeError(result.reason)}`,
+      );
     }
   });
 
@@ -299,6 +313,8 @@ export async function fetchAllNews(): Promise<RawNewsArticle[]> {
     return true;
   });
 
-  console.log(`[News] Total: ${articles.length} fetched, ${deduped.length} after dedup`);
+  console.log(
+    `[News] Total: ${articles.length} fetched, ${deduped.length} after dedup`,
+  );
   return deduped;
 }

@@ -15,7 +15,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWhaleAlerts, type WhaleAlert } from "@/hooks/useApiData";
-import { formatPremium, formatNumber, timeAgo, formatCurrency } from "@/lib/utils/formatters";
+import {
+  formatPremium,
+  formatNumber,
+  timeAgo,
+  formatCurrency,
+} from "@/lib/utils/formatters";
 import WhaleAlertDetail from "./WhaleAlertDetail";
 import WhaleAlertFilters, { type WhaleFilters } from "./WhaleAlertFilters";
 
@@ -65,7 +70,8 @@ export default function WhaleAlertsPage() {
             <ScrollArea className="h-[600px]">
               <Table>
                 <caption className="sr-only">
-                  Whale alerts table. Select a row to view detailed options flow information.
+                  Whale alerts table. Select a row to view detailed options flow
+                  information.
                 </caption>
                 <TableHeader>
                   <TableRow>
@@ -83,8 +89,12 @@ export default function WhaleAlertsPage() {
                 <TableBody>
                   {alerts.length === 0 && !isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
-                        No whale alerts found. Run a pipeline refresh or adjust filters.
+                      <TableCell
+                        colSpan={9}
+                        className="text-center text-muted-foreground py-8"
+                      >
+                        No whale alerts found. Run a pipeline refresh or adjust
+                        filters.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -92,7 +102,9 @@ export default function WhaleAlertsPage() {
                       <TableRow
                         key={alert.id}
                         className={`cursor-pointer transition-colors ${
-                          selected?.id === alert.id ? "bg-muted" : "hover:bg-muted/50"
+                          selected?.id === alert.id
+                            ? "bg-muted"
+                            : "hover:bg-muted/50"
                         }`}
                         role="button"
                         tabIndex={0}
@@ -100,17 +112,25 @@ export default function WhaleAlertsPage() {
                         onClick={() => setSelected(alert)}
                         onKeyDown={(event) => handleRowKeyDown(event, alert)}
                       >
-                        <TableCell className="font-mono font-medium">{alert.ticker}</TableCell>
+                        <TableCell className="font-mono font-medium">
+                          {alert.ticker}
+                        </TableCell>
                         <TableCell>
                           <Badge
-                            variant={alert.callPut === "C" ? "default" : "destructive"}
+                            variant={
+                              alert.callPut === "C" ? "default" : "destructive"
+                            }
                             className="text-xs"
                           >
                             {alert.callPut === "C" ? "CALL" : "PUT"}
                           </Badge>
                         </TableCell>
-                        <TableCell>{alert.strike ? formatCurrency(alert.strike) : "—"}</TableCell>
-                        <TableCell className="text-xs">{alert.expiry ?? "—"}</TableCell>
+                        <TableCell>
+                          {alert.strike ? formatCurrency(alert.strike) : "—"}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {alert.expiry ?? "—"}
+                        </TableCell>
                         <TableCell className="text-right font-medium">
                           {alert.premium ? formatPremium(alert.premium) : "—"}
                         </TableCell>
@@ -118,7 +138,9 @@ export default function WhaleAlertsPage() {
                           {alert.volume ? formatNumber(alert.volume) : "—"}
                         </TableCell>
                         <TableCell className="text-right">
-                          {alert.openInterest ? formatNumber(alert.openInterest) : "—"}
+                          {alert.openInterest
+                            ? formatNumber(alert.openInterest)
+                            : "—"}
                         </TableCell>
                         <TableCell>
                           <span
@@ -126,8 +148,8 @@ export default function WhaleAlertsPage() {
                               alert.sentiment === "bullish"
                                 ? "text-emerald-400"
                                 : alert.sentiment === "bearish"
-                                ? "text-red-400"
-                                : "text-muted-foreground"
+                                  ? "text-red-400"
+                                  : "text-muted-foreground"
                             }
                           >
                             {alert.sentiment ?? "—"}
@@ -147,7 +169,10 @@ export default function WhaleAlertsPage() {
 
         {/* Detail panel */}
         {selected && (
-          <WhaleAlertDetail alert={selected} onClose={() => setSelected(null)} />
+          <WhaleAlertDetail
+            alert={selected}
+            onClose={() => setSelected(null)}
+          />
         )}
       </div>
     </div>
