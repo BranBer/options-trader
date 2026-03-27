@@ -1,5 +1,5 @@
 import YahooFinance from "yahoo-finance2";
-import type { MarketSnapshot, OptionsChainSummary } from "@/types/market";
+import type { MarketSnapshot, OptionsChainSummary, CandleData } from "@/types/market";
 
 // yahoo-finance2 v3 class API — types export `never` but methods exist at runtime
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,6 +81,63 @@ export async function fetchOptionsChain(
       error,
     );
     return null;
+  }
+}
+
+// ---------- Historical OHLCV data ----------
+
+export async function fetchHistoricalData(
+  ticker: string,
+  period: string = "3mo",
+): Promise<CandleData[]> {
+  try {
+    // Map period to interval: short periods get intraday, longer get daily
+    const interval = period === "1wk" ? "1h" : "1d";
+
+    // Calculate period1 from period string
+    const now = new Date();
+    const periodMap: Record<string, number> = {
+      "1wk": 7,
+      "1mo": 30,
+      "3mo": 90,
+      "6mo": 180,
+      "1y": 365,
+    };
+    const days = periodMap[period] ?? 90;
+    const period1 = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const result = await yf.chart(ticker, {
+      period1,
+      period2: now,
+      interval,
+    });
+
+    if (!result?.quotes?.length) {
+      console.warn(`[market-fetcher] No historical data for ${ticker}`);
+      return [];
+    }
+
+    const candles: CandleData[] = result.quotes
+      .filter((q: any) => q.open != null && q.close != null)
+      .map((q: any) => ({
+        time: new Date(q.date).toISOString().split("T")[0],
+        open: q.open,
+        high: q.high,
+        low: q.low,
+        close: q.close,
+        volume: q.volume ?? 0,
+      }));
+
+    console.log(
+      `[market-fetcher] Fetched ${candles.length} candles for ${ticker} (${period})`,
+    );
+    return candles;
+  } catch (error) {
+    console.error(
+      `[market-fetcher] Historical data failed for ${ticker}:`,
+      error,
+    );
+    return [];
   }
 }
 

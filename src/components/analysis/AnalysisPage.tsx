@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,6 +17,8 @@ import type {
   CrossReferenceAnalysis,
   TradeRecommendation,
 } from "@/types/analysis";
+import WhaleDeepDive from "@/components/analysis/WhaleDeepDive";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 export default function AnalysisPage() {
   const { data: xrefData, isLoading: xrefLoading } = useAnalyses(
@@ -106,6 +109,12 @@ function EmptyState({ message }: { message: string }) {
 function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
   const output =
     analysis.output as unknown as Partial<CrossReferenceAnalysis> | null;
+  const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
+
+  const toggleTicker = useCallback((ticker: string) => {
+    setExpandedTicker((prev) => (prev === ticker ? null : ticker));
+  }, []);
+
   if (!output || !output.correlations) return null;
 
   return (
@@ -151,43 +160,60 @@ function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
         {/* Correlations */}
         <div className="space-y-3">
           <p className="text-sm font-medium">Correlations</p>
-          {output.correlations.map((c, i) => (
-            <div key={i} className="rounded-md border p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono font-medium text-sm">
-                    {c.whale_trade.ticker}
-                  </span>
-                  <Badge variant="outline" className="text-xs">
-                    {c.whale_trade.type.toUpperCase()} ${c.whale_trade.strike}{" "}
-                    {c.whale_trade.expiry}
-                  </Badge>
-                  <Badge
-                    variant={
-                      c.alignment === "confirming"
-                        ? "default"
-                        : c.alignment === "contrarian"
-                          ? "destructive"
-                          : "secondary"
-                    }
-                    className="text-xs"
-                  >
-                    {c.alignment}
-                  </Badge>
-                </div>
-                <div className="flex items-center gap-2">
-                  <SignalBadge signal={c.smart_money_signal} />
-                  <span className="text-xs text-muted-foreground">
-                    {(c.correlation_confidence * 100).toFixed(0)}%
-                  </span>
-                </div>
+          {output.correlations.map((c, i) => {
+            const isExpanded = expandedTicker === c.whale_trade.ticker;
+            return (
+              <div key={i} className="rounded-md border overflow-hidden">
+                <button
+                  onClick={() => toggleTicker(c.whale_trade.ticker)}
+                  className="w-full text-left p-3 space-y-2 hover:bg-muted/30 transition-colors"
+                  aria-expanded={isExpanded}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-medium text-sm">
+                        {c.whale_trade.ticker}
+                      </span>
+                      <Badge variant="outline" className="text-xs">
+                        {c.whale_trade.type.toUpperCase()} ${c.whale_trade.strike}{" "}
+                        {c.whale_trade.expiry}
+                      </Badge>
+                      <Badge
+                        variant={
+                          c.alignment === "confirming"
+                            ? "default"
+                            : c.alignment === "contrarian"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                        className="text-xs"
+                      >
+                        {c.alignment}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <SignalBadge signal={c.smart_money_signal} />
+                      <span className="text-xs text-muted-foreground">
+                        {(c.correlation_confidence * 100).toFixed(0)}%
+                      </span>
+                      {isExpanded ? (
+                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {c.related_event.headline}
+                  </p>
+                  <p className="text-sm">{c.thesis}</p>
+                </button>
+                {isExpanded && (
+                  <WhaleDeepDive ticker={c.whale_trade.ticker} />
+                )}
               </div>
-              <p className="text-xs text-muted-foreground">
-                {c.related_event.headline}
-              </p>
-              <p className="text-sm">{c.thesis}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Uncorrelated whales */}
@@ -198,16 +224,35 @@ function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
               <p className="text-sm font-medium text-muted-foreground">
                 Uncorrelated Whale Trades
               </p>
-              {output.uncorrelated_whales?.map((u, i) => (
-                <div key={i} className="text-xs flex items-center gap-2">
-                  <span className="font-mono">{u.ticker}</span>
-                  <Badge variant="outline" className="text-xs">
-                    {u.type.toUpperCase()}
-                  </Badge>
-                  <span>{formatPremium(u.premium)}</span>
-                  <span className="text-muted-foreground">— {u.note}</span>
-                </div>
-              ))}
+              {output.uncorrelated_whales?.map((u, i) => {
+                const isExpanded = expandedTicker === `uncorr-${u.ticker}`;
+                return (
+                  <div key={i} className="rounded-md border overflow-hidden">
+                    <button
+                      onClick={() => toggleTicker(`uncorr-${u.ticker}`)}
+                      className="w-full text-left p-2 hover:bg-muted/30 transition-colors"
+                      aria-expanded={isExpanded}
+                    >
+                      <div className="text-xs flex items-center gap-2">
+                        <span className="font-mono">{u.ticker}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {u.type.toUpperCase()}
+                        </Badge>
+                        <span>{formatPremium(u.premium)}</span>
+                        <span className="text-muted-foreground flex-1">
+                          — {u.note}
+                        </span>
+                        {isExpanded ? (
+                          <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                      </div>
+                    </button>
+                    {isExpanded && <WhaleDeepDive ticker={u.ticker} />}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

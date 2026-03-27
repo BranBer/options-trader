@@ -97,6 +97,87 @@ export const tradeRecommendationSchema = z.object({
 
 export type TradeRecommendation = z.infer<typeof tradeRecommendationSchema>;
 
+// --- Deep Dive Technical Pattern ---
+export const technicalPatternSchema = z.object({
+  name: z.string(),
+  type: z.enum(["bullish", "bearish", "neutral"]),
+  description: z.string(),
+  confidence: z.number().min(0).max(1),
+  price_target: z.number().nullable(),
+});
+
+export type TechnicalPattern = z.infer<typeof technicalPatternSchema>;
+
+// --- Support/Resistance Levels ---
+export const supportResistanceSchema = z.object({
+  level: z.number(),
+  type: z.enum(["support", "resistance"]),
+  strength: z.enum(["weak", "moderate", "strong"]),
+  note: z.string(),
+});
+
+export type SupportResistance = z.infer<typeof supportResistanceSchema>;
+
+// --- Indicator Analysis ---
+export const indicatorAnalysisSchema = z.object({
+  name: z.string(),
+  value: z.string(),
+  signal: z.enum(["bullish", "bearish", "neutral"]),
+  explanation: z.string(),
+});
+
+export type IndicatorAnalysis = z.infer<typeof indicatorAnalysisSchema>;
+
+// --- Entry/Exit Strategy ---
+export const entryExitStrategySchema = z.object({
+  recommended_option_type: z.string(),
+  entry_price_range: z.object({
+    low: z.number(),
+    high: z.number(),
+  }),
+  strike_selection: z.string(),
+  expiry_guidance: z.string(),
+  profit_target: z.string(),
+  stop_loss: z.string(),
+  position_sizing: z.string(),
+  rationale: z.string(),
+});
+
+export type EntryExitStrategy = z.infer<typeof entryExitStrategySchema>;
+
+// --- Full Deep Dive Analysis ---
+export const deepDiveAnalysisSchema = z.object({
+  ticker: z.string(),
+  whale_trade_summary: z.string(),
+  market_narrative: z.string(),
+  technical_patterns: z.array(technicalPatternSchema),
+  support_resistance: z.array(supportResistanceSchema),
+  indicators: z.array(indicatorAnalysisSchema),
+  options_context: z.object({
+    iv_percentile: z.string(),
+    iv_interpretation: z.string(),
+    put_call_ratio: z.string(),
+    unusual_activity_note: z.string(),
+    greeks_summary: z.string(),
+  }),
+  entry_exit: entryExitStrategySchema,
+  global_events_connection: z.string(),
+  risk_assessment: z.object({
+    overall_risk: z.enum(["low", "moderate", "high", "very_high"]),
+    key_risks: z.array(z.string()),
+    max_recommended_allocation: z.string(),
+  }),
+  educational_notes: z.array(
+    z.object({
+      term: z.string(),
+      explanation: z.string(),
+    }),
+  ),
+  disclaimer: z.string(),
+});
+
+export type DeepDiveAnalysis = z.infer<typeof deepDiveAnalysisSchema>;
+
 // --- DB row type ---
 export interface AnalysisRow {
   id: number;

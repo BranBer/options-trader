@@ -49,6 +49,16 @@ export const optionsChainSummarySchema = z.object({
 
 export type OptionsChainSummary = z.infer<typeof optionsChainSummarySchema>;
 
+// --- Historical candle data ---
+export interface CandleData {
+  time: string; // YYYY-MM-DD
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 // --- DB row type ---
 export interface MarketSnapshotRow {
   id: number;

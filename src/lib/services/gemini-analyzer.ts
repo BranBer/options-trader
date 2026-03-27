@@ -12,6 +12,10 @@ import {
   type TradeRecommendation,
   tradeRecommendationSchema,
 } from "@/types/analysis";
+import {
+  type DeepDiveAnalysis,
+  deepDiveAnalysisSchema,
+} from "@/types/analysis";
 import type { Correlation } from "@/types/analysis";
 import {
   NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
@@ -28,6 +32,12 @@ import {
   TRADE_ANALYZER_RESPONSE_SCHEMA,
   buildTradeAnalyzerPrompt,
 } from "@/lib/prompts/trade-analyzer";
+import {
+  DEEP_DIVE_SYSTEM_INSTRUCTION,
+  DEEP_DIVE_RESPONSE_SCHEMA,
+  buildDeepDivePrompt,
+} from "@/lib/prompts/deep-dive-analyzer";
+import type { CandleData, OptionsChainSummary } from "@/types/market";
 
 // --- Gemini Client Singleton ---
 
@@ -96,8 +106,11 @@ async function callGeminiWithRetry<T>(
 
 const MAX_ARTICLES_PER_BATCH = 20;
 
+const CLASSIFY_CONCURRENCY = 2;
+
 export async function classifyNews(
   articles: RawNewsArticle[],
+  onBatchProgress?: (done: number, total: number) => void,
 ): Promise<NewsClassification> {
   if (articles.length === 0) {
     return {
@@ -118,29 +131,42 @@ export async function classifyNews(
   }
 
   console.log(
-    `[Gemini] Classifying ${articles.length} articles in ${batches.length} batch(es)`,
+    `[Gemini] Classifying ${articles.length} articles in ${batches.length} batch(es), concurrency=${CLASSIFY_CONCURRENCY}`,
   );
 
   const allClassified: NewsClassification["articles"] = [];
   let totalInput = 0;
-  let totalRelevant = 0;
-  let totalDiscarded = 0;
+  let batchesDone = 0;
 
-  for (const batch of batches) {
-    const prompt = buildNewsClassifierPrompt(batch);
-    const result = await callGeminiWithRetry(
-      "gemini-3-flash-preview",
-      NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
-      prompt,
-      NEWS_CLASSIFIER_RESPONSE_SCHEMA,
-      newsClassificationSchema,
-      { temperature: 0.1, maxOutputTokens: 8192 },
+  // Process batches with limited concurrency
+  for (let i = 0; i < batches.length; i += CLASSIFY_CONCURRENCY) {
+    const chunk = batches.slice(i, i + CLASSIFY_CONCURRENCY);
+    const results = await Promise.allSettled(
+      chunk.map((batch) => {
+        const prompt = buildNewsClassifierPrompt(batch);
+        return callGeminiWithRetry(
+          "gemini-3-flash-preview",
+          NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
+          prompt,
+          NEWS_CLASSIFIER_RESPONSE_SCHEMA,
+          newsClassificationSchema,
+          { temperature: 0.1, maxOutputTokens: 8192 },
+        );
+      }),
     );
 
-    allClassified.push(...result.articles);
-    totalInput += result.processing_metadata.total_input;
-    totalRelevant += result.processing_metadata.total_relevant;
-    totalDiscarded += result.processing_metadata.total_discarded;
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        allClassified.push(...result.value.articles);
+        totalInput += result.value.processing_metadata.total_input;
+      } else {
+        console.error("[Gemini] Batch classification failed:", result.reason);
+      }
+    }
+
+    batchesDone += chunk.length;
+    onBatchProgress?.(batchesDone, batches.length);
+    console.log(`[Gemini] Classification progress: ${batchesDone}/${batches.length} batches`);
   }
 
   // Filter: only keep articles with impact_score >= 3
@@ -272,6 +298,110 @@ export async function generateRecommendation(
 
   console.log(
     `[Gemini] Recommendation for ${ticker}: ${result.direction} (confidence: ${result.confidence})`,
+  );
+
+  return result;
+}
+
+// ============================================================
+// Story 5.1 — Deep Dive Analysis Generator
+// ============================================================
+
+interface DeepDiveInput {
+  ticker: string;
+  whaleTrade: {
+    ticker: string;
+    strike?: number;
+    expiry?: string;
+    callPut?: string;
+    premium?: number;
+    volume?: number;
+    openInterest?: number;
+    sentiment?: string;
+  };
+  historicalData: CandleData[];
+  optionsChain: OptionsChainSummary | null;
+  currentPrice: number;
+  correlatedEvent?: { headline: string; impact_score: number; event_type: string };
+  newsContext?: Array<{ headline: string; sentiment: string }>;
+}
+
+export async function generateDeepDive(
+  input: DeepDiveInput,
+): Promise<DeepDiveAnalysis> {
+  const { ticker } = input;
+  console.log(`[Gemini] Generating deep dive for ${ticker}`);
+
+  // Build historical summary (last N candles as compact table)
+  const recentCandles = input.historicalData.slice(-60);
+  const historicalSummary = recentCandles.length > 0
+    ? `Date | Open | High | Low | Close | Volume\n` +
+      recentCandles
+        .map(
+          (c) =>
+            `${c.time} | ${c.open.toFixed(2)} | ${c.high.toFixed(2)} | ${c.low.toFixed(2)} | ${c.close.toFixed(2)} | ${c.volume}`,
+        )
+        .join("\n")
+    : "No historical data available.";
+
+  // Build options chain summary
+  let chainSummary = "No options chain data available.";
+  if (input.optionsChain) {
+    const chain = input.optionsChain;
+    const allCalls = chain.nearestExpiry.calls;
+    const allPuts = chain.nearestExpiry.puts;
+    const totalCallVol = allCalls.reduce((s, c) => s + c.volume, 0);
+    const totalPutVol = allPuts.reduce((s, c) => s + c.volume, 0);
+    const totalCallOI = allCalls.reduce((s, c) => s + c.openInterest, 0);
+    const totalPutOI = allPuts.reduce((s, c) => s + c.openInterest, 0);
+    const pcRatio = totalCallVol > 0 ? (totalPutVol / totalCallVol).toFixed(2) : "N/A";
+
+    // ATM options (within 5% of price)
+    const atmCalls = allCalls.filter(
+      (c) => Math.abs(c.strike - input.currentPrice) / input.currentPrice < 0.05,
+    );
+    const atmPuts = allPuts.filter(
+      (c) => Math.abs(c.strike - input.currentPrice) / input.currentPrice < 0.05,
+    );
+    const avgIV =
+      [...atmCalls, ...atmPuts].filter((c) => c.iv > 0).reduce((s, c, _, a) => s + c.iv / a.length, 0);
+
+    chainSummary = `Nearest expiry: ${chain.nearestExpiry.date}
+Expirations available: ${chain.expirations.length}
+Total call volume: ${totalCallVol} | Total put volume: ${totalPutVol}
+Put/Call ratio: ${pcRatio}
+Total call OI: ${totalCallOI} | Total put OI: ${totalPutOI}
+ATM avg IV: ${(avgIV * 100).toFixed(1)}%
+ATM calls: ${atmCalls.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.volume} OI:${c.openInterest} IV:${(c.iv * 100).toFixed(1)}%)`).join(", ") || "none"}
+ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.volume} OI:${c.openInterest} IV:${(c.iv * 100).toFixed(1)}%)`).join(", ") || "none"}`;
+  }
+
+  const prompt = buildDeepDivePrompt({
+    ticker,
+    whaleTradeJson: JSON.stringify(input.whaleTrade, null, 2),
+    historicalDataSummary: historicalSummary,
+    optionsChainSummary: chainSummary,
+    currentPrice: input.currentPrice,
+    correlatedEventJson: input.correlatedEvent
+      ? JSON.stringify(input.correlatedEvent, null, 2)
+      : undefined,
+    newsContextJson: input.newsContext
+      ? JSON.stringify(input.newsContext, null, 2)
+      : undefined,
+  });
+
+  const result = await callGeminiWithRetry(
+    "gemini-3-flash-preview",
+    DEEP_DIVE_SYSTEM_INSTRUCTION,
+    prompt,
+    DEEP_DIVE_RESPONSE_SCHEMA,
+    deepDiveAnalysisSchema,
+    { temperature: 0.25, maxOutputTokens: 8192 },
+  );
+
+  console.log(
+    `[Gemini] Deep dive for ${ticker}: risk=${result.risk_assessment.overall_risk}, ` +
+      `patterns=${result.technical_patterns.length}, S/R=${result.support_resistance.length}`,
   );
 
   return result;

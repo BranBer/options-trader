@@ -111,3 +111,48 @@ export function useMarket(ticker?: string, limit = 10) {
     enabled: !!ticker,
   });
 }
+
+export function useDeepDive(ticker?: string) {
+  const sp = new URLSearchParams();
+  sp.set("type", "deep_dive");
+  if (ticker) sp.set("ticker", ticker);
+  sp.set("limit", "1");
+
+  return useQuery<{ analyses: Analysis[] }>({
+    queryKey: ["deepDive", ticker],
+    queryFn: async () => {
+      const res = await fetch(`/api/analysis?${sp.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch deep dive");
+      return res.json();
+    },
+    enabled: !!ticker,
+  });
+}
+
+export interface CandleDataResponse {
+  ticker: string;
+  period: string;
+  candles: Array<{
+    time: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>;
+}
+
+export function useHistoricalData(ticker?: string, period = "3mo") {
+  return useQuery<CandleDataResponse>({
+    queryKey: ["historicalData", ticker, period],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/market/history?ticker=${encodeURIComponent(ticker!)}&period=${period}`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch historical data");
+      return res.json();
+    },
+    enabled: !!ticker,
+    staleTime: 5 * 60 * 1000, // 5 min
+  });
+}

@@ -1,7 +1,9 @@
 import cron from "node-cron";
-import { runNewsPipeline } from "@/lib/cron/pipelines/news-pipeline";
+import { fetchAllNews } from "@/lib/services/news-fetcher";
+import { classifyAndStoreNews } from "@/lib/cron/pipelines/news-pipeline";
 import { runWhalePipeline } from "@/lib/cron/pipelines/whale-pipeline";
 import { runAnalysisPipeline } from "@/lib/cron/pipelines/analysis-pipeline";
+import * as progress from "./pipeline-progress";
 
 let lastRefreshAt: string | null = null;
 let isRunning = false;
@@ -20,15 +22,33 @@ export async function runPipeline(): Promise<{ status: string; timestamp: string
   const startTime = new Date();
   console.log(`[Pipeline] Starting cycle at ${startTime.toISOString()}`);
 
+  progress.init([
+    "Fetching data",
+    "Classifying articles",
+    "Cross-referencing",
+    "Generating recommendations",
+    "Deep dive analysis",
+  ]);
+
   try {
-    // Phase 1: Data ingestion (parallel)
-    const [newsCount, whaleCount] = await Promise.all([
-      runNewsPipeline(),
+    // Step 0: Fetch data (news + whale in parallel)
+    progress.activate(0);
+    const [rawArticles, whaleCount] = await Promise.all([
+      fetchAllNews(),
       runWhalePipeline(),
     ]);
-    console.log(`[Pipeline] Phase 1 complete: ${newsCount} news events, ${whaleCount} whale alerts stored`);
+    progress.complete(0);
+    console.log(`[Pipeline] Phase 1 fetch: ${rawArticles.length} articles, ${whaleCount} whale alerts`);
 
-    // Phase 2: Analysis (sequential, depends on Phase 1)
+    // Step 1: Classify news articles with Gemini
+    progress.activate(1);
+    const newsCount = await classifyAndStoreNews(rawArticles, (done, total) => {
+      progress.updateDetail(1, `${done}/${total} batches`);
+    });
+    progress.complete(1);
+    console.log(`[Pipeline] Phase 1 classify: ${newsCount} news events stored`);
+
+    // Steps 2-4: Analysis (pipeline updates progress internally)
     const analysisCount = await runAnalysisPipeline();
     console.log(`[Pipeline] Phase 2 complete: ${analysisCount} analyses stored`);
 
@@ -36,9 +56,11 @@ export async function runPipeline(): Promise<{ status: string; timestamp: string
     const elapsed = Date.now() - startTime.getTime();
     console.log(`[Pipeline] Cycle complete in ${elapsed}ms`);
 
+    progress.finish();
     return { status: "ok", timestamp: lastRefreshAt };
   } catch (error) {
     console.error("[Pipeline] Cycle failed:", error);
+    progress.finish();
     return { status: "error", timestamp: lastRefreshAt ?? "never" };
   } finally {
     isRunning = false;
