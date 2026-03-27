@@ -71,6 +71,15 @@ interface GdeltResponse {
   articles?: GdeltArticle[];
 }
 
+function summarizeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const causeCode =
+    typeof error === "object" && error !== null && "cause" in error
+      ? (error as { cause?: { code?: string } }).cause?.code
+      : undefined;
+  return causeCode ? `${message} (code: ${causeCode})` : message;
+}
+
 // Static lookup: GDELT country codes → approximate center lat/lng
 const COUNTRY_COORDS: Record<string, [number, number]> = {
   US: [39.8283, -98.5795],
@@ -149,7 +158,7 @@ export async function fetchGdeltEvents(): Promise<RawNewsArticle[]> {
       };
     });
   } catch (error) {
-    console.error("[GDELT] Fetch failed:", error);
+    console.warn(`[GDELT] Fetch failed: ${summarizeError(error)}`);
     return [];
   }
 }
@@ -277,7 +286,7 @@ export async function fetchAllNews(): Promise<RawNewsArticle[]> {
       console.log(`[News] ${sourceNames[i]}: ${result.value.length} articles`);
       articles.push(...result.value);
     } else {
-      console.error(`[News] ${sourceNames[i]} failed:`, result.reason);
+      console.warn(`[News] ${sourceNames[i]} failed: ${summarizeError(result.reason)}`);
     }
   });
 

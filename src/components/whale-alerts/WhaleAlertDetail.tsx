@@ -1,6 +1,6 @@
 "use client";
 
-import { X, TrendingUp, TrendingDown } from "lucide-react";
+import { X, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
           </Badge>
         </CardTitle>
         <Button variant="ghost" size="icon" onClick={onClose}>
+          <span className="sr-only">Close detail panel</span>
           <X className="h-4 w-4" />
         </Button>
       </CardHeader>
@@ -36,9 +37,11 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
         {/* Sentiment */}
         <div className="flex items-center gap-2">
           {alert.sentiment === "bullish" ? (
-            <TrendingUp className="h-5 w-5 text-emerald-400" />
+            <TrendingUp className="h-5 w-5 text-emerald-400" aria-hidden="true" />
+          ) : alert.sentiment === "bearish" ? (
+            <TrendingDown className="h-5 w-5 text-red-400" aria-hidden="true" />
           ) : (
-            <TrendingDown className="h-5 w-5 text-red-400" />
+            <Minus className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
           )}
           <span
             className={`text-lg font-semibold ${

@@ -103,6 +103,9 @@ export async function fetchPolygonOptions(tickers: string[] = ["SPY", "QQQ", "AA
   }
 
   const alerts: WhaleAlert[] = [];
+  const statusCounts: Record<number, number> = {};
+  const failedTickers: string[] = [];
+  const networkFailures: string[] = [];
 
   for (const ticker of tickers) {
     try {
@@ -117,7 +120,8 @@ export async function fetchPolygonOptions(tickers: string[] = ["SPY", "QQQ", "AA
           await new Promise((r) => setTimeout(r, 12_000));
           continue;
         }
-        console.error(`[whale-fetcher] Massive error for ${ticker}: ${res.status}`);
+        statusCounts[res.status] = (statusCounts[res.status] ?? 0) + 1;
+        failedTickers.push(ticker);
         continue;
       }
 
@@ -151,9 +155,27 @@ export async function fetchPolygonOptions(tickers: string[] = ["SPY", "QQQ", "AA
 
       // Massive free tier: 5 calls/min — small delay between tickers
       await new Promise((r) => setTimeout(r, 1_200));
-    } catch (error) {
-      console.error(`[whale-fetcher] Massive fetch failed for ${ticker}:`, error);
+    } catch {
+      networkFailures.push(ticker);
     }
+  }
+
+  if ((statusCounts[403] ?? 0) > 0) {
+    console.warn(
+      `[whale-fetcher] Massive returned 403 for ${statusCounts[403]}/${tickers.length} tickers (${failedTickers.join(", ")}). Check MASSIVE_API_KEY permissions/plan.`,
+    );
+  }
+
+  Object.entries(statusCounts)
+    .filter(([status]) => status !== "403")
+    .forEach(([status, count]) => {
+      console.warn(`[whale-fetcher] Massive HTTP ${status} for ${count} ticker(s)`);
+    });
+
+  if (networkFailures.length > 0) {
+    console.warn(
+      `[whale-fetcher] Massive network failures for ${networkFailures.length} ticker(s): ${networkFailures.join(", ")}`,
+    );
   }
 
   return alerts;

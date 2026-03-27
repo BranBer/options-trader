@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { useAnalyses, type Analysis } from "@/hooks/useApiData";
@@ -53,7 +51,9 @@ export default function AnalysisPage() {
 
         <TabsContent value="correlations" className="mt-4">
           {xrefLoading ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+              Loading cross-reference analyses...
+            </p>
           ) : crossRefs.length === 0 ? (
             <EmptyState message="No cross-reference analyses yet. Run a pipeline refresh with enough news & whale data." />
           ) : (
@@ -67,7 +67,9 @@ export default function AnalysisPage() {
 
         <TabsContent value="recommendations" className="mt-4">
           {recLoading ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+              Loading trade recommendations...
+            </p>
           ) : recommendations.length === 0 ? (
             <EmptyState message="No trade recommendations yet. Run a pipeline refresh to generate them." />
           ) : (
@@ -232,7 +234,11 @@ function RecommendationCard({ analysis }: { analysis: Analysis }) {
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1">
               <span className="text-xs text-muted-foreground">Confidence:</span>
-              <Progress value={output.confidence * 100} className="w-20 h-2" />
+              <Progress
+                value={output.confidence * 100}
+                className="w-20 h-2"
+                aria-label={`Recommendation confidence ${(output.confidence * 100).toFixed(0)} percent`}
+              />
               <span className="text-xs font-medium">
                 {(output.confidence * 100).toFixed(0)}%
               </span>
@@ -257,6 +263,9 @@ function RecommendationCard({ analysis }: { analysis: Analysis }) {
           </p>
           <div className="rounded-md border overflow-hidden">
             <table className="w-full text-xs">
+              <caption className="sr-only">
+                Recommended options strategy legs for {output.ticker}
+              </caption>
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="text-left p-2">Action</th>

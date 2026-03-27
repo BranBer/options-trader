@@ -19,28 +19,72 @@ function impactColor(score: number): string {
   return "#6b7280"; // gray
 }
 
+const COUNTRY_COORDS: Record<string, [number, number]> = {
+  US: [39.8283, -98.5795],
+  GB: [55.3781, -3.436],
+  DE: [51.1657, 10.4515],
+  FR: [46.2276, 2.2137],
+  CN: [35.8617, 104.1954],
+  JP: [36.2048, 138.2529],
+  IN: [20.5937, 78.9629],
+  RU: [61.524, 105.3188],
+  BR: [-14.235, -51.9253],
+  AU: [-25.2744, 133.7751],
+  CA: [56.1304, -106.3468],
+  KR: [35.9078, 127.7669],
+  TW: [23.6978, 120.9605],
+  IL: [31.0461, 34.8516],
+  UA: [48.3794, 31.1656],
+  IR: [32.4279, 53.688],
+  MX: [23.6345, -102.5528],
+  SG: [1.3521, 103.8198],
+  SA: [23.8859, 45.0792],
+};
+
+function getEventCoordinates(event: NewsEvent): { lat: number; lng: number } | null {
+  if (event.lat != null && event.lng != null) {
+    return { lat: event.lat, lng: event.lng };
+  }
+
+  if (!event.countryCode) return null;
+  const key = event.countryCode.toUpperCase().slice(0, 2);
+  const coords = COUNTRY_COORDS[key];
+  if (!coords) return null;
+  return { lat: coords[0], lng: coords[1] };
+}
+
+function parseStringArray(input: string | null | undefined): string[] {
+  if (!input) return [];
+  try {
+    const parsed = JSON.parse(input) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((value) => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function GlobePage() {
-  const { data, isLoading } = useNews(1, 200);
+  const { data, isLoading } = useNews(5, 200);
   const [selectedEvent, setSelectedEvent] = useState<NewsEvent | null>(null);
 
   const events = data?.events ?? [];
 
-  // Filter events with valid coordinates
-  const geoEvents = useMemo(
-    () => events.filter((e) => e.lat != null && e.lng != null),
-    [events]
-  );
-
   const pointsData = useMemo(
     () =>
-      geoEvents.map((e) => ({
-        lat: e.lat!,
-        lng: e.lng!,
-        size: Math.max(0.3, ((e.impactScore ?? 1) / 10) * 1.2),
-        color: impactColor(e.impactScore ?? 1),
-        event: e,
-      })),
-    [geoEvents]
+      events
+        .map((e) => {
+          const coords = getEventCoordinates(e);
+          if (!coords) return null;
+          return {
+            lat: coords.lat,
+            lng: coords.lng,
+            size: Math.max(0.45, ((e.impactScore ?? 1) / 10) * 1.5),
+            color: impactColor(e.impactScore ?? 1),
+            event: e,
+          };
+        })
+        .filter((p): p is { lat: number; lng: number; size: number; color: string; event: NewsEvent } => p !== null),
+    [events]
   );
 
   const handlePointClick = useCallback(
@@ -65,7 +109,7 @@ export default function GlobePage() {
         <Card className="lg:col-span-2 overflow-hidden">
           <CardContent className="p-0 h-[600px] relative">
             {isLoading ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
+              <div className="flex items-center justify-center h-full text-muted-foreground" role="status" aria-live="polite">
                 Loading globe data...
               </div>
             ) : (
@@ -75,7 +119,7 @@ export default function GlobePage() {
                 pointsData={pointsData}
                 pointLat="lat"
                 pointLng="lng"
-                pointAltitude={0.01}
+                pointAltitude={0.02}
                 pointRadius="size"
                 pointColor="color"
                 onPointClick={handlePointClick}
@@ -103,7 +147,7 @@ export default function GlobePage() {
               {selectedEvent ? (
                 <EventDetail event={selectedEvent} onBack={() => setSelectedEvent(null)} />
               ) : (
-                <EventsList events={geoEvents} onSelect={setSelectedEvent} />
+                <EventsList events={events} onSelect={setSelectedEvent} />
               )}
             </ScrollArea>
           </CardContent>
@@ -131,12 +175,16 @@ export default function GlobePage() {
 }
 
 function EventDetail({ event, onBack }: { event: NewsEvent; onBack: () => void }) {
-  const sectors = event.sectors ? JSON.parse(event.sectors) as string[] : [];
-  const tickers = event.tickers ? JSON.parse(event.tickers) as string[] : [];
+  const sectors = parseStringArray(event.sectors);
+  const tickers = parseStringArray(event.tickers);
 
   return (
     <div className="space-y-3">
-      <button onClick={onBack} className="text-xs text-primary hover:underline">
+      <button
+        onClick={onBack}
+        className="text-xs text-primary hover:underline"
+        aria-label="Back to events feed"
+      >
         ← Back to feed
       </button>
       <h3 className="text-sm font-medium leading-tight">{event.headline}</h3>
@@ -201,6 +249,7 @@ function EventDetail({ event, onBack }: { event: NewsEvent; onBack: () => void }
             target="_blank"
             rel="noopener noreferrer"
             className="text-primary hover:underline"
+            aria-label="Read original article in a new tab"
           >
             Read original →
           </a>
@@ -220,7 +269,7 @@ function EventsList({
   if (events.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No geo-located events yet. Run a pipeline refresh.
+        No high-impact events yet. Run a pipeline refresh.
       </p>
     );
   }
@@ -232,10 +281,12 @@ function EventsList({
           key={e.id}
           onClick={() => onSelect(e)}
           className="w-full text-left p-2 rounded hover:bg-muted/50 transition-colors"
+          aria-label={`View event details: ${e.headline}`}
         >
           <p className="text-sm leading-tight line-clamp-2">{e.headline}</p>
           <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
             <span
+              aria-hidden="true"
               className="w-2 h-2 rounded-full shrink-0"
               style={{ backgroundColor: impactColor(e.impactScore ?? 1) }}
             />

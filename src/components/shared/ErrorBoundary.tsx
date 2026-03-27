@@ -28,9 +28,9 @@ export default class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <Card className="border-destructive/50">
+        <Card className="border-destructive/50" role="alert" aria-live="assertive">
           <CardContent className="flex flex-col items-center justify-center py-12 gap-4">
-            <AlertTriangle className="h-8 w-8 text-destructive" />
+            <AlertTriangle className="h-8 w-8 text-destructive" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">
               {this.props.fallbackMessage ?? "Something went wrong loading this section."}
             </p>

@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 export function SkeletonCard() {
   return (
-    <Card>
+    <Card aria-hidden="true">
       <CardHeader className="pb-2">
         <div className="h-4 w-32 bg-muted animate-pulse rounded" />
       </CardHeader>
@@ -16,7 +16,7 @@ export function SkeletonCard() {
 
 export function SkeletonTable({ rows = 5 }: { rows?: number }) {
   return (
-    <div className="space-y-2 p-4">
+    <div className="space-y-2 p-4" aria-hidden="true">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex gap-4 items-center">
           <div className="h-4 w-16 bg-muted animate-pulse rounded" />

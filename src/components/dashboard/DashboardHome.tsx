@@ -17,10 +17,16 @@ function sentimentColor(s: string | null) {
 
 function SentimentIcon({ sentiment }: { sentiment: string | null }) {
   if (sentiment === "bullish" || sentiment === "strong_bullish")
-    return <TrendingUp className="h-4 w-4 text-emerald-400" />;
+    return <TrendingUp aria-hidden="true" className="h-4 w-4 text-emerald-400" />;
   if (sentiment === "bearish" || sentiment === "strong_bearish")
-    return <TrendingDown className="h-4 w-4 text-red-400" />;
-  return <Minus className="h-4 w-4 text-muted-foreground" />;
+    return <TrendingDown aria-hidden="true" className="h-4 w-4 text-red-400" />;
+  return <Minus aria-hidden="true" className="h-4 w-4 text-muted-foreground" />;
+}
+
+function sentimentLabel(sentiment: string | null): string {
+  if (sentiment === "bullish" || sentiment === "strong_bullish") return "Bullish";
+  if (sentiment === "bearish" || sentiment === "strong_bearish") return "Bearish";
+  return "Neutral";
 }
 
 export default function DashboardHome() {
@@ -114,7 +120,7 @@ export default function DashboardHome() {
           <CardContent>
             <ScrollArea className="h-72">
               {whalesLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
+                <p className="text-sm text-muted-foreground" role="status" aria-live="polite">Loading recent whale alerts...</p>
               ) : whales.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No whale alerts yet. Run a pipeline refresh.</p>
               ) : (
@@ -123,6 +129,7 @@ export default function DashboardHome() {
                     <div key={w.id} className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <SentimentIcon sentiment={w.sentiment} />
+                        <span className="sr-only">{sentimentLabel(w.sentiment)} signal</span>
                         <div className="min-w-0">
                           <span className="font-mono font-medium text-sm">{w.ticker}</span>
                           <span className="text-xs text-muted-foreground ml-1">
@@ -157,11 +164,11 @@ export default function DashboardHome() {
           <CardContent>
             <ScrollArea className="h-72">
               {newsLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
+                <p className="text-sm text-muted-foreground" role="status" aria-live="polite">Loading high-impact news...</p>
               ) : news.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No news events yet. Run a pipeline refresh.</p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3 pr-3">
                   {news.slice(0, 8).map((n) => (
                     <div key={n.id} className="space-y-1">
                       <div className="flex items-start justify-between gap-2">
@@ -193,7 +200,7 @@ export default function DashboardHome() {
           </CardHeader>
           <CardContent>
             {analysisLoading ? (
-              <p className="text-sm text-muted-foreground">Loading...</p>
+              <p className="text-sm text-muted-foreground" role="status" aria-live="polite">Loading AI analyses...</p>
             ) : allAnalyses.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No analyses yet. Run a pipeline refresh to generate cross-references and recommendations.

@@ -17,8 +17,10 @@ interface Props {
 
 export default function WhaleAlertFilters({ filters, onChange }: Props) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <fieldset className="flex flex-wrap items-center gap-3" aria-label="Whale alert filters">
+      <legend className="sr-only">Filter whale alerts</legend>
       <Input
+        aria-label="Filter by ticker"
         placeholder="Filter by ticker (e.g. AAPL)"
         value={filters.ticker ?? ""}
         onChange={(e) => onChange({ ...filters, ticker: e.target.value.toUpperCase() })}
@@ -26,6 +28,8 @@ export default function WhaleAlertFilters({ filters, onChange }: Props) {
       />
       <Input
         type="number"
+        inputMode="numeric"
+        aria-label="Minimum premium in dollars"
         placeholder="Min premium ($)"
         value={filters.minPremium ?? ""}
         onChange={(e) =>
@@ -33,10 +37,11 @@ export default function WhaleAlertFilters({ filters, onChange }: Props) {
         }
         className="w-40"
       />
-      <div className="flex gap-1">
+      <div className="flex gap-1" role="group" aria-label="Sentiment filter">
         {(["all", "bullish", "bearish"] as const).map((s) => (
           <Button
             key={s}
+            aria-pressed={(s === "all" && !filters.sentiment) || filters.sentiment === s}
             variant={
               (s === "all" && !filters.sentiment) || filters.sentiment === s
                 ? "default"
@@ -54,6 +59,6 @@ export default function WhaleAlertFilters({ filters, onChange }: Props) {
           Clear
         </Button>
       )}
-    </div>
+    </fieldset>
   );
 }

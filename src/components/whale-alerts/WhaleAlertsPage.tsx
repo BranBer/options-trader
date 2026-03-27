@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { TrendingUp, TrendingDown, Minus, ExternalLink } from "lucide-react";
 import {
   Table,
@@ -32,6 +32,16 @@ export default function WhaleAlertsPage() {
 
   const alerts = data?.alerts ?? [];
 
+  const handleRowKeyDown = (
+    event: KeyboardEvent<HTMLTableRowElement>,
+    alert: WhaleAlert,
+  ) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setSelected(alert);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -54,6 +64,9 @@ export default function WhaleAlertsPage() {
           <CardContent className="p-0">
             <ScrollArea className="h-[600px]">
               <Table>
+                <caption className="sr-only">
+                  Whale alerts table. Select a row to view detailed options flow information.
+                </caption>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Ticker</TableHead>
@@ -81,7 +94,11 @@ export default function WhaleAlertsPage() {
                         className={`cursor-pointer transition-colors ${
                           selected?.id === alert.id ? "bg-muted" : "hover:bg-muted/50"
                         }`}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`View details for ${alert.ticker} ${alert.callPut === "C" ? "call" : "put"} option`}
                         onClick={() => setSelected(alert)}
+                        onKeyDown={(event) => handleRowKeyDown(event, alert)}
                       >
                         <TableCell className="font-mono font-medium">{alert.ticker}</TableCell>
                         <TableCell>
