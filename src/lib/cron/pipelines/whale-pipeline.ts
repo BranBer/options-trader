@@ -1,5 +1,9 @@
 import { fetchWhaleAlerts } from "@/lib/services/whale-fetcher";
-import { fetchMarketData, enrichWithIV } from "@/lib/services/market-fetcher";
+import {
+  fetchMarketData,
+  enrichWithIV,
+  fetchVIX,
+} from "@/lib/services/market-fetcher";
 import { db } from "@/lib/db/client";
 import { whaleAlerts, marketSnapshots } from "@/lib/db/schema";
 
@@ -19,7 +23,9 @@ export async function runWhalePipeline(): Promise<number> {
 
   // Step 2: Extract unique tickers and fetch market data
   const uniqueTickers = [...new Set(alerts.map((a) => a.ticker))];
-  console.log(`[WhalePipeline] Enriching ${uniqueTickers.length} tickers with market data`);
+  console.log(
+    `[WhalePipeline] Enriching ${uniqueTickers.length} tickers with market data`,
+  );
 
   const marketData = await fetchMarketData(uniqueTickers);
 
@@ -31,7 +37,7 @@ export async function runWhalePipeline(): Promise<number> {
         return enrichWithIV(snap);
       }
       return snap;
-    })
+    }),
   );
 
   // Build a lookup map for quick enrichment
@@ -49,7 +55,27 @@ export async function runWhalePipeline(): Promise<number> {
         dayChangePct: snap.dayChangePct,
       });
     } catch (error) {
-      console.warn(`[WhalePipeline] Failed to insert market snapshot for ${snap.ticker}:`, error);
+      console.warn(
+        `[WhalePipeline] Failed to insert market snapshot for ${snap.ticker}:`,
+        error,
+      );
+    }
+  }
+
+  // Step 4b: Store VIX snapshot for macro context
+  const vixLevel = await fetchVIX();
+  if (vixLevel != null) {
+    try {
+      await db.insert(marketSnapshots).values({
+        ticker: "^VIX",
+        price: vixLevel,
+        volume: 0,
+        iv: null,
+        ivRank: null,
+        dayChangePct: 0,
+      });
+    } catch {
+      /* ignore duplicate */
     }
   }
 
@@ -73,10 +99,15 @@ export async function runWhalePipeline(): Promise<number> {
       });
       stored++;
     } catch (error) {
-      console.warn(`[WhalePipeline] Failed to insert whale alert for ${alert.ticker}:`, error);
+      console.warn(
+        `[WhalePipeline] Failed to insert whale alert for ${alert.ticker}:`,
+        error,
+      );
     }
   }
 
-  console.log(`[WhalePipeline] Complete: ${stored} whale alerts stored, ${enrichedMarket.length} market snapshots`);
+  console.log(
+    `[WhalePipeline] Complete: ${stored} whale alerts stored, ${enrichedMarket.length} market snapshots`,
+  );
   return stored;
 }

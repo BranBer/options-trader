@@ -9,6 +9,39 @@ import type {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const yf = new YahooFinance() as any;
 
+// ---------- VIX ----------
+
+export async function fetchVIX(): Promise<number | null> {
+  try {
+    const q = await yf.quote("^VIX");
+    const level = q?.regularMarketPrice ?? null;
+    if (level != null) {
+      console.log(`[market-fetcher] VIX: ${level}`);
+    }
+    return level;
+  } catch (err) {
+    console.error("[market-fetcher] VIX fetch failed:", err);
+    return null;
+  }
+}
+
+// ---------- Earnings date ----------
+
+export async function fetchEarningsDate(
+  ticker: string,
+): Promise<string | null> {
+  try {
+    const q = await yf.quote(ticker);
+    const ts = q?.earningsTimestamp ?? q?.earningsTimestampStart ?? null;
+    if (ts == null) return null;
+    const d = ts instanceof Date ? ts : new Date(ts * 1000);
+    return d.toISOString();
+  } catch (err) {
+    console.error(`[market-fetcher] Earnings date failed for ${ticker}:`, err);
+    return null;
+  }
+}
+
 // ---------- Market quotes ----------
 
 export async function fetchMarketData(
@@ -193,3 +226,8 @@ export async function enrichWithIV(
 
   return { ...snapshot, iv: avgIV, ivRank };
 }
+
+// ---------- Re-exports for pipeline context ----------
+// (kept at bottom so barrel imports work cleanly)
+export type { VIXContext } from "@/lib/utils/vix-regimes";
+export type { EarningsProximity } from "@/lib/utils/earnings-proximity";

@@ -9,6 +9,9 @@ Rules:
 4. Factor in current IV rank — high IV favors selling premium, low IV favors buying.
 5. Consider the event timeline — is there a catalyst date? Position expiry should account for it.
 6. Rate your own confidence honestly. Most recommendations should be 0.3-0.6 range.
+7. If VIX is elevated (>25), increase risk weighting, prefer defined-risk spreads, and widen stop-losses. If VIX is low (<15), note that premium is cheap.
+8. CRITICAL: If the option expires AFTER an earnings date, warn about IV crush. IV typically drops 30-60% after earnings. Recommend closing positions before earnings or using spread strategies to mitigate.
+9. During FOMC decision week (3 days before/after a meeting), expect elevated volatility. Widen stop-losses and prefer straddles/strangles over directional bets.
 
 Always respond with the exact JSON schema provided.`;
 
@@ -21,9 +24,17 @@ export function buildTradeAnalyzerPrompt(
   ivRank: number | undefined,
   avgVolume: number,
   todayVolume: number,
-  optionsChainSummary: string
+  optionsChainSummary: string,
+  macroContext?: {
+    vixLevel?: number | null;
+    vixRegime?: string;
+    earningsDate?: string | null;
+    ivCrushRisk?: string;
+    fomcNextDate?: string;
+    fomcIsDecisionWeek?: boolean;
+  },
 ): string {
-  return `Based on the following correlated whale trade, news event, and market data, generate a structured trade recommendation.
+  let prompt = `Based on the following correlated whale trade, news event, and market data, generate a structured trade recommendation.
 
 Correlation:
 ${correlationJson}
@@ -33,9 +44,25 @@ Market Data for ${ticker}:
 - IV Rank: ${ivRank != null ? `${ivRank}%` : "N/A"}
 - 30-day Avg Volume: ${avgVolume.toLocaleString()}
 - Today's Volume: ${todayVolume.toLocaleString()}
-- Options Chain Snapshot: ${optionsChainSummary}
+- Options Chain Snapshot: ${optionsChainSummary}`;
 
-Generate a trade recommendation with risk analysis.`;
+  if (macroContext) {
+    if (macroContext.vixLevel != null) {
+      prompt += `\n- VIX Level: ${macroContext.vixLevel.toFixed(2)} (Regime: ${macroContext.vixRegime ?? "unknown"})`;
+    }
+    if (macroContext.earningsDate) {
+      prompt += `\n- Earnings Date: ${macroContext.earningsDate.split("T")[0]}`;
+      prompt += `\n- IV Crush Risk: ${macroContext.ivCrushRisk ?? "unknown"}`;
+    }
+    if (macroContext.fomcIsDecisionWeek) {
+      prompt += `\n- ⚠️ FOMC Decision Week — next meeting: ${macroContext.fomcNextDate}`;
+    } else if (macroContext.fomcNextDate) {
+      prompt += `\n- Next FOMC Meeting: ${macroContext.fomcNextDate}`;
+    }
+  }
+
+  prompt += `\n\nGenerate a trade recommendation with risk analysis.`;
+  return prompt;
 }
 
 // ---------- Gemini Response Schema ----------
@@ -62,7 +89,13 @@ export const TRADE_ANALYZER_RESPONSE_SCHEMA = {
               expiry: { type: "string" },
               estimated_premium: { type: "number" },
             },
-            required: ["action", "type", "strike", "expiry", "estimated_premium"],
+            required: [
+              "action",
+              "type",
+              "strike",
+              "expiry",
+              "estimated_premium",
+            ],
           },
         },
         max_profit: { type: "string" },
@@ -70,14 +103,27 @@ export const TRADE_ANALYZER_RESPONSE_SCHEMA = {
         breakeven: { type: "string" },
         risk_reward_ratio: { type: "string" },
       },
-      required: ["name", "legs", "max_profit", "max_loss", "breakeven", "risk_reward_ratio"],
+      required: [
+        "name",
+        "legs",
+        "max_profit",
+        "max_loss",
+        "breakeven",
+        "risk_reward_ratio",
+      ],
     },
     market_context: {
       type: "object",
       properties: {
-        iv_assessment: { type: "string", enum: ["elevated", "normal", "depressed"] },
+        iv_assessment: {
+          type: "string",
+          enum: ["elevated", "normal", "depressed"],
+        },
         iv_strategy_note: { type: "string" },
-        volume_assessment: { type: "string", enum: ["unusual_high", "above_average", "normal", "low"] },
+        volume_assessment: {
+          type: "string",
+          enum: ["unusual_high", "above_average", "normal", "low"],
+        },
         catalyst_date: { type: "string", nullable: true },
         days_to_catalyst: { type: "integer", nullable: true },
       },
@@ -98,5 +144,15 @@ export const TRADE_ANALYZER_RESPONSE_SCHEMA = {
     },
     disclaimer: { type: "string" },
   },
-  required: ["ticker", "thesis", "direction", "confidence", "primary_strategy", "market_context", "risk_factors", "whale_alignment", "disclaimer"],
+  required: [
+    "ticker",
+    "thesis",
+    "direction",
+    "confidence",
+    "primary_strategy",
+    "market_context",
+    "risk_factors",
+    "whale_alignment",
+    "disclaimer",
+  ],
 };

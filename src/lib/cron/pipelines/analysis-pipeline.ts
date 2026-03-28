@@ -14,9 +14,16 @@ import {
   fetchMarketData,
   fetchOptionsChain,
   fetchHistoricalData,
+  fetchVIX,
+  fetchEarningsDate,
 } from "@/lib/services/market-fetcher";
-import { desc, gte, and } from "drizzle-orm";
+import { desc, gte, eq, and } from "drizzle-orm";
 import * as progress from "@/lib/cron/pipeline-progress";
+import { buildVIXContext } from "@/lib/utils/vix-regimes";
+import { getEarningsProximity } from "@/lib/utils/earnings-proximity";
+import { getFOMCProximity } from "@/lib/utils/fomc-calendar";
+import { computeConfidenceAdjustment } from "@/lib/utils/confidence-adjuster";
+import type { DeepDiveAnalysis, TradeRecommendation } from "@/types/analysis";
 
 const MIN_CORRELATION_CONFIDENCE = 0.5;
 const RECOMMEND_CONCURRENCY = 2;
@@ -34,6 +41,21 @@ const STEP_DEEP_DIVES = 4;
  */
 export async function runAnalysisPipeline(): Promise<number> {
   console.log("[AnalysisPipeline] Starting...");
+
+  // Step 0: Fetch macro context (VIX + FOMC) — used by recommendations + deep dives
+  const vixLevel = await fetchVIX();
+  const vixCtx = vixLevel != null ? buildVIXContext(vixLevel) : null;
+  const fomcCtx = getFOMCProximity();
+  const macroBase = {
+    vixLevel: vixCtx?.level ?? null,
+    vixRegime: vixCtx?.regime,
+    fomcNextDate: fomcCtx.nextDate,
+    fomcIsDecisionWeek: fomcCtx.isDecisionWeek,
+  };
+  console.log(
+    `[AnalysisPipeline] Macro context: VIX=${vixCtx?.level?.toFixed(2) ?? "N/A"} (${vixCtx?.regime ?? "N/A"}), ` +
+      `FOMC next=${fomcCtx.nextDate} (decision week: ${fomcCtx.isDecisionWeek})`,
+  );
 
   // Step 1: Fetch recent high-impact news (last 24h, impact >= 5)
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -153,6 +175,13 @@ export async function runAnalysisPipeline(): Promise<number> {
           const [marketData] = await fetchMarketData([ticker]);
           const chain = await fetchOptionsChain(ticker);
 
+          // Fetch earnings date for IV crush risk context
+          const earningsDate = await fetchEarningsDate(ticker);
+          const earningsCtx = getEarningsProximity(
+            earningsDate,
+            correlation.whale_trade.expiry,
+          );
+
           const recommendation = await generateRecommendation(correlation, {
             price: marketData?.price ?? 0,
             ivRank: undefined,
@@ -161,6 +190,11 @@ export async function runAnalysisPipeline(): Promise<number> {
             optionsChainSummary: chain
               ? `${chain.expirations.length} expirations, nearest: ${chain.nearestExpiry.date} (${chain.nearestExpiry.calls.length} calls, ${chain.nearestExpiry.puts.length} puts)`
               : "No options chain data available",
+            macroContext: {
+              ...macroBase,
+              earningsDate: earningsCtx.earningsDate,
+              ivCrushRisk: earningsCtx.ivCrushRisk,
+            },
           });
 
           // Store latest market snapshot
@@ -322,6 +356,7 @@ export async function runAnalysisPipeline(): Promise<number> {
             currentPrice,
             correlatedEvent: item.correlatedEvent,
             newsContext,
+            macroContext: macroBase,
           });
 
           await db.insert(analyses).values({
@@ -351,6 +386,68 @@ export async function runAnalysisPipeline(): Promise<number> {
     }
   }
   progress.complete(STEP_DEEP_DIVES);
+
+  // Step 6: Confidence feedback loop — adjust recommendation confidence using deep dive results
+  if (deepDiveQueue.length > 0) {
+    console.log("[AnalysisPipeline] Running confidence feedback loop...");
+
+    // Fetch the deep dives and recommendations we just stored (current cycle)
+    const recentDeepDives = await db
+      .select()
+      .from(analyses)
+      .where(
+        and(gte(analyses.createdAt, since), eq(analyses.type, "deep_dive")),
+      )
+      .orderBy(desc(analyses.createdAt));
+
+    const recentRecs = await db
+      .select()
+      .from(analyses)
+      .where(
+        and(
+          gte(analyses.createdAt, since),
+          eq(analyses.type, "trade_recommendation"),
+        ),
+      )
+      .orderBy(desc(analyses.createdAt));
+
+    for (const diveRow of recentDeepDives) {
+      try {
+        const diveOutput = JSON.parse(
+          diveRow.output ?? "{}",
+        ) as DeepDiveAnalysis;
+        const diveTicker = diveOutput.ticker;
+        if (!diveTicker) continue;
+
+        // Find matching recommendation by ticker
+        const matchingRec = recentRecs.find((r) => {
+          const refs = JSON.parse(r.inputRefs ?? "{}");
+          return refs.correlationTicker === diveTicker;
+        });
+        if (!matchingRec) continue;
+
+        const recOutput = JSON.parse(
+          matchingRec.output ?? "{}",
+        ) as TradeRecommendation;
+        const adjustment = computeConfidenceAdjustment(diveOutput, recOutput);
+
+        if (adjustment.delta !== 0) {
+          await db
+            .update(analyses)
+            .set({ confidence: adjustment.adjusted })
+            .where(eq(analyses.id, matchingRec.id));
+
+          console.log(
+            `[AnalysisPipeline] Confidence adjusted: ${diveTicker} ` +
+              `${adjustment.original.toFixed(2)} → ${adjustment.adjusted.toFixed(2)} ` +
+              `(${adjustment.delta > 0 ? "+" : ""}${adjustment.delta.toFixed(3)} from deep dive feedback)`,
+          );
+        }
+      } catch {
+        // Non-critical — skip any parsing errors
+      }
+    }
+  }
 
   console.log(`[AnalysisPipeline] Complete: ${stored} analyses stored`);
   return stored;

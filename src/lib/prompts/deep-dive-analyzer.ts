@@ -24,6 +24,11 @@ Options-specific rules:
 - Position sizing should never exceed 2-5% of a typical portfolio.
 - For greeks_breakdown, explain each Greek in plain English that a beginner would understand. Example: "For every $1 the stock moves up, this option gains approximately $0.45 in value."
 
+Macro awareness rules:
+- If VIX context is provided, factor the volatility regime into position sizing and strategy selection. Elevated VIX (>25) means wider expected moves — tighten stops, prefer defined-risk.
+- If earnings proximity data is provided and the option expires AFTER earnings, prominently warn about IV crush risk. IV typically drops 30-60% post-earnings.
+- During FOMC decision week, expect elevated intraday volatility and potential trend reversals.
+
 Always respond with the exact JSON schema provided.`;
 
 // ---------- User Prompt Builder ----------
@@ -36,6 +41,14 @@ interface DeepDivePromptInput {
   currentPrice: number;
   correlatedEventJson?: string;
   newsContextJson?: string;
+  macroContext?: {
+    vixLevel?: number | null;
+    vixRegime?: string;
+    earningsDate?: string | null;
+    ivCrushRisk?: string;
+    fomcNextDate?: string;
+    fomcIsDecisionWeek?: boolean;
+  };
 }
 
 export function buildDeepDivePrompt(input: DeepDivePromptInput): string {
@@ -65,6 +78,21 @@ ${input.correlatedEventJson}`;
 
 ## Additional News Context
 ${input.newsContextJson}`;
+  }
+
+  if (input.macroContext) {
+    prompt += `\n\n## Macro Context`;
+    if (input.macroContext.vixLevel != null) {
+      prompt += `\n- VIX: ${input.macroContext.vixLevel.toFixed(2)} (${input.macroContext.vixRegime ?? "unknown"} regime)`;
+    }
+    if (input.macroContext.earningsDate) {
+      prompt += `\n- Next Earnings: ${input.macroContext.earningsDate.split("T")[0]} (IV Crush Risk: ${input.macroContext.ivCrushRisk ?? "unknown"})`;
+    }
+    if (input.macroContext.fomcIsDecisionWeek) {
+      prompt += `\n- ⚠️ FOMC Decision Week — next meeting: ${input.macroContext.fomcNextDate}`;
+    } else if (input.macroContext.fomcNextDate) {
+      prompt += `\n- Next FOMC Meeting: ${input.macroContext.fomcNextDate}`;
+    }
   }
 
   prompt += `

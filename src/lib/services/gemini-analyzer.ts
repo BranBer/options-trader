@@ -269,6 +269,14 @@ interface MarketDataForRecommendation {
   avgVolume: number;
   todayVolume: number;
   optionsChainSummary: string;
+  macroContext?: {
+    vixLevel?: number | null;
+    vixRegime?: string;
+    earningsDate?: string | null;
+    ivCrushRisk?: string;
+    fomcNextDate?: string;
+    fomcIsDecisionWeek?: boolean;
+  };
 }
 
 export async function generateRecommendation(
@@ -287,6 +295,7 @@ export async function generateRecommendation(
     marketData.avgVolume,
     marketData.todayVolume,
     marketData.optionsChainSummary,
+    marketData.macroContext,
   );
 
   const result = await callGeminiWithRetry(
@@ -330,6 +339,14 @@ interface DeepDiveInput {
     event_type: string;
   };
   newsContext?: Array<{ headline: string; sentiment: string }>;
+  macroContext?: {
+    vixLevel?: number | null;
+    vixRegime?: string;
+    earningsDate?: string | null;
+    ivCrushRisk?: string;
+    fomcNextDate?: string;
+    fomcIsDecisionWeek?: boolean;
+  };
 }
 
 export async function generateDeepDive(
@@ -399,6 +416,7 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
     newsContextJson: input.newsContext
       ? JSON.stringify(input.newsContext, null, 2)
       : undefined,
+    macroContext: input.macroContext,
   });
 
   const result = await callGeminiWithRetry(
