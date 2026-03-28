@@ -12,6 +12,8 @@ Core principles:
 
 Technical analysis rules:
 - Identify chart patterns only when they are clearly formed (not "emerging" or "potential").
+- For each identified pattern, provide the approximate start_time and end_time (matching dates from the historical candle data) and start_price/end_price where the pattern is visible on the chart. For channels, also provide secondary_start_price and secondary_end_price for the opposite boundary.
+- Classify each pattern's drawing_type as one of: "trendline" (single diagonal line), "channel" (two parallel lines), "spike_region" (vertical highlighted zone), "marker" (single point annotation), or "none" (cannot be drawn).
 - Support/resistance levels should be based on actual price action (recent highs/lows, volume clusters).
 - Indicator signals should agree with price action — divergences should be noted.
 
@@ -20,6 +22,7 @@ Options-specific rules:
 - Low IV favors buying premium (debit spreads, long options).
 - Always consider time decay. Recommend expiries that give the thesis enough time to play out.
 - Position sizing should never exceed 2-5% of a typical portfolio.
+- For greeks_breakdown, explain each Greek in plain English that a beginner would understand. Example: "For every $1 the stock moves up, this option gains approximately $0.45 in value."
 
 Always respond with the exact JSON schema provided.`;
 
@@ -68,12 +71,13 @@ ${input.newsContextJson}`;
 
 Analyze the chart data to identify:
 1. Key support and resistance levels from the price action
-2. Any clear technical patterns (head & shoulders, double bottom, channels, etc.)
+2. Any clear technical patterns (head & shoulders, double bottom, channels, etc.) — for each pattern, specify the drawing_type, start_time, end_time, start_price, end_price from the historical data so patterns can be drawn on the chart. For channels, also specify secondary_start_price and secondary_end_price. Use the exact date strings from the candle data.
 3. Technical indicator signals (trend, momentum, volatility)
 4. How the whale's trade aligns with the technical picture
 5. Specific entry/exit strategy with risk management
 6. How global events connect to this trade
 7. Educational notes explaining key concepts for beginners
+8. For greeks_breakdown, provide individual assessments for the most relevant Greeks (delta, gamma, theta, vega) with plain English explanations
 
 Be specific with price levels. Ground everything in the data provided.`;
 
@@ -98,8 +102,29 @@ export const DEEP_DIVE_RESPONSE_SCHEMA = {
           description: { type: "string" },
           confidence: { type: "number" },
           price_target: { type: "number", nullable: true },
+          drawing_type: {
+            type: "string",
+            enum: ["trendline", "channel", "spike_region", "marker", "none"],
+            nullable: true,
+          },
+          start_time: { type: "string", nullable: true },
+          end_time: { type: "string", nullable: true },
+          start_price: { type: "number", nullable: true },
+          end_price: { type: "number", nullable: true },
+          secondary_start_price: { type: "number", nullable: true },
+          secondary_end_price: { type: "number", nullable: true },
         },
-        required: ["name", "type", "description", "confidence"],
+        required: [
+          "name",
+          "type",
+          "description",
+          "confidence",
+          "drawing_type",
+          "start_time",
+          "end_time",
+          "start_price",
+          "end_price",
+        ],
       },
     },
     support_resistance: {
@@ -136,6 +161,26 @@ export const DEEP_DIVE_RESPONSE_SCHEMA = {
         put_call_ratio: { type: "string" },
         unusual_activity_note: { type: "string" },
         greeks_summary: { type: "string" },
+        greeks_breakdown: {
+          type: "array",
+          nullable: true,
+          items: {
+            type: "object",
+            properties: {
+              greek: {
+                type: "string",
+                enum: ["delta", "gamma", "theta", "vega", "rho"],
+              },
+              value: { type: "string" },
+              plain_english: { type: "string" },
+              implication: {
+                type: "string",
+                enum: ["favorable", "neutral", "unfavorable"],
+              },
+            },
+            required: ["greek", "value", "plain_english", "implication"],
+          },
+        },
       },
       required: [
         "iv_percentile",

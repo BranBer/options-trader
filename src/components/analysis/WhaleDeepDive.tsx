@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useDeepDive, useHistoricalData } from "@/hooks/useApiData";
 import type { DeepDiveAnalysis } from "@/types/analysis";
 import PriceChart from "@/components/charts/PriceChart";
+import ChartLegend from "@/components/charts/ChartLegend";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
 import {
   TrendingUp,
@@ -15,6 +16,9 @@ import {
   Target,
   AlertTriangle,
   Globe,
+  Eye,
+  EyeOff,
+  Clock,
 } from "lucide-react";
 
 const TIMEFRAMES = ["1wk", "1mo", "3mo", "6mo", "1y"] as const;
@@ -32,6 +36,10 @@ interface WhaleDeepDiveProps {
 
 export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
   const [timeframe, setTimeframe] = useState<string>("3mo");
+  const [showPatterns, setShowPatterns] = useState(true);
+  const [hoveredPatternIndex, setHoveredPatternIndex] = useState<number | null>(
+    null,
+  );
 
   const { data: deepDiveData, isLoading: ddLoading } = useDeepDive(ticker);
   const { data: histData, isLoading: histLoading } = useHistoricalData(
@@ -39,10 +47,14 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
     timeframe,
   );
 
-  const deepDive = deepDiveData?.analyses?.[0]?.output as
-    | DeepDiveAnalysis
-    | undefined;
+  const analysisRow = deepDiveData?.analyses?.[0];
+  const deepDive = analysisRow?.output as DeepDiveAnalysis | undefined;
+  const analysisCreatedAt = analysisRow?.createdAt ?? null;
   const candles = histData?.candles ?? [];
+
+  const handleChartHover = useCallback((idx: number | null) => {
+    setHoveredPatternIndex(idx);
+  }, []);
 
   if (ddLoading) {
     return (
@@ -65,10 +77,15 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
     <div className="space-y-5 p-4 border-t bg-muted/20">
       {/* Header */}
       <div>
-        <h3 className="text-sm font-semibold flex items-center gap-2">
-          <Target className="h-4 w-4" />
-          Deep Dive: {ticker}
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Target className="h-4 w-4" />
+            Deep Dive: {ticker}
+          </h3>
+          {analysisCreatedAt && (
+            <FreshnessBadge createdAt={analysisCreatedAt} />
+          )}
+        </div>
         <p className="text-sm mt-1">{deepDive.whale_trade_summary}</p>
       </div>
 
@@ -83,21 +100,38 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">Price Action</p>
-          <div className="flex gap-1">
-            {TIMEFRAMES.map((tf) => (
-              <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                  timeframe === tf
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                }`}
-                aria-pressed={timeframe === tf}
-              >
-                {TIMEFRAME_LABELS[tf]}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowPatterns(!showPatterns)}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
+              aria-pressed={showPatterns}
+              title={
+                showPatterns ? "Hide pattern overlays" : "Show pattern overlays"
+              }
+            >
+              {showPatterns ? (
+                <Eye className="h-3 w-3" />
+              ) : (
+                <EyeOff className="h-3 w-3" />
+              )}
+              Patterns
+            </button>
+            <div className="flex gap-1">
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                    timeframe === tf
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                  aria-pressed={timeframe === tf}
+                >
+                  {TIMEFRAME_LABELS[tf]}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         {histLoading ? (
@@ -105,11 +139,22 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
             Loading chart data...
           </div>
         ) : (
-          <PriceChart
-            candles={candles}
-            supportResistance={deepDive.support_resistance}
-            height={300}
-          />
+          <>
+            <PriceChart
+              candles={candles}
+              supportResistance={deepDive.support_resistance}
+              technicalPatterns={deepDive.technical_patterns}
+              showPatterns={showPatterns}
+              highlightedPatternIndex={hoveredPatternIndex}
+              onHoveredPattern={handleChartHover}
+              height={300}
+            />
+            <ChartLegend
+              supportResistance={deepDive.support_resistance}
+              technicalPatterns={deepDive.technical_patterns}
+              showPatterns={showPatterns}
+            />
+          </>
         )}
       </div>
 
@@ -121,7 +166,16 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
           <p className="text-sm font-medium">Technical Patterns</p>
           <div className="space-y-2">
             {deepDive.technical_patterns.map((p, i) => (
-              <div key={i} className="flex items-start gap-2 text-sm">
+              <div
+                key={i}
+                className={`flex items-start gap-2 text-sm rounded-md px-2 py-1 transition-colors cursor-default ${
+                  hoveredPatternIndex === i
+                    ? "bg-accent/50 ring-1 ring-accent"
+                    : ""
+                }`}
+                onMouseEnter={() => setHoveredPatternIndex(i)}
+                onMouseLeave={() => setHoveredPatternIndex(null)}
+              >
                 <PatternIcon type={p.type} />
                 <div>
                   <span className="font-medium">{p.name}</span>
@@ -137,6 +191,11 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
                   >
                     {p.type}
                   </Badge>
+                  {p.confidence != null && (
+                    <span className="text-xs text-muted-foreground ml-2">
+                      {Math.round(p.confidence * 100)}% confidence
+                    </span>
+                  )}
                   {p.price_target && (
                     <span className="text-xs text-muted-foreground ml-2">
                       Target: ${p.price_target.toFixed(2)}
@@ -341,5 +400,37 @@ function RiskBadge({ risk }: { risk: string }) {
     <Badge variant={variant} className="text-xs">
       {risk.replace("_", " ")} risk
     </Badge>
+  );
+}
+
+function FreshnessBadge({ createdAt }: { createdAt: string }) {
+  const created = new Date(createdAt);
+  const now = new Date();
+  const diffMs = now.getTime() - created.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  let label: string;
+  if (diffMins < 1) label = "just now";
+  else if (diffMins < 60) label = `${diffMins}m ago`;
+  else if (diffHours < 24) label = `${diffHours}h ago`;
+  else label = `${diffDays}d ago`;
+
+  const stale =
+    diffHours >= 72
+      ? "text-red-400"
+      : diffHours >= 24
+        ? "text-amber-400"
+        : "text-muted-foreground";
+
+  return (
+    <span
+      className={`flex items-center gap-1 text-xs ${stale}`}
+      title={`Analysis generated: ${created.toLocaleString()}`}
+    >
+      <Clock className="h-3 w-3" />
+      {label}
+    </span>
   );
 }

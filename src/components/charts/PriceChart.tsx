@@ -12,7 +12,12 @@ import {
   type HistogramData,
   type Time,
 } from "lightweight-charts";
-import type { DeepDiveAnalysis } from "@/types/analysis";
+import type { DeepDiveAnalysis, TechnicalPattern } from "@/types/analysis";
+import {
+  createPatternOverlays,
+  detachPatternOverlays,
+  type AttachedOverlays,
+} from "./primitives/PatternMarkerHelper";
 
 interface PriceChartProps {
   candles: Array<{
@@ -24,18 +29,27 @@ interface PriceChartProps {
     volume: number;
   }>;
   supportResistance?: DeepDiveAnalysis["support_resistance"];
+  technicalPatterns?: TechnicalPattern[];
+  showPatterns?: boolean;
+  highlightedPatternIndex?: number | null;
+  onHoveredPattern?: (patternIndex: number | null) => void;
   height?: number;
 }
 
 export default function PriceChart({
   candles,
   supportResistance,
+  technicalPatterns,
+  showPatterns = true,
+  highlightedPatternIndex,
+  onHoveredPattern,
   height = 400,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const overlaysRef = useRef<AttachedOverlays | null>(null);
 
   const initChart = useCallback(() => {
     if (!containerRef.current || candles.length === 0) return;
@@ -135,6 +149,43 @@ export default function PriceChart({
 
     chart.timeScale().fitContent();
 
+    // Pattern overlays
+    if (technicalPatterns && technicalPatterns.length > 0 && showPatterns) {
+      // Build a map from normalized YYYY-MM-DD → original Time value
+      const candleTimeMap = new Map<string, Time>();
+      for (const c of candles) {
+        const normalizedKey =
+          typeof c.time === "number"
+            ? new Date(c.time * 1000).toISOString().slice(0, 10)
+            : String(c.time);
+        // For intraday, multiple candles share the same date — keep the first
+        if (!candleTimeMap.has(normalizedKey)) {
+          candleTimeMap.set(normalizedKey, c.time as Time);
+        }
+      }
+      const overlays = createPatternOverlays(
+        technicalPatterns,
+        candleSeries,
+        candleTimeMap,
+      );
+      overlaysRef.current = overlays;
+    }
+
+    // Crosshair move for pattern hover detection
+    if (onHoveredPattern) {
+      chart.subscribeCrosshairMove((param) => {
+        if (param.hoveredObjectId) {
+          const idStr = String(param.hoveredObjectId);
+          const match = idStr.match(/^pattern-(\d+)$/);
+          if (match) {
+            onHoveredPattern(parseInt(match[1], 10));
+            return;
+          }
+        }
+        onHoveredPattern(null);
+      });
+    }
+
     // Resize observer
     const ro = new ResizeObserver(() => {
       if (containerRef.current && chartRef.current) {
@@ -147,10 +198,39 @@ export default function PriceChart({
 
     return () => {
       ro.disconnect();
+      if (overlaysRef.current && candleSeriesRef.current) {
+        detachPatternOverlays(overlaysRef.current, candleSeriesRef.current);
+        overlaysRef.current = null;
+      }
       chart.remove();
       chartRef.current = null;
     };
-  }, [candles, supportResistance, height]);
+  }, [
+    candles,
+    supportResistance,
+    technicalPatterns,
+    showPatterns,
+    height,
+    onHoveredPattern,
+  ]);
+
+  // Highlight a specific pattern overlay when hovered from text
+  useEffect(() => {
+    if (!overlaysRef.current) return;
+    const all = [
+      ...overlaysRef.current.trendlines,
+      ...overlaysRef.current.regions,
+    ];
+    for (const prim of all) {
+      const idx = parseInt(prim.id.replace("pattern-", ""), 10);
+      // When a pattern is highlighted, dim others
+      if (highlightedPatternIndex != null) {
+        prim.setVisible(idx === highlightedPatternIndex);
+      } else {
+        prim.setVisible(true);
+      }
+    }
+  }, [highlightedPatternIndex]);
 
   useEffect(() => {
     const cleanup = initChart();

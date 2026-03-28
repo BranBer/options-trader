@@ -106,6 +106,18 @@ export const technicalPatternSchema = z.object({
   description: z.string(),
   confidence: z.number().min(0).max(1),
   price_target: z.number().nullable(),
+  // Chart overlay coordinates (nullable for backward compat with existing data)
+  drawing_type: z
+    .enum(["trendline", "channel", "spike_region", "marker", "none"])
+    .nullable()
+    .optional(),
+  start_time: z.string().nullable().optional(),
+  end_time: z.string().nullable().optional(),
+  start_price: z.number().nullable().optional(),
+  end_price: z.number().nullable().optional(),
+  // For channels: secondary boundary prices
+  secondary_start_price: z.number().nullable().optional(),
+  secondary_end_price: z.number().nullable().optional(),
 });
 
 export type TechnicalPattern = z.infer<typeof technicalPatternSchema>;
@@ -161,6 +173,16 @@ export const deepDiveAnalysisSchema = z.object({
     put_call_ratio: z.string(),
     unusual_activity_note: z.string(),
     greeks_summary: z.string(),
+    greeks_breakdown: z
+      .array(
+        z.object({
+          greek: z.enum(["delta", "gamma", "theta", "vega", "rho"]),
+          value: z.string(),
+          plain_english: z.string(),
+          implication: z.enum(["favorable", "neutral", "unfavorable"]),
+        }),
+      )
+      .optional(),
   }),
   entry_exit: entryExitStrategySchema,
   global_events_connection: z.string(),
