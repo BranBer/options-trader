@@ -23,6 +23,9 @@ Options-specific rules:
 - Always consider time decay. Recommend expiries that give the thesis enough time to play out.
 - Position sizing should never exceed 2-5% of a typical portfolio.
 - For greeks_breakdown, explain each Greek in plain English that a beginner would understand. Example: "For every $1 the stock moves up, this option gains approximately $0.45 in value."
+- OI walls represent large concentrations of open interest where market-maker hedging may act as magnets or barriers for price. Call OI walls above price act as resistance; put OI walls below act as support.
+- Max pain is the price at which option holders lose the most — stocks often gravitate toward max pain near expiration due to market-maker delta hedging.
+- The IV-RV spread indicates whether options are over- or under-priced relative to actual stock movement. A spread > 10% means options are expensive (favor credit strategies). A spread < -5% means options are cheap (favor debit strategies).
 
 Macro awareness rules:
 - If VIX context is provided, factor the volatility regime into position sizing and strategy selection. Elevated VIX (>25) means wider expected moves — tighten stops, prefer defined-risk.
@@ -48,6 +51,15 @@ interface DeepDivePromptInput {
     ivCrushRisk?: string;
     fomcNextDate?: string;
     fomcIsDecisionWeek?: boolean;
+  };
+  optionsAnalytics?: {
+    maxPain?: number | null;
+    oiWalls?: {
+      callWalls: { strike: number; oi: number }[];
+      putWalls: { strike: number; oi: number }[];
+    } | null;
+    ivRvSpread?: number | null;
+    realizedVol?: number | null;
   };
 }
 
@@ -92,6 +104,35 @@ ${input.newsContextJson}`;
       prompt += `\n- ⚠️ FOMC Decision Week — next meeting: ${input.macroContext.fomcNextDate}`;
     } else if (input.macroContext.fomcNextDate) {
       prompt += `\n- Next FOMC Meeting: ${input.macroContext.fomcNextDate}`;
+    }
+  }
+
+  if (input.optionsAnalytics) {
+    prompt += `\n\n## Options Microstructure`;
+    if (input.optionsAnalytics.maxPain != null) {
+      prompt += `\n- Max Pain: $${input.optionsAnalytics.maxPain} — the strike where option holders lose the most; stocks often pin near this level at expiration due to market-maker hedging`;
+    }
+    if (input.optionsAnalytics.oiWalls) {
+      const { callWalls, putWalls } = input.optionsAnalytics.oiWalls;
+      if (callWalls.length > 0) {
+        prompt += `\n- Call OI Walls (Resistance): ${callWalls.map((w) => `$${w.strike} (${w.oi.toLocaleString()} contracts)`).join(", ")}`;
+      }
+      if (putWalls.length > 0) {
+        prompt += `\n- Put OI Walls (Support): ${putWalls.map((w) => `$${w.strike} (${w.oi.toLocaleString()} contracts)`).join(", ")}`;
+      }
+    }
+    if (input.optionsAnalytics.ivRvSpread != null) {
+      const spread = input.optionsAnalytics.ivRvSpread;
+      const label =
+        spread > 0.1
+          ? "options are expensive — favor selling premium"
+          : spread < -0.05
+            ? "options are cheap — favor buying premium"
+            : "near fair value";
+      prompt += `\n- IV-RV Spread: ${spread > 0 ? "+" : ""}${(spread * 100).toFixed(1)}% (${label})`;
+    }
+    if (input.optionsAnalytics.realizedVol != null) {
+      prompt += `\n- 20-day Realized Volatility: ${(input.optionsAnalytics.realizedVol * 100).toFixed(1)}%`;
     }
   }
 

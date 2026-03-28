@@ -12,6 +12,8 @@ Rules:
 7. If VIX is elevated (>25), increase risk weighting, prefer defined-risk spreads, and widen stop-losses. If VIX is low (<15), note that premium is cheap.
 8. CRITICAL: If the option expires AFTER an earnings date, warn about IV crush. IV typically drops 30-60% after earnings. Recommend closing positions before earnings or using spread strategies to mitigate.
 9. During FOMC decision week (3 days before/after a meeting), expect elevated volatility. Widen stop-losses and prefer straddles/strangles over directional bets.
+10. The IV-RV spread indicates whether options are over- or under-priced relative to actual stock movement. A spread > 10% means options are expensive — favor credit strategies (selling premium). A spread < -5% means options are cheap — favor debit strategies (buying premium).
+11. OI walls are large concentrations of open interest where market-maker hedging creates price magnets or barriers. Max pain is the price at which open option positions lose the most — price often gravitates here near expiration.
 
 Always respond with the exact JSON schema provided.`;
 
@@ -32,6 +34,15 @@ export function buildTradeAnalyzerPrompt(
     ivCrushRisk?: string;
     fomcNextDate?: string;
     fomcIsDecisionWeek?: boolean;
+  },
+  optionsAnalytics?: {
+    maxPain?: number | null;
+    oiWalls?: {
+      callWalls: { strike: number; oi: number }[];
+      putWalls: { strike: number; oi: number }[];
+    } | null;
+    ivRvSpread?: number | null;
+    realizedVol?: number | null;
   },
 ): string {
   let prompt = `Based on the following correlated whale trade, news event, and market data, generate a structured trade recommendation.
@@ -58,6 +69,34 @@ Market Data for ${ticker}:
       prompt += `\n- ⚠️ FOMC Decision Week — next meeting: ${macroContext.fomcNextDate}`;
     } else if (macroContext.fomcNextDate) {
       prompt += `\n- Next FOMC Meeting: ${macroContext.fomcNextDate}`;
+    }
+  }
+
+  if (optionsAnalytics) {
+    if (optionsAnalytics.maxPain != null) {
+      prompt += `\n- Max Pain: $${optionsAnalytics.maxPain} (price where option holders lose the most — stocks often gravitate here near expiry)`;
+    }
+    if (optionsAnalytics.oiWalls) {
+      const { callWalls, putWalls } = optionsAnalytics.oiWalls;
+      if (callWalls.length > 0) {
+        prompt += `\n- Call OI Walls (Resistance): ${callWalls.map((w) => `$${w.strike} (${w.oi.toLocaleString()} contracts)`).join(", ")}`;
+      }
+      if (putWalls.length > 0) {
+        prompt += `\n- Put OI Walls (Support): ${putWalls.map((w) => `$${w.strike} (${w.oi.toLocaleString()} contracts)`).join(", ")}`;
+      }
+    }
+    if (optionsAnalytics.ivRvSpread != null) {
+      const spread = optionsAnalytics.ivRvSpread;
+      const label =
+        spread > 0.1
+          ? "options expensive — favor selling premium"
+          : spread < -0.05
+            ? "options cheap — favor buying premium"
+            : "near fair value";
+      prompt += `\n- IV-RV Spread: ${spread > 0 ? "+" : ""}${(spread * 100).toFixed(1)}% (${label})`;
+    }
+    if (optionsAnalytics.realizedVol != null) {
+      prompt += `\n- 20-day Realized Volatility: ${(optionsAnalytics.realizedVol * 100).toFixed(1)}%`;
     }
   }
 

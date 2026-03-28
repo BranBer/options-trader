@@ -13,6 +13,7 @@ export const whaleAlertSchema = z.object({
   sentiment: z.enum(["bullish", "bearish"]),
   source: z.string(),
   detectedAt: z.string(),
+  qualityScore: z.number().int().min(0).max(100).optional(),
 });
 
 export type WhaleAlert = z.infer<typeof whaleAlertSchema>;
@@ -43,5 +44,6 @@ export interface WhaleAlertRow {
   sentiment: string | null;
   source: string | null;
   detectedAt: string | null;
+  qualityScore: number | null;
   createdAt: string | null;
 }

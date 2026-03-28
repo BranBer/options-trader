@@ -1,0 +1,1 @@
+ALTER TABLE `whale_alerts` ADD `quality_score` integer;

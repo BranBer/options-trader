@@ -33,6 +33,7 @@ export const whaleAlerts = sqliteTable("whale_alerts", {
   sentiment: text("sentiment"), // 'bullish' | 'bearish'
   source: text("source"),
   detectedAt: text("detected_at"),
+  qualityScore: integer("quality_score"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -44,6 +45,9 @@ export const marketSnapshots = sqliteTable("market_snapshots", {
   iv: real("iv"),
   ivRank: real("iv_rank"),
   dayChangePct: real("day_change_pct"),
+  realizedVol: real("realized_vol"),
+  ivRvSpread: real("iv_rv_spread"),
+  ivPercentileMethod: text("iv_percentile_method"),
   capturedAt: text("captured_at").default(sql`CURRENT_TIMESTAMP`),
 });
 

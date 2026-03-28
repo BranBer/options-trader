@@ -16,6 +16,7 @@ import {
   fetchHistoricalData,
   fetchVIX,
   fetchEarningsDate,
+  computeRealizedVol,
 } from "@/lib/services/market-fetcher";
 import { desc, gte, eq, and } from "drizzle-orm";
 import * as progress from "@/lib/cron/pipeline-progress";
@@ -107,6 +108,7 @@ export async function runAnalysisPipeline(): Promise<number> {
     volume: w.volume ?? 0,
     openInterest: w.openInterest ?? 0,
     sentiment: w.sentiment ?? "neutral",
+    qualityScore: w.qualityScore ?? undefined,
   }));
 
   const crossRef = await crossReferenceAnalysis(
@@ -175,6 +177,32 @@ export async function runAnalysisPipeline(): Promise<number> {
           const [marketData] = await fetchMarketData([ticker]);
           const chain = await fetchOptionsChain(ticker);
 
+          // Compute IV-RV spread for options pricing context
+          let realizedVol: number | null = null;
+          let ivRvSpread: number | null = null;
+          let atmIV: number | null = null;
+          if (chain && marketData) {
+            const allContracts = [
+              ...chain.nearestExpiry.calls,
+              ...chain.nearestExpiry.puts,
+            ];
+            const atmContracts = allContracts.filter(
+              (c) =>
+                Math.abs(c.strike - marketData.price) / marketData.price <
+                  0.05 && c.iv > 0,
+            );
+            if (atmContracts.length > 0) {
+              atmIV =
+                atmContracts.reduce((s, c) => s + c.iv, 0) /
+                atmContracts.length;
+              const candles = await fetchHistoricalData(ticker, "3mo");
+              realizedVol = computeRealizedVol(candles);
+              if (realizedVol != null && atmIV != null) {
+                ivRvSpread = atmIV - realizedVol;
+              }
+            }
+          }
+
           // Fetch earnings date for IV crush risk context
           const earningsDate = await fetchEarningsDate(ticker);
           const earningsCtx = getEarningsProximity(
@@ -195,6 +223,14 @@ export async function runAnalysisPipeline(): Promise<number> {
               earningsDate: earningsCtx.earningsDate,
               ivCrushRisk: earningsCtx.ivCrushRisk,
             },
+            optionsAnalytics: chain
+              ? {
+                  maxPain: chain.maxPain ?? null,
+                  oiWalls: chain.oiWalls ?? null,
+                  ivRvSpread,
+                  realizedVol,
+                }
+              : undefined,
           });
 
           // Store latest market snapshot
@@ -204,9 +240,11 @@ export async function runAnalysisPipeline(): Promise<number> {
                 ticker: marketData.ticker,
                 price: marketData.price,
                 volume: marketData.volume,
-                iv: marketData.iv ?? null,
+                iv: atmIV ?? marketData.iv ?? null,
                 ivRank: marketData.ivRank ?? null,
                 dayChangePct: marketData.dayChangePct,
+                realizedVol,
+                ivRvSpread,
               });
             } catch {
               /* ignore duplicate snapshot */
@@ -348,6 +386,28 @@ export async function runAnalysisPipeline(): Promise<number> {
             return 0;
           }
 
+          // Compute IV-RV spread for deep dive options context
+          let ddRealizedVol: number | null = null;
+          let ddIvRvSpread: number | null = null;
+          if (chain && currentPrice > 0) {
+            const allC = [
+              ...chain.nearestExpiry.calls,
+              ...chain.nearestExpiry.puts,
+            ];
+            const atm = allC.filter(
+              (c) =>
+                Math.abs(c.strike - currentPrice) / currentPrice < 0.05 &&
+                c.iv > 0,
+            );
+            if (atm.length > 0) {
+              const avgIV = atm.reduce((s, c) => s + c.iv, 0) / atm.length;
+              ddRealizedVol = computeRealizedVol(historicalData);
+              if (ddRealizedVol != null) {
+                ddIvRvSpread = avgIV - ddRealizedVol;
+              }
+            }
+          }
+
           const deepDive = await generateDeepDive({
             ticker: item.ticker,
             whaleTrade: item.whaleTrade,
@@ -357,6 +417,14 @@ export async function runAnalysisPipeline(): Promise<number> {
             correlatedEvent: item.correlatedEvent,
             newsContext,
             macroContext: macroBase,
+            optionsAnalytics: chain
+              ? {
+                  maxPain: chain.maxPain ?? null,
+                  oiWalls: chain.oiWalls ?? null,
+                  ivRvSpread: ddIvRvSpread,
+                  realizedVol: ddRealizedVol,
+                }
+              : undefined,
           });
 
           await db.insert(analyses).values({

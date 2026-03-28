@@ -4,6 +4,7 @@ import type {
   OptionsChainSummary,
   CandleData,
 } from "@/types/market";
+import { analyzeOptionsChain } from "@/lib/utils/options-analytics";
 
 // yahoo-finance2 v3 class API — types export `never` but methods exist at runtime
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,7 +104,7 @@ export async function fetchOptionsChain(
         theta: undefined,
       }));
 
-    return {
+    const baseSummary: OptionsChainSummary = {
       ticker,
       expirations,
       nearestExpiry: {
@@ -112,6 +113,17 @@ export async function fetchOptionsChain(
         puts: mapContracts(nearest.puts),
       },
     };
+
+    // Enrich with max pain and OI walls (needs a price estimate)
+    const midCall = nearest.calls?.[Math.floor(nearest.calls.length / 2)];
+    const priceEstimate = midCall?.strike ?? 0;
+    if (priceEstimate > 0) {
+      const analytics = analyzeOptionsChain(baseSummary, priceEstimate);
+      baseSummary.maxPain = analytics.maxPain;
+      baseSummary.oiWalls = analytics.oiWalls;
+    }
+
+    return baseSummary;
   } catch (error) {
     console.error(
       `[market-fetcher] Options chain failed for ${ticker}:`,
@@ -182,7 +194,119 @@ export async function fetchHistoricalData(
   }
 }
 
-// ---------- IV Rank helper ----------
+// ---------- Realized Volatility ----------
+
+/**
+ * Compute annualized realized (historical) volatility from daily candles.
+ * Uses the standard deviation of log returns × √252.
+ * Returns null if insufficient data (< 20 candles).
+ */
+export function computeRealizedVol(
+  candles: CandleData[],
+  window: number = 20,
+): number | null {
+  if (candles.length < window + 1) return null;
+
+  // Use the most recent `window` candles
+  const recent = candles.slice(-(window + 1));
+  const logReturns: number[] = [];
+  for (let i = 1; i < recent.length; i++) {
+    const prev = recent[i - 1].close;
+    const curr = recent[i].close;
+    if (prev > 0 && curr > 0) {
+      logReturns.push(Math.log(curr / prev));
+    }
+  }
+
+  if (logReturns.length < window) return null;
+
+  const mean = logReturns.reduce((s, r) => s + r, 0) / logReturns.length;
+  const variance =
+    logReturns.reduce((s, r) => s + (r - mean) ** 2, 0) /
+    (logReturns.length - 1);
+  const dailyVol = Math.sqrt(variance);
+  const annualizedVol = dailyVol * Math.sqrt(252);
+
+  return annualizedVol;
+}
+
+// ---------- Real IV Percentile ----------
+
+/**
+ * Compute a real IV percentile by comparing current ATM IV against the
+ * historical realized vol range over the past year.
+ * Falls back to the heuristic if insufficient historical data.
+ */
+export async function computeRealIVPercentile(
+  ticker: string,
+  currentIV: number,
+): Promise<{
+  ivRank: number;
+  realizedVol: number | null;
+  method: "real" | "heuristic";
+}> {
+  try {
+    const candles = await fetchHistoricalData(ticker, "1y");
+    if (candles.length < 60) {
+      // Insufficient data — fall back to heuristic
+      console.warn(
+        `[market-fetcher] Only ${candles.length} candles for ${ticker}, using heuristic IV rank`,
+      );
+      return {
+        ivRank: computeIVRank(currentIV),
+        realizedVol: null,
+        method: "heuristic",
+      };
+    }
+
+    // Compute rolling 20-day realized vol for each window across the year
+    const rollingVols: number[] = [];
+    for (let i = 20; i < candles.length; i++) {
+      const windowCandles = candles.slice(i - 20, i + 1);
+      const rv = computeRealizedVol(windowCandles, 20);
+      if (rv != null) rollingVols.push(rv);
+    }
+
+    if (rollingVols.length === 0) {
+      return {
+        ivRank: computeIVRank(currentIV),
+        realizedVol: null,
+        method: "heuristic",
+      };
+    }
+
+    // Current realized vol (most recent 20-day window)
+    const currentRV = computeRealizedVol(candles, 20);
+
+    // IV percentile: where current IV sits relative to the range of historical realized vols
+    const minRV = Math.min(...rollingVols);
+    const maxRV = Math.max(...rollingVols);
+    const range = maxRV - minRV;
+
+    let ivRank: number;
+    if (range < 0.001) {
+      // Nearly no range — use midpoint
+      ivRank = 50;
+    } else {
+      ivRank = Math.round(((currentIV - minRV) / range) * 100);
+      ivRank = Math.max(0, Math.min(100, ivRank));
+    }
+
+    return { ivRank, realizedVol: currentRV, method: "real" };
+  } catch (err) {
+    console.error(
+      `[market-fetcher] Real IV percentile failed for ${ticker}:`,
+      err,
+    );
+    return {
+      ivRank: computeIVRank(currentIV),
+      realizedVol: null,
+      method: "heuristic",
+    };
+  }
+}
+
+// ---------- IV Rank helper (heuristic fallback) ----------
 
 /**
  * Compute IV rank: where current IV sits in the 52-week range (0–100).
@@ -201,6 +325,7 @@ export function computeIVRank(
 
 /**
  * Enrich a market snapshot with IV data from the options chain.
+ * Uses real IV percentile computation when enough historical data is available.
  */
 export async function enrichWithIV(
   snapshot: MarketSnapshot,
@@ -222,9 +347,23 @@ export async function enrichWithIV(
 
   const avgIV =
     atmContracts.reduce((sum, c) => sum + c.iv, 0) / atmContracts.length;
-  const ivRank = computeIVRank(avgIV);
 
-  return { ...snapshot, iv: avgIV, ivRank };
+  // Use real IV percentile with historical realized vol
+  const { ivRank, realizedVol, method } = await computeRealIVPercentile(
+    snapshot.ticker,
+    avgIV,
+  );
+
+  const ivRvSpread = realizedVol != null ? avgIV - realizedVol : undefined;
+
+  return {
+    ...snapshot,
+    iv: avgIV,
+    ivRank,
+    realizedVol: realizedVol ?? undefined,
+    ivRvSpread,
+    ivPercentileMethod: method,
+  };
 }
 
 // ---------- Re-exports for pipeline context ----------

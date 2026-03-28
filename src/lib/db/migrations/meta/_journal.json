@@ -8,6 +8,20 @@
       "when": 1774563230952,
       "tag": "0000_certain_diamondback",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1774738035380,
+      "tag": "0001_lethal_ted_forrester",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1774738119283,
+      "tag": "0002_absent_ted_forrester",
+      "breakpoints": true
     }
   ]
 }

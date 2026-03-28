@@ -15,13 +15,15 @@ Rate correlation confidence from 0.0 to 1.0:
 
 Be skeptical. Most whale trades are NOT correlated with specific news events. Only flag genuine connections.
 
+Higher whale quality scores (>70) indicate more conviction — weight these correlations more heavily. A high-quality whale trade (large premium, aggressive OTM strike, high volume/OI ratio) paired with a relevant news event is a stronger signal than a low-quality trade.
+
 Always respond with the exact JSON schema provided.`;
 
 // ---------- User Prompt Builder ----------
 
 export function buildCrossReferencePrompt(
   newsEventsJson: string,
-  whaleAlertsJson: string
+  whaleAlertsJson: string,
 ): string {
   return `Cross-reference the following whale options trades with recent market-relevant news events. Identify any correlations where a whale's position appears to be event-driven.
 
@@ -52,7 +54,14 @@ export const CROSS_REFERENCE_RESPONSE_SCHEMA = {
               premium: { type: "number" },
               volume: { type: "integer" },
             },
-            required: ["ticker", "strike", "expiry", "type", "premium", "volume"],
+            required: [
+              "ticker",
+              "strike",
+              "expiry",
+              "type",
+              "premium",
+              "volume",
+            ],
           },
           related_event: {
             type: "object",
@@ -64,14 +73,30 @@ export const CROSS_REFERENCE_RESPONSE_SCHEMA = {
             required: ["headline", "impact_score", "event_type"],
           },
           correlation_confidence: { type: "number" },
-          alignment: { type: "string", enum: ["confirming", "contrarian", "hedging"] },
+          alignment: {
+            type: "string",
+            enum: ["confirming", "contrarian", "hedging"],
+          },
           thesis: { type: "string" },
           smart_money_signal: {
             type: "string",
-            enum: ["strong_bullish", "bullish", "neutral", "bearish", "strong_bearish"],
+            enum: [
+              "strong_bullish",
+              "bullish",
+              "neutral",
+              "bearish",
+              "strong_bearish",
+            ],
           },
         },
-        required: ["whale_trade", "related_event", "correlation_confidence", "alignment", "thesis", "smart_money_signal"],
+        required: [
+          "whale_trade",
+          "related_event",
+          "correlation_confidence",
+          "alignment",
+          "thesis",
+          "smart_money_signal",
+        ],
       },
     },
     uncorrelated_whales: {
@@ -96,8 +121,18 @@ export const CROSS_REFERENCE_RESPONSE_SCHEMA = {
         correlations_found: { type: "integer" },
         timestamp: { type: "string" },
       },
-      required: ["news_events_analyzed", "whale_trades_analyzed", "correlations_found", "timestamp"],
+      required: [
+        "news_events_analyzed",
+        "whale_trades_analyzed",
+        "correlations_found",
+        "timestamp",
+      ],
     },
   },
-  required: ["correlations", "uncorrelated_whales", "summary", "analysis_metadata"],
+  required: [
+    "correlations",
+    "uncorrelated_whales",
+    "summary",
+    "analysis_metadata",
+  ],
 };

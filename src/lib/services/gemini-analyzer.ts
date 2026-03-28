@@ -277,6 +277,15 @@ interface MarketDataForRecommendation {
     fomcNextDate?: string;
     fomcIsDecisionWeek?: boolean;
   };
+  optionsAnalytics?: {
+    maxPain?: number | null;
+    oiWalls?: {
+      callWalls: { strike: number; oi: number }[];
+      putWalls: { strike: number; oi: number }[];
+    } | null;
+    ivRvSpread?: number | null;
+    realizedVol?: number | null;
+  };
 }
 
 export async function generateRecommendation(
@@ -296,6 +305,7 @@ export async function generateRecommendation(
     marketData.todayVolume,
     marketData.optionsChainSummary,
     marketData.macroContext,
+    marketData.optionsAnalytics,
   );
 
   const result = await callGeminiWithRetry(
@@ -346,6 +356,15 @@ interface DeepDiveInput {
     ivCrushRisk?: string;
     fomcNextDate?: string;
     fomcIsDecisionWeek?: boolean;
+  };
+  optionsAnalytics?: {
+    maxPain?: number | null;
+    oiWalls?: {
+      callWalls: { strike: number; oi: number }[];
+      putWalls: { strike: number; oi: number }[];
+    } | null;
+    ivRvSpread?: number | null;
+    realizedVol?: number | null;
   };
 }
 
@@ -417,6 +436,7 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
       ? JSON.stringify(input.newsContext, null, 2)
       : undefined,
     macroContext: input.macroContext,
+    optionsAnalytics: input.optionsAnalytics,
   });
 
   const result = await callGeminiWithRetry(

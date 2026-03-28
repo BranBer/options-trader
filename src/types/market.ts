@@ -8,6 +8,9 @@ export const marketSnapshotSchema = z.object({
   iv: z.number().optional(),
   ivRank: z.number().optional(),
   dayChangePct: z.number(),
+  realizedVol: z.number().optional(),
+  ivRvSpread: z.number().optional(),
+  ivPercentileMethod: z.enum(["real", "heuristic"]).optional(),
 });
 
 export type MarketSnapshot = z.infer<typeof marketSnapshotSchema>;
@@ -45,6 +48,16 @@ export const optionsChainSummarySchema = z.object({
       }),
     ),
   }),
+  maxPain: z.number().nullable().optional(),
+  oiWalls: z
+    .object({
+      callWalls: z.array(
+        z.object({ strike: z.number(), oi: z.number().int() }),
+      ),
+      putWalls: z.array(z.object({ strike: z.number(), oi: z.number().int() })),
+    })
+    .nullable()
+    .optional(),
 });
 
 export type OptionsChainSummary = z.infer<typeof optionsChainSummarySchema>;
@@ -68,5 +81,8 @@ export interface MarketSnapshotRow {
   iv: number | null;
   ivRank: number | null;
   dayChangePct: number | null;
+  realizedVol: number | null;
+  ivRvSpread: number | null;
+  ivPercentileMethod: string | null;
   capturedAt: string | null;
 }

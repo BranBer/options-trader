@@ -6,6 +6,7 @@ import {
 } from "@/lib/services/market-fetcher";
 import { db } from "@/lib/db/client";
 import { whaleAlerts, marketSnapshots } from "@/lib/db/schema";
+import { scoreWhaleQuality } from "@/lib/utils/whale-quality";
 
 /**
  * Whale Pipeline: Fetch whale alerts → Enrich with market data → Store
@@ -53,6 +54,9 @@ export async function runWhalePipeline(): Promise<number> {
         iv: snap.iv ?? null,
         ivRank: snap.ivRank ?? null,
         dayChangePct: snap.dayChangePct,
+        realizedVol: snap.realizedVol ?? null,
+        ivRvSpread: snap.ivRvSpread ?? null,
+        ivPercentileMethod: snap.ivPercentileMethod ?? null,
       });
     } catch (error) {
       console.warn(
@@ -83,6 +87,7 @@ export async function runWhalePipeline(): Promise<number> {
   let stored = 0;
   for (const alert of alerts) {
     const market = marketMap.get(alert.ticker);
+    const quality = scoreWhaleQuality(alert, market?.price);
     try {
       await db.insert(whaleAlerts).values({
         ticker: alert.ticker,
@@ -96,6 +101,7 @@ export async function runWhalePipeline(): Promise<number> {
         sentiment: alert.sentiment,
         source: alert.source,
         detectedAt: alert.detectedAt,
+        qualityScore: quality,
       });
       stored++;
     } catch (error) {
