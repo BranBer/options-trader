@@ -11,7 +11,10 @@ export function formatPremium(value: number): string {
  * Format a number as USD currency.
  */
 export function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(value);
 }
 
 /**
@@ -24,7 +27,10 @@ export function formatNumber(value: number): string {
 }
 
 /**
- * Format ISO timestamp to relative time: "2m ago", "1h ago", "3d ago"
+ * Format ISO timestamp to relative time: "2m ago", "1h ago", "3d ago".
+ * NOTE: This uses Date.now() so the result is non-deterministic.
+ * When used in SSR-rendered JSX, wrap the output element with
+ * suppressHydrationWarning to avoid server/client mismatch.
  */
 export function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -46,6 +52,7 @@ export function formatDateTime(iso: string): string {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "America/New_York",
   });
 }
 

@@ -196,7 +196,10 @@ export default function DashboardHome() {
                         <div className="text-sm font-medium">
                           {w.premium ? formatPremium(w.premium) : "—"}
                         </div>
-                        <div className="text-xs text-muted-foreground">
+                        <div
+                          className="text-xs text-muted-foreground"
+                          suppressHydrationWarning
+                        >
                           {w.detectedAt ? timeAgo(w.detectedAt) : ""}
                         </div>
                       </div>
@@ -250,7 +253,11 @@ export default function DashboardHome() {
                           {n.sentiment}
                         </span>
                         {n.countryCode && <span>{n.countryCode}</span>}
-                        {n.publishedAt && <span>{timeAgo(n.publishedAt)}</span>}
+                        {n.publishedAt && (
+                          <span suppressHydrationWarning>
+                            {timeAgo(n.publishedAt)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -289,11 +296,31 @@ export default function DashboardHome() {
               <div className="space-y-4">
                 {allAnalyses.slice(0, 3).map((a) => {
                   const output = a.output as Record<string, unknown> | null;
+                  const isCorrelation = a.type === "cross_reference";
+                  const correlations = isCorrelation
+                    ? (output?.correlations as
+                        | Array<{
+                            whale_trade: {
+                              ticker: string;
+                              type: string;
+                              strike: number;
+                            };
+                            related_event: { headline: string };
+                            alignment: string;
+                            thesis: string;
+                          }>
+                        | undefined)
+                    : undefined;
                   const summary =
                     (output?.summary as string) ??
                     (output?.thesis as string) ??
                     "—";
-                  const ticker = output?.ticker as string | undefined;
+                  const ticker = isCorrelation
+                    ? correlations
+                        ?.map((c) => c.whale_trade.ticker)
+                        .filter((v, i, a) => a.indexOf(v) === i)
+                        .join(", ")
+                    : (output?.ticker as string | undefined);
                   return (
                     <div key={a.id}>
                       <div className="flex items-center gap-2 mb-1">
@@ -323,8 +350,33 @@ export default function DashboardHome() {
                       <p className="text-sm text-muted-foreground line-clamp-2">
                         {summary}
                       </p>
+                      {isCorrelation &&
+                        correlations &&
+                        correlations.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {correlations.slice(0, 3).map((c, i) => (
+                              <div
+                                key={i}
+                                className="flex items-start gap-2 text-xs"
+                              >
+                                <Badge
+                                  variant="outline"
+                                  className="shrink-0 text-[10px] px-1.5"
+                                >
+                                  {c.alignment}
+                                </Badge>
+                                <span className="text-muted-foreground line-clamp-1">
+                                  {c.related_event.headline}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       {a.createdAt && (
-                        <p className="text-xs text-muted-foreground mt-1">
+                        <p
+                          className="text-xs text-muted-foreground mt-1"
+                          suppressHydrationWarning
+                        >
                           {timeAgo(a.createdAt)}
                         </p>
                       )}

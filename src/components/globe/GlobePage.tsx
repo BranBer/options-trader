@@ -585,7 +585,11 @@ function EventDetail({
       <div className="text-xs text-muted-foreground space-y-0.5">
         {event.source && <p>Source: {event.source}</p>}
         {event.countryCode && <p>Country: {event.countryCode}</p>}
-        {event.publishedAt && <p>Published: {timeAgo(event.publishedAt)}</p>}
+        {event.publishedAt && (
+          <p suppressHydrationWarning>
+            Published: {timeAgo(event.publishedAt)}
+          </p>
+        )}
         {event.url && (
           <a
             href={event.url}
@@ -635,7 +639,9 @@ function EventsList({
             />
             <span>{e.impactScore ?? 0}/10</span>
             {e.countryCode && <span>{e.countryCode}</span>}
-            {e.publishedAt && <span>{timeAgo(e.publishedAt)}</span>}
+            {e.publishedAt && (
+              <span suppressHydrationWarning>{timeAgo(e.publishedAt)}</span>
+            )}
           </div>
         </button>
       ))}

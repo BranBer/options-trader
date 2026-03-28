@@ -158,7 +158,10 @@ export default function WhaleAlertsPage() {
                               {alert.sentiment ?? "—"}
                             </span>
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
+                          <TableCell
+                            className="text-xs text-muted-foreground"
+                            suppressHydrationWarning
+                          >
                             {alert.detectedAt ? timeAgo(alert.detectedAt) : "—"}
                           </TableCell>
                         </TableRow>

@@ -130,7 +130,10 @@ function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
               </Badge>
             )}
             {analysis.createdAt && (
-              <span className="text-xs text-muted-foreground">
+              <span
+                className="text-xs text-muted-foreground"
+                suppressHydrationWarning
+              >
                 {timeAgo(analysis.createdAt)}
               </span>
             )}
@@ -295,7 +298,10 @@ function RecommendationCard({ analysis }: { analysis: Analysis }) {
               </span>
             </div>
             {analysis.createdAt && (
-              <span className="text-xs text-muted-foreground">
+              <span
+                className="text-xs text-muted-foreground"
+                suppressHydrationWarning
+              >
                 {timeAgo(analysis.createdAt)}
               </span>
             )}

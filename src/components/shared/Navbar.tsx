@@ -228,23 +228,25 @@ export default function Navbar() {
 
           <TooltipProvider>
             <Tooltip>
-              <TooltipTrigger>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={triggerRefresh}
-                  disabled={pipelineActive}
-                  aria-label={
-                    pipelineActive
-                      ? "Pipeline running"
-                      : "Trigger manual refresh"
-                  }
-                  title="Trigger manual refresh"
-                >
-                  <RefreshCw
-                    className={`h-4 w-4 ${pipelineActive ? "animate-spin" : ""}`}
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={triggerRefresh}
+                    disabled={pipelineActive}
+                    aria-label={
+                      pipelineActive
+                        ? "Pipeline running"
+                        : "Trigger manual refresh"
+                    }
+                    title="Trigger manual refresh"
                   />
-                </Button>
+                }
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${pipelineActive ? "animate-spin" : ""}`}
+                />
               </TooltipTrigger>
               {pipelineActive && pipeline?.steps && (
                 <TooltipContent side="bottom" align="end" className="w-64 p-3">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useDeepDive, useHistoricalData } from "@/hooks/useApiData";
@@ -404,31 +404,36 @@ function RiskBadge({ risk }: { risk: string }) {
 }
 
 function FreshnessBadge({ createdAt }: { createdAt: string }) {
-  const created = new Date(createdAt);
-  const now = new Date();
-  const diffMs = now.getTime() - created.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
+  const [label, setLabel] = useState("just now");
+  const [stale, setStale] = useState("text-muted-foreground");
 
-  let label: string;
-  if (diffMins < 1) label = "just now";
-  else if (diffMins < 60) label = `${diffMins}m ago`;
-  else if (diffHours < 24) label = `${diffHours}h ago`;
-  else label = `${diffDays}d ago`;
+  useEffect(() => {
+    function update() {
+      const diffMs = Date.now() - new Date(createdAt).getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
 
-  const stale =
-    diffHours >= 72
-      ? "text-red-400"
-      : diffHours >= 24
-        ? "text-amber-400"
-        : "text-muted-foreground";
+      if (diffMins < 1) setLabel("just now");
+      else if (diffMins < 60) setLabel(`${diffMins}m ago`);
+      else if (diffHours < 24) setLabel(`${diffHours}h ago`);
+      else setLabel(`${diffDays}d ago`);
+
+      setStale(
+        diffHours >= 72
+          ? "text-red-400"
+          : diffHours >= 24
+            ? "text-amber-400"
+            : "text-muted-foreground",
+      );
+    }
+    update();
+    const id = setInterval(update, 60_000);
+    return () => clearInterval(id);
+  }, [createdAt]);
 
   return (
-    <span
-      className={`flex items-center gap-1 text-xs ${stale}`}
-      title={`Analysis generated: ${created.toLocaleString()}`}
-    >
+    <span className={`flex items-center gap-1 text-xs ${stale}`}>
       <Clock className="h-3 w-3" />
       {label}
     </span>
