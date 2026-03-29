@@ -183,6 +183,25 @@ export const deepDiveAnalysisSchema = z.object({
         }),
       )
       .optional(),
+    max_pain: z.number().nullable().optional(),
+    oi_walls: z
+      .object({
+        call_walls: z.array(z.object({ strike: z.number(), oi: z.number() })),
+        put_walls: z.array(z.object({ strike: z.number(), oi: z.number() })),
+      })
+      .nullable()
+      .optional(),
+    gex_summary: z
+      .object({
+        net_gex: z.number(),
+        dealer_positioning: z.enum(["long_gamma", "short_gamma", "neutral"]),
+        gex_flip_level: z.number().nullable(),
+        interpretation: z.string().optional(),
+      })
+      .nullable()
+      .optional(),
+    iv_rv_spread: z.number().nullable().optional(),
+    iv_rv_interpretation: z.string().nullable().optional(),
   }),
   entry_exit: entryExitStrategySchema,
   global_events_connection: z.string(),

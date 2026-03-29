@@ -37,6 +37,20 @@ export interface WhaleAlert {
   createdAt: string | null;
   currentPrice: number | null;
   dayChangePct: number | null;
+  qualityScore: number | null;
+}
+
+export interface ConfidenceFactor {
+  name: string;
+  value: number;
+  weight: number;
+  contribution: number;
+  description: string;
+}
+
+export interface ConfidenceBreakdown {
+  composite: number;
+  factors: ConfidenceFactor[];
 }
 
 export interface Analysis {
@@ -45,6 +59,7 @@ export interface Analysis {
   inputRefs: Record<string, unknown> | null;
   output: Record<string, unknown> | null;
   confidence: number | null;
+  confidenceBreakdown: ConfidenceBreakdown | null;
   createdAt: string | null;
 }
 

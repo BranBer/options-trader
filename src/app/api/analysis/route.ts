@@ -36,6 +36,9 @@ export async function GET(req: NextRequest) {
     ...a,
     output: a.output ? JSON.parse(a.output) : null,
     inputRefs: a.inputRefs ? JSON.parse(a.inputRefs) : null,
+    confidenceBreakdown: a.confidenceBreakdown
+      ? JSON.parse(a.confidenceBreakdown)
+      : null,
   }));
 
   return NextResponse.json({ analyses: parsed });

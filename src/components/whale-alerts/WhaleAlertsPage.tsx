@@ -1,7 +1,19 @@
-"use client";
+﻿"use client";
 
 import { useState, type KeyboardEvent } from "react";
-import { TrendingUp, TrendingDown, Minus, ExternalLink } from "lucide-react";
+import {
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  ExternalLink,
+  HelpCircle,
+} from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -84,6 +96,27 @@ export default function WhaleAlertsPage() {
                       <TableHead className="text-right">Volume</TableHead>
                       <TableHead className="text-right">OI</TableHead>
                       <TableHead>Sentiment</TableHead>
+                      <TableHead className="text-center">
+                        <span className="flex items-center justify-center gap-1">
+                          Quality
+                          <TooltipProvider delay={200}>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="top"
+                                className="max-w-60 text-xs"
+                              >
+                                Trade quality score (0â€“100) based on Volume/OI
+                                ratio, OTM distance, premium size, expiry
+                                timing, and sweep likelihood. Higher = stronger
+                                conviction signal.
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </span>
+                      </TableHead>
                       <TableHead>Time</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -91,7 +124,7 @@ export default function WhaleAlertsPage() {
                     {alerts.length === 0 && !isLoading ? (
                       <TableRow>
                         <TableCell
-                          colSpan={9}
+                          colSpan={10}
                           className="text-center text-muted-foreground py-8"
                         >
                           No whale alerts found. Run a pipeline refresh or
@@ -129,21 +162,25 @@ export default function WhaleAlertsPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            {alert.strike ? formatCurrency(alert.strike) : "—"}
+                            {alert.strike
+                              ? formatCurrency(alert.strike)
+                              : "â€”"}
                           </TableCell>
                           <TableCell className="text-xs">
-                            {alert.expiry ?? "—"}
+                            {alert.expiry ?? "â€”"}
                           </TableCell>
                           <TableCell className="text-right font-medium">
-                            {alert.premium ? formatPremium(alert.premium) : "—"}
+                            {alert.premium
+                              ? formatPremium(alert.premium)
+                              : "â€”"}
                           </TableCell>
                           <TableCell className="text-right">
-                            {alert.volume ? formatNumber(alert.volume) : "—"}
+                            {alert.volume ? formatNumber(alert.volume) : "â€”"}
                           </TableCell>
                           <TableCell className="text-right">
                             {alert.openInterest
                               ? formatNumber(alert.openInterest)
-                              : "—"}
+                              : "â€”"}
                           </TableCell>
                           <TableCell>
                             <span
@@ -155,14 +192,23 @@ export default function WhaleAlertsPage() {
                                     : "text-muted-foreground"
                               }
                             >
-                              {alert.sentiment ?? "—"}
+                              {alert.sentiment ?? "â€”"}
                             </span>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {alert.qualityScore != null ? (
+                              <QualityBadge score={alert.qualityScore} />
+                            ) : (
+                              "â€”"
+                            )}
                           </TableCell>
                           <TableCell
                             className="text-xs text-muted-foreground"
                             suppressHydrationWarning
                           >
-                            {alert.detectedAt ? timeAgo(alert.detectedAt) : "—"}
+                            {alert.detectedAt
+                              ? timeAgo(alert.detectedAt)
+                              : "â€”"}
                           </TableCell>
                         </TableRow>
                       ))
@@ -183,5 +229,21 @@ export default function WhaleAlertsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function QualityBadge({ score }: { score: number }) {
+  const variant =
+    score >= 70 ? "default" : score >= 40 ? "secondary" : "outline";
+  const color =
+    score >= 70
+      ? "text-emerald-400"
+      : score >= 40
+        ? "text-amber-400"
+        : "text-muted-foreground";
+  return (
+    <Badge variant={variant} className={`text-xs ${color}`}>
+      {score}
+    </Badge>
   );
 }
