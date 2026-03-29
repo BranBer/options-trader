@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 
 export interface NewsEvent {
   id: number;
@@ -110,6 +110,29 @@ export function useAnalyses(type?: string, limit = 20) {
       if (!res.ok) throw new Error("Failed to fetch analyses");
       return res.json();
     },
+  });
+}
+
+export function useInfiniteAnalyses(type?: string, limit = 20) {
+  return useInfiniteQuery<{
+    analyses: Analysis[];
+    nextCursor: number | null;
+    hasMore: boolean;
+  }>({
+    queryKey: ["infiniteAnalyses", type],
+    queryFn: async ({ pageParam }) => {
+      const sp = new URLSearchParams();
+      if (type) sp.set("type", type);
+      sp.set("limit", String(limit));
+      if (pageParam) sp.set("cursor", String(pageParam));
+      const res = await fetch(`/api/analysis?${sp.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch analyses");
+      return res.json();
+    },
+    initialPageParam: null as number | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 }
 

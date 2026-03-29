@@ -13,7 +13,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  useAnalyses,
+  useInfiniteAnalyses,
   type Analysis,
   type ConfidenceBreakdown,
 } from "@/hooks/useApiData";
@@ -28,20 +28,28 @@ import type {
   TradeRecommendation,
 } from "@/types/analysis";
 import WhaleDeepDive from "@/components/analysis/WhaleDeepDive";
+import { InfiniteScrollTrigger } from "@/components/shared/InfiniteScrollTrigger";
+import { VirtualizedAnalysisList } from "@/components/shared/VirtualizedAnalysisList";
 import { ChevronDown, ChevronUp, HelpCircle } from "lucide-react";
 
 export default function AnalysisPage() {
-  const { data: xrefData, isLoading: xrefLoading } = useAnalyses(
-    "cross_reference",
-    20,
-  );
-  const { data: recData, isLoading: recLoading } = useAnalyses(
-    "trade_recommendation",
-    20,
-  );
+  const {
+    data: xrefData,
+    isLoading: xrefLoading,
+    hasNextPage: xrefHasMore,
+    isFetchingNextPage: xrefFetchingNext,
+    fetchNextPage: xrefFetchNext,
+  } = useInfiniteAnalyses("cross_reference");
+  const {
+    data: recData,
+    isLoading: recLoading,
+    hasNextPage: recHasMore,
+    isFetchingNextPage: recFetchingNext,
+    fetchNextPage: recFetchNext,
+  } = useInfiniteAnalyses("trade_recommendation");
 
-  const crossRefs = xrefData?.analyses ?? [];
-  const recommendations = recData?.analyses ?? [];
+  const crossRefs = xrefData?.pages.flatMap((p) => p.analyses) ?? [];
+  const recommendations = recData?.pages.flatMap((p) => p.analyses) ?? [];
 
   return (
     <div className="space-y-6">
@@ -74,11 +82,17 @@ export default function AnalysisPage() {
           ) : crossRefs.length === 0 ? (
             <EmptyState message="No cross-reference analyses yet. Run a pipeline refresh with enough news & whale data." />
           ) : (
-            <div className="space-y-4">
-              {crossRefs.map((a) => (
-                <CrossReferenceCard key={a.id} analysis={a} />
-              ))}
-            </div>
+            <VirtualizedAnalysisList
+              items={crossRefs}
+              renderItem={(a) => <CrossReferenceCard analysis={a} />}
+              footer={
+                <InfiniteScrollTrigger
+                  onLoadMore={xrefFetchNext}
+                  hasMore={xrefHasMore ?? false}
+                  isLoading={xrefFetchingNext}
+                />
+              }
+            />
           )}
         </TabsContent>
 
@@ -94,11 +108,17 @@ export default function AnalysisPage() {
           ) : recommendations.length === 0 ? (
             <EmptyState message="No trade recommendations yet. Run a pipeline refresh to generate them." />
           ) : (
-            <div className="space-y-4">
-              {recommendations.map((a) => (
-                <RecommendationCard key={a.id} analysis={a} />
-              ))}
-            </div>
+            <VirtualizedAnalysisList
+              items={recommendations}
+              renderItem={(a) => <RecommendationCard analysis={a} />}
+              footer={
+                <InfiniteScrollTrigger
+                  onLoadMore={recFetchNext}
+                  hasMore={recHasMore ?? false}
+                  isLoading={recFetchingNext}
+                />
+              }
+            />
           )}
         </TabsContent>
       </Tabs>
