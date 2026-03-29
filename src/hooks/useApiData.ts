@@ -190,10 +190,15 @@ export function useHistoricalData(ticker?: string, period = "3mo") {
         `/api/market/history?ticker=${encodeURIComponent(ticker!)}&period=${period}`,
       );
       if (!res.ok) throw new Error("Failed to fetch historical data");
-      return res.json();
+      const data = await res.json();
+      if (!data.candles?.length) throw new Error("No candle data returned");
+      return data;
     },
     enabled: !!ticker,
-    staleTime: 5 * 60 * 1000, // 5 min
+    staleTime: 10 * 60 * 1000, // 10 min — candle data is relatively static
+    refetchInterval: false, // historical data doesn't need periodic refetch
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev, // keep previous data while refetching
   });
 }
 

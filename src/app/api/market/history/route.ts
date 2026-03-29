@@ -24,5 +24,12 @@ export async function GET(req: NextRequest) {
 
   const candles = await fetchHistoricalData(ticker.toUpperCase(), period);
 
+  if (!candles.length) {
+    return NextResponse.json(
+      { error: `No historical data available for ${ticker.toUpperCase()}` },
+      { status: 404 },
+    );
+  }
+
   return NextResponse.json({ ticker: ticker.toUpperCase(), period, candles });
 }

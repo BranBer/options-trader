@@ -144,28 +144,47 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
         <div className="space-y-2">
           <p className="text-sm font-medium">Technical Indicators</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {deepDive.indicators.map((ind, i) => (
-              <div key={i} className="rounded-md border p-2 text-xs space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{ind.name}</span>
-                  <Badge
-                    variant={
-                      ind.signal === "bullish"
-                        ? "default"
-                        : ind.signal === "bearish"
-                          ? "destructive"
-                          : "secondary"
-                    }
-                    className="text-xs"
-                  >
-                    {ind.signal}
-                  </Badge>
+            {deepDive.indicators.map((ind, i) => {
+              // For Put/Call Ratio, derive signal from the numeric value
+              // to ensure the badge reflects direct reading (high P/C = bearish)
+              let signal = ind.signal;
+              if (/put.?call/i.test(ind.name)) {
+                const parsed = parseFloat(ind.value);
+                if (!isNaN(parsed)) {
+                  signal =
+                    parsed > 1.2
+                      ? "bearish"
+                      : parsed < 0.8
+                        ? "bullish"
+                        : "neutral";
+                }
+              }
+              return (
+                <div
+                  key={i}
+                  className="rounded-md border p-2 text-xs space-y-1"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{ind.name}</span>
+                    <Badge
+                      variant={
+                        signal === "bullish"
+                          ? "default"
+                          : signal === "bearish"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                      className="text-xs"
+                    >
+                      {signal}
+                    </Badge>
+                  </div>
+                  <p className="text-muted-foreground">
+                    {ind.value} — {ind.explanation}
+                  </p>
                 </div>
-                <p className="text-muted-foreground">
-                  {ind.value} — {ind.explanation}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

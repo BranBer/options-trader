@@ -28,6 +28,9 @@ Options-specific rules:
 - The IV-RV spread indicates whether options are over- or under-priced relative to actual stock movement. A spread > 10% means options are expensive (favor credit strategies). A spread < -5% means options are cheap (favor debit strategies).
 - GEX (Gamma Exposure) measures how much market makers need to hedge. Positive net GEX means dealers are long gamma and will dampen price moves (mean-reversion environment). Negative net GEX means dealers are short gamma and will amplify price moves (trending environment). The GEX flip level is the price where dealer positioning transitions — above it expect dampened moves, below it expect amplified moves.
 
+Indicator signal labeling rules:
+- For the Put/Call Ratio indicator, use the DIRECT reading for the signal field: ratio > 1.0 means more puts than calls = "bearish"; ratio < 1.0 means more calls than puts = "bullish"; ratio ≈ 1.0 = "neutral". You may mention the contrarian interpretation in the explanation, but the signal field must reflect the direct sentiment of the positioning.
+
 Macro awareness rules:
 - If VIX context is provided, factor the volatility regime into position sizing and strategy selection. Elevated VIX (>25) means wider expected moves — tighten stops, prefer defined-risk.
 - If earnings proximity data is provided and the option expires AFTER earnings, prominently warn about IV crush risk. IV typically drops 30-60% post-earnings.
