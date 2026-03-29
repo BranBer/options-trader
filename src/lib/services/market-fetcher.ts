@@ -5,6 +5,11 @@ import type {
   CandleData,
 } from "@/types/market";
 import { analyzeOptionsChain } from "@/lib/utils/options-analytics";
+import { computeGEX } from "@/lib/utils/gex-calculator";
+import {
+  SECTOR_ETFS,
+  type SectorPerformance,
+} from "@/lib/utils/sector-rotation";
 
 // yahoo-finance2 v3 class API — types export `never` but methods exist at runtime
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,6 +126,7 @@ export async function fetchOptionsChain(
       const analytics = analyzeOptionsChain(baseSummary, priceEstimate);
       baseSummary.maxPain = analytics.maxPain;
       baseSummary.oiWalls = analytics.oiWalls;
+      baseSummary.gex = computeGEX(baseSummary, priceEstimate) ?? null;
     }
 
     return baseSummary;
@@ -192,6 +198,36 @@ export async function fetchHistoricalData(
     );
     return [];
   }
+}
+
+// ---------- Sector Performance ----------
+
+export async function fetchSectorPerformance(): Promise<SectorPerformance[]> {
+  const results: SectorPerformance[] = [];
+
+  for (const etf of SECTOR_ETFS) {
+    try {
+      const q = await yf.quote(etf.ticker);
+      if (q?.symbol) {
+        results.push({
+          ticker: etf.ticker,
+          name: etf.name,
+          dayChangePct: q.regularMarketChangePercent ?? 0,
+          cyclical: etf.cyclical,
+        });
+      }
+    } catch (err) {
+      console.warn(
+        `[market-fetcher] Sector quote failed for ${etf.ticker}:`,
+        err,
+      );
+    }
+  }
+
+  console.log(
+    `[market-fetcher] Fetched ${results.length}/${SECTOR_ETFS.length} sector ETF quotes`,
+  );
+  return results;
 }
 
 // ---------- Realized Volatility ----------

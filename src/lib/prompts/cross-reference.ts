@@ -17,6 +17,10 @@ Be skeptical. Most whale trades are NOT correlated with specific news events. On
 
 Higher whale quality scores (>70) indicate more conviction — weight these correlations more heavily. A high-quality whale trade (large premium, aggressive OTM strike, high volume/OI ratio) paired with a relevant news event is a stronger signal than a low-quality trade.
 
+Insider buying combined with whale call buying is an especially strong bullish signal. Insider selling combined with whale put buying suggests informed bearishness. When insider transaction data is provided, factor it into your correlation confidence assessment.
+
+If sector rotation context is provided, consider whether the whale trade aligns with current sector momentum. Whale trades in leading sectors during risk-on regimes are stronger signals than trades in lagging sectors.
+
 Always respond with the exact JSON schema provided.`;
 
 // ---------- User Prompt Builder ----------
@@ -24,14 +28,31 @@ Always respond with the exact JSON schema provided.`;
 export function buildCrossReferencePrompt(
   newsEventsJson: string,
   whaleAlertsJson: string,
+  insiderContextJson?: string,
+  sectorRotationContext?: string,
 ): string {
-  return `Cross-reference the following whale options trades with recent market-relevant news events. Identify any correlations where a whale's position appears to be event-driven.
+  let prompt = `Cross-reference the following whale options trades with recent market-relevant news events. Identify any correlations where a whale's position appears to be event-driven.
 
 Recent News Events (last 24h, impact >= 5):
 ${newsEventsJson}
 
 Current Whale Options Flow:
 ${whaleAlertsJson}`;
+
+  if (insiderContextJson) {
+    prompt += `
+
+Recent Insider Transactions (last 30 days for correlated tickers):
+${insiderContextJson}`;
+  }
+
+  if (sectorRotationContext) {
+    prompt += `
+
+${sectorRotationContext}`;
+  }
+
+  return prompt;
 }
 
 // ---------- Gemini Response Schema ----------

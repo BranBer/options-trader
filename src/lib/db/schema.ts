@@ -57,5 +57,6 @@ export const analyses = sqliteTable("analyses", {
   inputRefs: text("input_refs"), // JSON: references to news_event ids, whale_alert ids
   output: text("output"), // full Gemini structured JSON
   confidence: real("confidence"),
+  confidenceBreakdown: text("confidence_breakdown"), // JSON CompositeConfidenceBreakdown
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });

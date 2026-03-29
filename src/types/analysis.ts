@@ -202,6 +202,12 @@ export const deepDiveAnalysisSchema = z.object({
 
 export type DeepDiveAnalysis = z.infer<typeof deepDiveAnalysisSchema>;
 
+// --- Composite Confidence Breakdown ---
+export type {
+  CompositeConfidenceBreakdown,
+  ConfidenceFactor,
+} from "@/lib/utils/composite-confidence";
+
 // --- DB row type ---
 export interface AnalysisRow {
   id: number;
@@ -209,5 +215,6 @@ export interface AnalysisRow {
   inputRefs: string | null; // JSON
   output: string | null; // JSON
   confidence: number | null;
+  confidenceBreakdown: string | null; // JSON CompositeConfidenceBreakdown
   createdAt: string | null;
 }

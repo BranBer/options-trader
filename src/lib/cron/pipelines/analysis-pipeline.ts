@@ -24,6 +24,18 @@ import { buildVIXContext } from "@/lib/utils/vix-regimes";
 import { getEarningsProximity } from "@/lib/utils/earnings-proximity";
 import { getFOMCProximity } from "@/lib/utils/fomc-calendar";
 import { computeConfidenceAdjustment } from "@/lib/utils/confidence-adjuster";
+import {
+  fetchInsiderTransactions,
+  computeInsiderSentiment,
+} from "@/lib/services/insider-fetcher";
+import {
+  classifyRotation,
+  buildSectorRotationPromptContext,
+} from "@/lib/utils/sector-rotation";
+import { fetchSectorPerformance } from "@/lib/services/market-fetcher";
+import { computeCompositeConfidence } from "@/lib/utils/composite-confidence";
+import type { InsiderSentiment } from "@/types/insider";
+import type { SectorRotationContext } from "@/lib/utils/sector-rotation";
 import type { DeepDiveAnalysis, TradeRecommendation } from "@/types/analysis";
 
 const MIN_CORRELATION_CONFIDENCE = 0.5;
@@ -111,9 +123,62 @@ export async function runAnalysisPipeline(): Promise<number> {
     qualityScore: w.qualityScore ?? undefined,
   }));
 
+  // Fetch insider transactions for unique whale tickers (top 10 to respect rate limits)
+  const uniqueWhaleTickers = [
+    ...new Set(recentWhales.map((w) => w.ticker)),
+  ].slice(0, 10);
+  let insiderContextJson: string | undefined;
+  const insiderSentimentMap = new Map<string, InsiderSentiment>();
+  try {
+    const insiderResults = await Promise.all(
+      uniqueWhaleTickers.map(async (ticker) => {
+        const txns = await fetchInsiderTransactions(ticker);
+        if (txns.length === 0) return null;
+        return computeInsiderSentiment(ticker, txns);
+      }),
+    );
+    const insiderData = insiderResults.filter(Boolean);
+    if (insiderData.length > 0) {
+      for (const s of insiderData) {
+        if (s) insiderSentimentMap.set(s.ticker, s);
+      }
+      insiderContextJson = JSON.stringify(insiderData, null, 2);
+      console.log(
+        `[AnalysisPipeline] Insider data fetched for ${insiderData.length} tickers`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      "[AnalysisPipeline] Insider fetch failed (non-critical):",
+      err,
+    );
+  }
+
+  // Fetch sector rotation context for cross-reference
+  let sectorRotationPrompt: string | undefined;
+  let sectorRotationCtx: SectorRotationContext | null = null;
+  try {
+    const sectorPerf = await fetchSectorPerformance();
+    if (sectorPerf.length > 0) {
+      sectorRotationCtx = classifyRotation(sectorPerf);
+      sectorRotationPrompt =
+        buildSectorRotationPromptContext(sectorRotationCtx);
+      console.log(
+        `[AnalysisPipeline] Sector rotation: ${sectorRotationCtx.regime}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      "[AnalysisPipeline] Sector rotation fetch failed (non-critical):",
+      err,
+    );
+  }
+
   const crossRef = await crossReferenceAnalysis(
     newsForCorrelation,
     whalesForCorrelation,
+    insiderContextJson,
+    sectorRotationPrompt,
   );
 
   // Store cross-reference analysis
@@ -229,8 +294,10 @@ export async function runAnalysisPipeline(): Promise<number> {
                   oiWalls: chain.oiWalls ?? null,
                   ivRvSpread,
                   realizedVol,
+                  gex: chain.gex ?? null,
                 }
               : undefined,
+            sectorRotationContext: sectorRotationPrompt,
           });
 
           // Store latest market snapshot
@@ -423,6 +490,7 @@ export async function runAnalysisPipeline(): Promise<number> {
                   oiWalls: chain.oiWalls ?? null,
                   ivRvSpread: ddIvRvSpread,
                   realizedVol: ddRealizedVol,
+                  gex: chain.gex ?? null,
                 }
               : undefined,
           });
@@ -513,6 +581,84 @@ export async function runAnalysisPipeline(): Promise<number> {
         }
       } catch {
         // Non-critical — skip any parsing errors
+      }
+    }
+
+    // Step 7: Compute composite confidence for each recommendation
+    console.log("[AnalysisPipeline] Computing composite confidence scores...");
+
+    // Re-fetch recommendations (confidence may have been updated by feedback loop)
+    const updatedRecs = await db
+      .select()
+      .from(analyses)
+      .where(
+        and(
+          gte(analyses.createdAt, since),
+          eq(analyses.type, "trade_recommendation"),
+        ),
+      )
+      .orderBy(desc(analyses.createdAt));
+
+    for (const recRow of updatedRecs) {
+      try {
+        const refs = JSON.parse(recRow.inputRefs ?? "{}");
+        const ticker = refs.correlationTicker as string;
+        const correlationConf = (refs.correlationConfidence as number) ?? 0.5;
+        const recOutput = JSON.parse(
+          recRow.output ?? "{}",
+        ) as TradeRecommendation;
+
+        // Gather whale quality score from DB
+        const whaleRow = recentWhales.find((w) => w.ticker === ticker);
+        const whaleQuality = whaleRow?.qualityScore ?? null;
+
+        // Gather IV percentile from market snapshot
+        const snapRow = await db
+          .select()
+          .from(marketSnapshots)
+          .where(eq(marketSnapshots.ticker, ticker))
+          .orderBy(desc(marketSnapshots.capturedAt))
+          .limit(1);
+        const ivPercentile = snapRow[0]?.ivRank ?? null;
+
+        // Parse earnings risk from recommendation output
+        const earningsRisk =
+          recOutput.market_context?.catalyst_date != null
+            ? recOutput.market_context.days_to_catalyst != null &&
+              recOutput.market_context.days_to_catalyst <= 3
+              ? "high"
+              : recOutput.market_context.days_to_catalyst != null &&
+                  recOutput.market_context.days_to_catalyst <= 14
+                ? "moderate"
+                : "low"
+            : "none";
+
+        const composite = computeCompositeConfidence({
+          geminiCorrelationConf: correlationConf,
+          whaleQualityScore: whaleQuality,
+          technicalAlignmentScore: recRow.confidence,
+          ivPercentile,
+          vixLevel: macroBase.vixLevel,
+          earningsRisk,
+          insiderSentiment: insiderSentimentMap.get(ticker) ?? null,
+          direction: recOutput.direction,
+          sectorRotation: sectorRotationCtx,
+        });
+
+        await db
+          .update(analyses)
+          .set({
+            confidence: composite.composite,
+            confidenceBreakdown: JSON.stringify(composite),
+          })
+          .where(eq(analyses.id, recRow.id));
+
+        console.log(
+          `[AnalysisPipeline] Composite confidence for ${ticker}: ${composite.composite.toFixed(3)} ` +
+            `(${composite.factors.filter((f) => f.weight > 0).length} factors)`,
+        );
+      } catch {
+        // Non-critical
       }
     }
   }

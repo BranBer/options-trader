@@ -3,10 +3,13 @@ import {
   fetchMarketData,
   enrichWithIV,
   fetchVIX,
+  fetchSectorPerformance,
 } from "@/lib/services/market-fetcher";
 import { db } from "@/lib/db/client";
 import { whaleAlerts, marketSnapshots } from "@/lib/db/schema";
 import { scoreWhaleQuality } from "@/lib/utils/whale-quality";
+import { classifyRotation } from "@/lib/utils/sector-rotation";
+import type { SectorRotationContext } from "@/lib/utils/sector-rotation";
 
 /**
  * Whale Pipeline: Fetch whale alerts → Enrich with market data → Store
@@ -81,6 +84,35 @@ export async function runWhalePipeline(): Promise<number> {
     } catch {
       /* ignore duplicate */
     }
+  }
+
+  // Step 4c: Fetch sector ETF performance and store snapshots
+  let sectorRotation: SectorRotationContext | null = null;
+  try {
+    const sectorPerf = await fetchSectorPerformance();
+    if (sectorPerf.length > 0) {
+      sectorRotation = classifyRotation(sectorPerf);
+      for (const sp of sectorPerf) {
+        try {
+          await db.insert(marketSnapshots).values({
+            ticker: sp.ticker,
+            price: 0,
+            volume: 0,
+            iv: null,
+            ivRank: null,
+            dayChangePct: sp.dayChangePct,
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      console.log(
+        `[WhalePipeline] Sector rotation: ${sectorRotation.regime} ` +
+          `(leading: ${sectorRotation.leading.map((s) => s.ticker).join(", ")})`,
+      );
+    }
+  } catch (err) {
+    console.warn("[WhalePipeline] Sector fetch failed (non-critical):", err);
   }
 
   // Step 5: Enrich and store whale alerts

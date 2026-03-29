@@ -26,6 +26,7 @@ Options-specific rules:
 - OI walls represent large concentrations of open interest where market-maker hedging may act as magnets or barriers for price. Call OI walls above price act as resistance; put OI walls below act as support.
 - Max pain is the price at which option holders lose the most — stocks often gravitate toward max pain near expiration due to market-maker delta hedging.
 - The IV-RV spread indicates whether options are over- or under-priced relative to actual stock movement. A spread > 10% means options are expensive (favor credit strategies). A spread < -5% means options are cheap (favor debit strategies).
+- GEX (Gamma Exposure) measures how much market makers need to hedge. Positive net GEX means dealers are long gamma and will dampen price moves (mean-reversion environment). Negative net GEX means dealers are short gamma and will amplify price moves (trending environment). The GEX flip level is the price where dealer positioning transitions — above it expect dampened moves, below it expect amplified moves.
 
 Macro awareness rules:
 - If VIX context is provided, factor the volatility regime into position sizing and strategy selection. Elevated VIX (>25) means wider expected moves — tighten stops, prefer defined-risk.
@@ -60,6 +61,12 @@ interface DeepDivePromptInput {
     } | null;
     ivRvSpread?: number | null;
     realizedVol?: number | null;
+    gex?: {
+      netGEX: number;
+      gexFlipLevel: number | null;
+      topConcentrations: { strike: number; gex: number }[];
+      dealerPositioning: string;
+    } | null;
   };
 }
 
@@ -133,6 +140,23 @@ ${input.newsContextJson}`;
     }
     if (input.optionsAnalytics.realizedVol != null) {
       prompt += `\n- 20-day Realized Volatility: ${(input.optionsAnalytics.realizedVol * 100).toFixed(1)}%`;
+    }
+    if (input.optionsAnalytics.gex) {
+      const g = input.optionsAnalytics.gex;
+      const netLabel = g.netGEX >= 0 ? "+" : "";
+      const posLabel =
+        g.dealerPositioning === "long_gamma"
+          ? "dealers long gamma — expect mean-reversion, dampened moves"
+          : g.dealerPositioning === "short_gamma"
+            ? "dealers short gamma — expect trending, amplified moves"
+            : "neutral positioning";
+      prompt += `\n- Net GEX: ${netLabel}$${Math.abs(g.netGEX).toLocaleString()} (${posLabel})`;
+      if (g.gexFlipLevel != null) {
+        prompt += `\n- GEX Flip Level: $${g.gexFlipLevel} — above this price moves are dampened, below they are amplified`;
+      }
+      if (g.topConcentrations.length > 0) {
+        prompt += `\n- Top GEX Concentrations: ${g.topConcentrations.map((c) => `$${c.strike} ($${Math.abs(c.gex).toLocaleString()})`).join(", ")}`;
+      }
     }
   }
 

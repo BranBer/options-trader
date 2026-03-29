@@ -58,9 +58,23 @@ export const optionsChainSummarySchema = z.object({
     })
     .nullable()
     .optional(),
+  gex: z
+    .object({
+      netGEX: z.number(),
+      gexFlipLevel: z.number().nullable(),
+      topConcentrations: z.array(
+        z.object({ strike: z.number(), gex: z.number() }),
+      ),
+      dealerPositioning: z.enum(["long_gamma", "short_gamma", "neutral"]),
+    })
+    .nullable()
+    .optional(),
 });
 
 export type OptionsChainSummary = z.infer<typeof optionsChainSummarySchema>;
+
+// --- GEX Summary (re-exported from gex-calculator) ---
+export type { GEXSummary } from "@/lib/utils/gex-calculator";
 
 // --- Historical candle data ---
 export interface CandleData {

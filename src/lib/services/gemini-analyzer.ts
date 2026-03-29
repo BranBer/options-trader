@@ -218,6 +218,8 @@ interface WhaleAlertForCorrelation {
 export async function crossReferenceAnalysis(
   newsEvents: NewsEventForCorrelation[],
   whaleAlerts: WhaleAlertForCorrelation[],
+  insiderContextJson?: string,
+  sectorRotationContext?: string,
 ): Promise<CrossReferenceAnalysis> {
   if (newsEvents.length === 0 || whaleAlerts.length === 0) {
     console.log("[Gemini] Skipping cross-reference: insufficient data");
@@ -241,6 +243,8 @@ export async function crossReferenceAnalysis(
   const prompt = buildCrossReferencePrompt(
     JSON.stringify(newsEvents, null, 2),
     JSON.stringify(whaleAlerts, null, 2),
+    insiderContextJson,
+    sectorRotationContext,
   );
 
   const result = await callGeminiWithRetry(
@@ -285,7 +289,14 @@ interface MarketDataForRecommendation {
     } | null;
     ivRvSpread?: number | null;
     realizedVol?: number | null;
+    gex?: {
+      netGEX: number;
+      gexFlipLevel: number | null;
+      topConcentrations: { strike: number; gex: number }[];
+      dealerPositioning: string;
+    } | null;
   };
+  sectorRotationContext?: string;
 }
 
 export async function generateRecommendation(
@@ -306,6 +317,7 @@ export async function generateRecommendation(
     marketData.optionsChainSummary,
     marketData.macroContext,
     marketData.optionsAnalytics,
+    marketData.sectorRotationContext,
   );
 
   const result = await callGeminiWithRetry(
@@ -365,6 +377,12 @@ interface DeepDiveInput {
     } | null;
     ivRvSpread?: number | null;
     realizedVol?: number | null;
+    gex?: {
+      netGEX: number;
+      gexFlipLevel: number | null;
+      topConcentrations: { strike: number; gex: number }[];
+      dealerPositioning: string;
+    } | null;
   };
 }
 

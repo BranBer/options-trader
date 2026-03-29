@@ -44,6 +44,7 @@ export function buildTradeAnalyzerPrompt(
     ivRvSpread?: number | null;
     realizedVol?: number | null;
   },
+  sectorRotationContext?: string,
 ): string {
   let prompt = `Based on the following correlated whale trade, news event, and market data, generate a structured trade recommendation.
 
@@ -98,6 +99,10 @@ Market Data for ${ticker}:
     if (optionsAnalytics.realizedVol != null) {
       prompt += `\n- 20-day Realized Volatility: ${(optionsAnalytics.realizedVol * 100).toFixed(1)}%`;
     }
+  }
+
+  if (sectorRotationContext) {
+    prompt += `\n\n${sectorRotationContext}`;
   }
 
   prompt += `\n\nGenerate a trade recommendation with risk analysis.`;
