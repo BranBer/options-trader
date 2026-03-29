@@ -112,3 +112,15 @@ export interface PortfolioTradesResponse {
 export interface EquityCurveResponse {
   snapshots: EquityCurvePoint[];
 }
+
+// --- Position Valuation (batch exit monitor) ---
+export interface PositionValuation {
+  tradeId: number;
+  ticker: string;
+  currentValue: number;
+  pnlPct: number;
+  daysHeld: number;
+  nearExitThreshold: boolean; // within 80% of any exit trigger
+  exitTriggered: boolean;
+  exitReason: string | null;
+}

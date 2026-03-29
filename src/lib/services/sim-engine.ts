@@ -9,7 +9,12 @@ import {
   fetchMarketData,
   fetchOptionsChain,
 } from "@/lib/services/market-fetcher";
-import type { GeminiTradeDecision, SimLeg } from "@/types/portfolio";
+import type {
+  GeminiTradeDecision,
+  SimLeg,
+  PositionValuation,
+} from "@/types/portfolio";
+import { recordApiCall } from "@/lib/utils/api-budget";
 
 // ============================================================
 // Portfolio initialization
@@ -292,7 +297,7 @@ async function estimateFromStockPrice(
 // Close a position
 // ============================================================
 
-async function closePosition(
+export async function closePosition(
   tradeId: number,
   exitPrice: number,
   reason: string,
@@ -403,4 +408,186 @@ export function getOpenPositionsSummary(
       entryPrice: t.entryPrice,
       currentPnlPct: 0, // Will be updated during evaluation
     }));
+}
+
+// ============================================================
+// Batch position valuation (for exit monitor)
+// ============================================================
+
+/** Mutex: true while positions are being evaluated (prevents concurrent runs) */
+let isEvaluatingPositions = false;
+export function getIsEvaluating(): boolean {
+  return isEvaluatingPositions;
+}
+
+/**
+ * Batch-evaluate all open positions using a single batch quote call.
+ * Returns valuations including near-threshold flags.
+ * Only fetches the full options chain for positions near an exit trigger.
+ */
+export async function batchEvaluatePositions(): Promise<PositionValuation[]> {
+  if (isEvaluatingPositions) {
+    console.log("[ExitMonitor] Evaluation already in progress, skipping");
+    return [];
+  }
+
+  isEvaluatingPositions = true;
+  try {
+    const openTrades = await db
+      .select()
+      .from(simTrades)
+      .where(eq(simTrades.status, "open"));
+
+    if (openTrades.length === 0) return [];
+
+    // Batch quote: one API call for all tickers
+    const tickers = [...new Set(openTrades.map((t) => t.ticker))];
+    const quotes = await fetchMarketData(tickers);
+    recordApiCall("yahoo", 1); // batch quote = 1 call
+    const priceMap = new Map(quotes.map((q) => [q.ticker, q.price]));
+
+    const valuations: PositionValuation[] = [];
+
+    for (const trade of openTrades) {
+      const entryDate = new Date(trade.entryDate);
+      const daysHeld =
+        (Date.now() - entryDate.getTime()) / (1000 * 60 * 60 * 24);
+      const timeExitDays = trade.timeExitDays ?? 14;
+      const profitTarget = trade.profitTargetPct ?? 50;
+      const stopLoss = trade.stopLossPct ?? 30;
+
+      // Check expiry
+      const legs: SimLeg[] = JSON.parse(trade.legs);
+      const earliestExpiry = legs.reduce((earliest, leg) => {
+        const exp = new Date(leg.expiry);
+        return exp < earliest ? exp : earliest;
+      }, new Date("2099-12-31"));
+
+      if (earliestExpiry <= new Date()) {
+        valuations.push({
+          tradeId: trade.id,
+          ticker: trade.ticker,
+          currentValue: 0,
+          pnlPct: -100,
+          daysHeld,
+          nearExitThreshold: true,
+          exitTriggered: true,
+          exitReason: "expiry",
+        });
+        continue;
+      }
+
+      // Check time exit
+      if (daysHeld >= timeExitDays) {
+        // Need current value — fetch options chain for this one
+        const currentValue = await estimatePositionValue(trade);
+        recordApiCall("yahoo", 1);
+        valuations.push({
+          tradeId: trade.id,
+          ticker: trade.ticker,
+          currentValue,
+          pnlPct:
+            trade.entryPrice !== 0
+              ? ((currentValue - trade.entryPrice) /
+                  Math.abs(trade.entryPrice)) *
+                100
+              : 0,
+          daysHeld,
+          nearExitThreshold: true,
+          exitTriggered: true,
+          exitReason: "time_exit",
+        });
+        continue;
+      }
+
+      // Quick estimate from stock price to check proximity
+      const stockPrice = priceMap.get(trade.ticker);
+      if (!stockPrice) {
+        valuations.push({
+          tradeId: trade.id,
+          ticker: trade.ticker,
+          currentValue: trade.entryPrice,
+          pnlPct: 0,
+          daysHeld,
+          nearExitThreshold: false,
+          exitTriggered: false,
+          exitReason: null,
+        });
+        continue;
+      }
+
+      // Quick intrinsic value estimate from stock price
+      let quickValue = 0;
+      for (const leg of legs) {
+        let intrinsic = 0;
+        if (leg.type === "call") {
+          intrinsic = Math.max(0, stockPrice - leg.strike);
+        } else {
+          intrinsic = Math.max(0, leg.strike - stockPrice);
+        }
+        const contractValue = intrinsic * 100 * leg.quantity;
+        quickValue += leg.action === "buy" ? contractValue : -contractValue;
+      }
+
+      const quickPnlPct =
+        trade.entryPrice !== 0
+          ? ((quickValue - trade.entryPrice) / Math.abs(trade.entryPrice)) * 100
+          : 0;
+
+      // "Near threshold" = within 80% of any exit trigger
+      const nearProfit = quickPnlPct >= profitTarget * 0.8;
+      const nearStop = quickPnlPct <= -(stopLoss * 0.8);
+      const nearTime = daysHeld >= timeExitDays * 0.8;
+      const nearThreshold = nearProfit || nearStop || nearTime;
+
+      // If near threshold, do a full options chain evaluation for precision
+      if (nearThreshold) {
+        const preciseValue = await estimatePositionValue(trade);
+        recordApiCall("yahoo", 1);
+
+        const precisePnlPct =
+          trade.entryPrice !== 0
+            ? ((preciseValue - trade.entryPrice) / Math.abs(trade.entryPrice)) *
+              100
+            : 0;
+
+        let exitReason: string | null = null;
+        let exitTriggered = false;
+
+        if (precisePnlPct >= profitTarget) {
+          exitTriggered = true;
+          exitReason = "profit_target";
+        } else if (precisePnlPct <= -stopLoss) {
+          exitTriggered = true;
+          exitReason = "stop_loss";
+        }
+
+        valuations.push({
+          tradeId: trade.id,
+          ticker: trade.ticker,
+          currentValue: preciseValue,
+          pnlPct: precisePnlPct,
+          daysHeld,
+          nearExitThreshold: true,
+          exitTriggered,
+          exitReason,
+        });
+      } else {
+        valuations.push({
+          tradeId: trade.id,
+          ticker: trade.ticker,
+          currentValue: quickValue,
+          pnlPct: quickPnlPct,
+          daysHeld,
+          nearExitThreshold: false,
+          exitTriggered: false,
+          exitReason: null,
+        });
+      }
+    }
+
+    return valuations;
+  } finally {
+    isEvaluatingPositions = false;
+  }
 }
