@@ -60,3 +60,55 @@ export const analyses = sqliteTable("analyses", {
   confidenceBreakdown: text("confidence_breakdown"), // JSON CompositeConfidenceBreakdown
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+// ============================================================
+// Epic 12 — Simulated Portfolio Tables
+// ============================================================
+
+export const simTrades = sqliteTable("sim_trades", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticker: text("ticker").notNull(),
+  optionSymbol: text("option_symbol"),
+  strategyName: text("strategy_name").notNull(),
+  direction: text("direction").notNull(), // 'bullish' | 'bearish' | 'neutral'
+  legs: text("legs").notNull(), // JSON array of strategy legs
+  entryPrice: real("entry_price").notNull(), // net premium paid/received
+  entryDate: text("entry_date").notNull(),
+  exitPrice: real("exit_price"),
+  exitDate: text("exit_date"),
+  quantity: integer("quantity").notNull().default(1),
+  pnl: real("pnl"),
+  pnlPct: real("pnl_pct"),
+  status: text("status").notNull().default("open"), // 'open' | 'closed' | 'expired'
+  exitReason: text("exit_reason"), // 'profit_target' | 'stop_loss' | 'time_exit' | 'expiry'
+  geminiReasoning: text("gemini_reasoning"), // JSON GeminiTradeDecision
+  profitTargetPct: real("profit_target_pct"),
+  stopLossPct: real("stop_loss_pct"),
+  timeExitDays: integer("time_exit_days"),
+  sourceAnalysisId: integer("source_analysis_id"),
+  sourceWhaleId: integer("source_whale_id"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const simPortfolio = sqliteTable("sim_portfolio", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  balance: real("balance").notNull().default(2000),
+  startingBalance: real("starting_balance").notNull().default(2000),
+  totalPnl: real("total_pnl").notNull().default(0),
+  totalTrades: integer("total_trades").notNull().default(0),
+  winningTrades: integer("winning_trades").notNull().default(0),
+  losingTrades: integer("losing_trades").notNull().default(0),
+  maxDrawdown: real("max_drawdown").notNull().default(0),
+  bestTradePnl: real("best_trade_pnl").notNull().default(0),
+  worstTradePnl: real("worst_trade_pnl").notNull().default(0),
+  lastUpdated: text("last_updated").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const simPortfolioSnapshots = sqliteTable("sim_portfolio_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  balance: real("balance").notNull(),
+  totalPnl: real("total_pnl").notNull(),
+  openPositions: integer("open_positions").notNull().default(0),
+  snapshotDate: text("snapshot_date").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});

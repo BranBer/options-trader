@@ -3,6 +3,7 @@ import { fetchAllNews } from "@/lib/services/news-fetcher";
 import { classifyAndStoreNews } from "@/lib/cron/pipelines/news-pipeline";
 import { runWhalePipeline } from "@/lib/cron/pipelines/whale-pipeline";
 import { runAnalysisPipeline } from "@/lib/cron/pipelines/analysis-pipeline";
+import { runSimPipeline } from "@/lib/cron/pipelines/sim-pipeline";
 import * as progress from "./pipeline-progress";
 
 let lastRefreshAt: string | null = null;
@@ -31,6 +32,7 @@ export async function runPipeline(): Promise<{
     "Cross-referencing",
     "Generating recommendations",
     "Deep dive analysis",
+    "Sim portfolio",
   ]);
 
   try {
@@ -58,6 +60,10 @@ export async function runPipeline(): Promise<{
     console.log(
       `[Pipeline] Phase 2 complete: ${analysisCount} analyses stored`,
     );
+
+    // Step 5: Sim portfolio (evaluate exits + open new positions)
+    const simActions = await runSimPipeline();
+    console.log(`[Pipeline] Phase 3 sim: ${simActions} actions`);
 
     lastRefreshAt = new Date().toISOString();
     const elapsed = Date.now() - startTime.getTime();

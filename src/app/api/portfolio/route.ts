@@ -1,0 +1,169 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { db } from "@/lib/db/client";
+import {
+  simTrades,
+  simPortfolio,
+  simPortfolioSnapshots,
+} from "@/lib/db/schema";
+import { desc, eq, asc } from "drizzle-orm";
+
+export async function GET(req: NextRequest) {
+  const params = req.nextUrl.searchParams;
+  const view = params.get("view") ?? "overview"; // 'overview' | 'trades' | 'equity' | 'trade'
+  const tradeId = params.get("id");
+  const status = params.get("status"); // 'open' | 'closed' | 'all'
+  const limit = Math.min(Number(params.get("limit")) || 50, 200);
+
+  // --- Single trade detail ---
+  if (view === "trade" && tradeId) {
+    const id = Number(tradeId);
+    if (isNaN(id)) {
+      return NextResponse.json({ error: "Invalid trade ID" }, { status: 400 });
+    }
+    const [trade] = await db
+      .select()
+      .from(simTrades)
+      .where(eq(simTrades.id, id));
+
+    if (!trade) {
+      return NextResponse.json({ error: "Trade not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      trade: {
+        ...trade,
+        legs: trade.legs ? JSON.parse(trade.legs) : [],
+        geminiReasoning: trade.geminiReasoning
+          ? JSON.parse(trade.geminiReasoning)
+          : null,
+      },
+    });
+  }
+
+  // --- Equity curve ---
+  if (view === "equity") {
+    const snapshots = await db
+      .select()
+      .from(simPortfolioSnapshots)
+      .orderBy(asc(simPortfolioSnapshots.snapshotDate))
+      .limit(365);
+
+    return NextResponse.json({
+      snapshots: snapshots.map((s) => ({
+        date: s.snapshotDate,
+        balance: s.balance,
+        totalPnl: s.totalPnl,
+        openPositions: s.openPositions,
+      })),
+    });
+  }
+
+  // --- Trades list ---
+  if (view === "trades") {
+    let query = db.select().from(simTrades);
+
+    if (status === "open") {
+      query = query.where(eq(simTrades.status, "open")) as typeof query;
+    } else if (status === "closed") {
+      query = query.where(eq(simTrades.status, "closed")) as typeof query;
+    }
+
+    const trades = await query.orderBy(desc(simTrades.createdAt)).limit(limit);
+
+    return NextResponse.json({
+      trades: trades.map((t) => ({
+        ...t,
+        legs: t.legs ? JSON.parse(t.legs) : [],
+        geminiReasoning: t.geminiReasoning
+          ? JSON.parse(t.geminiReasoning)
+          : null,
+      })),
+      total: trades.length,
+    });
+  }
+
+  // --- Overview (default) ---
+  const [portfolio] = await db.select().from(simPortfolio).limit(1);
+
+  if (!portfolio) {
+    return NextResponse.json({
+      portfolio: {
+        balance: 2000,
+        startingBalance: 2000,
+        totalPnl: 0,
+        totalPnlPct: 0,
+        totalTrades: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        winRate: 0,
+        avgPnl: 0,
+        maxDrawdown: 0,
+        bestTradePnl: 0,
+        worstTradePnl: 0,
+        sharpeRatio: null,
+        openPositions: 0,
+        lastUpdated: null,
+      },
+    });
+  }
+
+  const openCount = await db
+    .select()
+    .from(simTrades)
+    .where(eq(simTrades.status, "open"));
+
+  const totalTrades = portfolio.totalTrades;
+  const winRate =
+    totalTrades > 0 ? (portfolio.winningTrades / totalTrades) * 100 : 0;
+  const avgPnl = totalTrades > 0 ? portfolio.totalPnl / totalTrades : 0;
+  const totalPnlPct =
+    portfolio.startingBalance > 0
+      ? (portfolio.totalPnl / portfolio.startingBalance) * 100
+      : 0;
+
+  // Compute Sharpe ratio from snapshots (if enough data)
+  let sharpeRatio: number | null = null;
+  const snapshots = await db
+    .select()
+    .from(simPortfolioSnapshots)
+    .orderBy(asc(simPortfolioSnapshots.snapshotDate));
+
+  if (snapshots.length >= 5) {
+    const returns: number[] = [];
+    for (let i = 1; i < snapshots.length; i++) {
+      const prev = snapshots[i - 1].balance;
+      const curr = snapshots[i].balance;
+      if (prev > 0) returns.push((curr - prev) / prev);
+    }
+    if (returns.length > 1) {
+      const mean = returns.reduce((s, r) => s + r, 0) / returns.length;
+      const variance =
+        returns.reduce((s, r) => s + Math.pow(r - mean, 2), 0) /
+        (returns.length - 1);
+      const stdDev = Math.sqrt(variance);
+      if (stdDev > 0) {
+        sharpeRatio = (mean / stdDev) * Math.sqrt(252); // Annualized
+      }
+    }
+  }
+
+  return NextResponse.json({
+    portfolio: {
+      balance: portfolio.balance,
+      startingBalance: portfolio.startingBalance,
+      totalPnl: portfolio.totalPnl,
+      totalPnlPct,
+      totalTrades,
+      winningTrades: portfolio.winningTrades,
+      losingTrades: portfolio.losingTrades,
+      winRate,
+      avgPnl,
+      maxDrawdown: portfolio.maxDrawdown,
+      bestTradePnl: portfolio.bestTradePnl,
+      worstTradePnl: portfolio.worstTradePnl,
+      sharpeRatio,
+      openPositions: openCount.length,
+      lastUpdated: portfolio.lastUpdated,
+    },
+  });
+}

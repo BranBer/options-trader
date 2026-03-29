@@ -173,3 +173,62 @@ export function useHistoricalData(ticker?: string, period = "3mo") {
     staleTime: 5 * 60 * 1000, // 5 min
   });
 }
+
+// ============================================================
+// Epic 12 — Portfolio Hooks
+// ============================================================
+
+import type {
+  PortfolioStats,
+  SimTrade,
+  EquityCurvePoint,
+} from "@/types/portfolio";
+
+export function usePortfolio() {
+  return useQuery<{ portfolio: PortfolioStats }>({
+    queryKey: ["portfolio"],
+    queryFn: async () => {
+      const res = await fetch("/api/portfolio?view=overview");
+      if (!res.ok) throw new Error("Failed to fetch portfolio");
+      return res.json();
+    },
+  });
+}
+
+export function usePortfolioTrades(status?: "open" | "closed") {
+  const sp = new URLSearchParams();
+  sp.set("view", "trades");
+  if (status) sp.set("status", status);
+
+  return useQuery<{ trades: SimTrade[]; total: number }>({
+    queryKey: ["portfolioTrades", status],
+    queryFn: async () => {
+      const res = await fetch(`/api/portfolio?${sp.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch portfolio trades");
+      return res.json();
+    },
+  });
+}
+
+export function usePortfolioTrade(id?: number) {
+  return useQuery<{ trade: SimTrade }>({
+    queryKey: ["portfolioTrade", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/portfolio?view=trade&id=${id}`);
+      if (!res.ok) throw new Error("Failed to fetch trade");
+      return res.json();
+    },
+    enabled: id != null,
+  });
+}
+
+export function useEquityCurve() {
+  return useQuery<{ snapshots: EquityCurvePoint[] }>({
+    queryKey: ["equityCurve"],
+    queryFn: async () => {
+      const res = await fetch("/api/portfolio?view=equity");
+      if (!res.ok) throw new Error("Failed to fetch equity curve");
+      return res.json();
+    },
+  });
+}

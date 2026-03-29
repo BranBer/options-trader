@@ -14,6 +14,7 @@ import {
   Check,
   Loader2,
   Circle,
+  Briefcase,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,7 @@ const navLinks = [
   { href: "/whale-alerts", label: "Whale Alerts", icon: Activity },
   { href: "/globe", label: "Globe", icon: Globe },
   { href: "/analysis", label: "Analysis", icon: BarChart3 },
+  { href: "/portfolio", label: "Portfolio", icon: Briefcase },
 ];
 
 function NavItems({

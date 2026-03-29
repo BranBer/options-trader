@@ -37,6 +37,15 @@ import {
   DEEP_DIVE_RESPONSE_SCHEMA,
   buildDeepDivePrompt,
 } from "@/lib/prompts/deep-dive-analyzer";
+import {
+  SIM_TRADE_EVALUATOR_SYSTEM_INSTRUCTION,
+  SIM_TRADE_EVALUATOR_RESPONSE_SCHEMA,
+  buildSimTradeEvalPrompt,
+} from "@/lib/prompts/sim-trade-evaluator";
+import {
+  type GeminiTradeDecision,
+  geminiTradeDecisionSchema,
+} from "@/types/portfolio";
 import type { CandleData, OptionsChainSummary } from "@/types/market";
 
 // --- Gemini Client Singleton ---
@@ -469,6 +478,78 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
   console.log(
     `[Gemini] Deep dive for ${ticker}: risk=${result.risk_assessment.overall_risk}, ` +
       `patterns=${result.technical_patterns.length}, S/R=${result.support_resistance.length}`,
+  );
+
+  return result;
+}
+
+// ============================================================
+// Epic 12 — Sim Trade Evaluator
+// ============================================================
+
+interface SimTradeEvalInput {
+  ticker: string;
+  currentPrice: number;
+  recommendation: {
+    thesis: string;
+    direction: string;
+    confidence: number;
+    strategy: {
+      name: string;
+      legs: Array<{
+        action: string;
+        type: string;
+        strike: number;
+        expiry: string;
+        estimated_premium: number;
+      }>;
+      max_loss: string;
+      max_profit: string;
+      risk_reward_ratio: string;
+    };
+    risk_factors: string[];
+  };
+  deepDive?: {
+    market_narrative: string;
+    risk_level: string;
+    entry_exit?: {
+      profit_target: string;
+      stop_loss: string;
+      position_sizing: string;
+    };
+  };
+  compositeConfidence?: number;
+  whaleQualityScore?: number;
+  portfolioBalance: number;
+  openPositions: Array<{
+    ticker: string;
+    direction: string;
+    entryPrice: number;
+    currentPnlPct: number;
+  }>;
+}
+
+export async function evaluateTradeForSim(
+  input: SimTradeEvalInput,
+): Promise<GeminiTradeDecision> {
+  console.log(
+    `[Gemini] Evaluating ${input.ticker} for sim portfolio (balance: $${input.portfolioBalance.toFixed(2)})`,
+  );
+
+  const prompt = buildSimTradeEvalPrompt(input);
+
+  const result = await callGeminiWithRetry(
+    "gemini-3-flash-preview",
+    SIM_TRADE_EVALUATOR_SYSTEM_INSTRUCTION,
+    prompt,
+    SIM_TRADE_EVALUATOR_RESPONSE_SCHEMA,
+    geminiTradeDecisionSchema,
+    { temperature: 0.2, maxOutputTokens: 4096 },
+  );
+
+  console.log(
+    `[Gemini] Sim eval for ${input.ticker}: ${result.should_enter ? "ENTER" : "SKIP"} ` +
+      `(size: $${result.position_size_dollars}, strategy: ${result.adjusted_entry.strategy_name})`,
   );
 
   return result;

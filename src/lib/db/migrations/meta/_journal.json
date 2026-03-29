@@ -22,6 +22,13 @@
       "when": 1774738119283,
       "tag": "0002_absent_ted_forrester",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1774762547127,
+      "tag": "0003_curvy_archangel",
+      "breakpoints": true
     }
   ]
 }
