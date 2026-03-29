@@ -262,7 +262,7 @@ export async function crossReferenceAnalysis(
     prompt,
     CROSS_REFERENCE_RESPONSE_SCHEMA,
     crossReferenceAnalysisSchema,
-    { temperature: 0.2, maxOutputTokens: 8192 },
+    { temperature: 0.2, maxOutputTokens: 4096 },
   );
 
   console.log(
@@ -472,7 +472,7 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
     prompt,
     DEEP_DIVE_RESPONSE_SCHEMA,
     deepDiveAnalysisSchema,
-    { temperature: 0.25, maxOutputTokens: 8192 },
+    { temperature: 0.25, maxOutputTokens: 4096 },
   );
 
   console.log(

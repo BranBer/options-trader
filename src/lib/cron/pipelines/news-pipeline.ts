@@ -2,6 +2,7 @@ import { fetchAllNews } from "@/lib/services/news-fetcher";
 import { classifyNews } from "@/lib/services/gemini-analyzer";
 import { db } from "@/lib/db/client";
 import { newsEvents } from "@/lib/db/schema";
+import { inArray } from "drizzle-orm";
 import type { RawNewsArticle } from "@/types/news";
 
 /**
@@ -17,8 +18,35 @@ export async function classifyAndStoreNews(
     return 0;
   }
 
-  // Classify with Gemini
-  const classification = await classifyNews(rawArticles, onBatchProgress);
+  // Dedup: skip articles whose URL already exists in the DB
+  const urls = rawArticles.map((a) => a.url).filter((u): u is string => !!u);
+  const existingRows =
+    urls.length > 0
+      ? await db
+          .select({ url: newsEvents.url })
+          .from(newsEvents)
+          .where(inArray(newsEvents.url, urls))
+      : [];
+  const existingUrls = new Set(existingRows.map((r) => r.url));
+  const newArticles = rawArticles.filter(
+    (a) => !a.url || !existingUrls.has(a.url),
+  );
+
+  if (newArticles.length < rawArticles.length) {
+    console.log(
+      `[NewsPipeline] Dedup: ${rawArticles.length} fetched → ${newArticles.length} new (${rawArticles.length - newArticles.length} already classified)`,
+    );
+  }
+
+  if (newArticles.length === 0) {
+    console.log(
+      "[NewsPipeline] All articles already classified, skipping Gemini call",
+    );
+    return 0;
+  }
+
+  // Classify with Gemini (only new articles)
+  const classification = await classifyNews(newArticles, onBatchProgress);
   if (classification.articles.length === 0) {
     console.log("[NewsPipeline] No market-relevant articles found");
     return 0;
@@ -47,7 +75,7 @@ export async function classifyAndStoreNews(
 
   // Enrich lat/lng from original raw articles where available
   for (const row of rows) {
-    const original = rawArticles.find(
+    const original = newArticles.find(
       (raw) => raw.headline === row.headline || raw.url === row.url,
     );
     if (original?.lat != null && original?.lng != null) {
@@ -67,7 +95,7 @@ export async function classifyAndStoreNews(
   }
 
   console.log(
-    `[NewsPipeline] Classified & stored: ${rawArticles.length} fetched → ${classification.articles.length} classified → ${stored} stored`,
+    `[NewsPipeline] Classified & stored: ${rawArticles.length} fetched → ${newArticles.length} new → ${classification.articles.length} classified → ${stored} stored`,
   );
   return stored;
 }

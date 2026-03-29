@@ -74,6 +74,27 @@ export async function runSimPipeline(): Promise<number> {
     return closedCount;
   }
 
+  // Skip recommendations we've already evaluated (accepted or rejected)
+  const evaluatedIds = await db
+    .select({ sourceAnalysisId: simTrades.sourceAnalysisId })
+    .from(simTrades)
+    .where(gte(simTrades.createdAt, since));
+  const evaluatedIdSet = new Set(evaluatedIds.map((r) => r.sourceAnalysisId));
+  const unevaluatedRecs = recentRecs.filter((r) => !evaluatedIdSet.has(r.id));
+
+  if (unevaluatedRecs.length < recentRecs.length) {
+    console.log(
+      `[SimPipeline] Dedup: ${recentRecs.length} recs → ${unevaluatedRecs.length} unevaluated`,
+    );
+  }
+
+  if (unevaluatedRecs.length === 0) {
+    console.log("[SimPipeline] All recent recommendations already evaluated");
+    await takePortfolioSnapshot();
+    progress.complete(SIM_STEP_INDEX);
+    return closedCount;
+  }
+
   // Step 4: Get deep dives for context
   const recentDeepDives = await db
     .select()
@@ -104,10 +125,10 @@ export async function runSimPipeline(): Promise<number> {
 
   progress.updateDetail(
     SIM_STEP_INDEX,
-    `evaluating ${recentRecs.length} candidates`,
+    `evaluating ${unevaluatedRecs.length} candidates`,
   );
 
-  for (const rec of recentRecs) {
+  for (const rec of unevaluatedRecs) {
     if (newPositions >= slotsAvailable) break;
 
     try {

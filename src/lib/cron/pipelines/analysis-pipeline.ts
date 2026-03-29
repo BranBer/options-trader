@@ -100,6 +100,30 @@ export async function runAnalysisPipeline(): Promise<number> {
     return 0;
   }
 
+  // Staleness check: skip if no new news/whales since last cross-reference run
+  const lastCrossRef = await db
+    .select({ createdAt: analyses.createdAt })
+    .from(analyses)
+    .where(eq(analyses.type, "cross_reference"))
+    .orderBy(desc(analyses.createdAt))
+    .limit(1);
+
+  if (lastCrossRef.length > 0 && lastCrossRef[0].createdAt) {
+    const lastRunTime = lastCrossRef[0].createdAt;
+    const newestNewsTime = recentNews[0]?.createdAt ?? "";
+    const newestWhaleTime = recentWhales[0]?.createdAt ?? "";
+
+    if (newestNewsTime <= lastRunTime && newestWhaleTime <= lastRunTime) {
+      console.log(
+        `[AnalysisPipeline] No new data since last run (${lastRunTime}) — skipping Gemini calls`,
+      );
+      progress.complete(STEP_CROSS_REF);
+      progress.complete(STEP_RECOMMENDATIONS);
+      progress.complete(STEP_DEEP_DIVES);
+      return 0;
+    }
+  }
+
   // Step 3: Cross-reference with Gemini
   progress.activate(STEP_CROSS_REF);
   const newsForCorrelation = recentNews.map((n) => ({
@@ -419,6 +443,42 @@ export async function runAnalysisPipeline(): Promise<number> {
         sentiment: whaleRow?.sentiment ?? "neutral",
       },
     });
+  }
+
+  // Deep dive dedup: skip tickers that already have a deep dive from the last 4 hours
+  if (deepDiveQueue.length > 0) {
+    const fourHoursAgo = new Date(
+      Date.now() - 4 * 60 * 60 * 1000,
+    ).toISOString();
+    const recentDives = await db
+      .select({ output: analyses.output })
+      .from(analyses)
+      .where(
+        and(
+          gte(analyses.createdAt, fourHoursAgo),
+          eq(analyses.type, "deep_dive"),
+        ),
+      );
+    const recentDiveTickers = new Set<string>();
+    for (const dd of recentDives) {
+      try {
+        const parsed = JSON.parse(dd.output ?? "{}");
+        if (parsed.ticker) recentDiveTickers.add(parsed.ticker);
+      } catch {
+        /* skip */
+      }
+    }
+    const beforeCount = deepDiveQueue.length;
+    const filtered = deepDiveQueue.filter(
+      (d) => !recentDiveTickers.has(d.ticker),
+    );
+    if (filtered.length < beforeCount) {
+      console.log(
+        `[AnalysisPipeline] Deep dive dedup: ${beforeCount} → ${filtered.length} (${beforeCount - filtered.length} already analyzed within 4h)`,
+      );
+      deepDiveQueue.length = 0;
+      deepDiveQueue.push(...filtered);
+    }
   }
 
   if (deepDiveQueue.length > 0) {
