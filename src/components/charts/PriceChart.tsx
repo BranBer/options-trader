@@ -34,6 +34,10 @@ interface PriceChartProps {
   highlightedPatternIndex?: number | null;
   onHoveredPattern?: (patternIndex: number | null) => void;
   height?: number;
+  /** Trade entry price — shown as a horizontal line */
+  entryPrice?: number;
+  /** Trade exit price — shown as a horizontal line */
+  exitPrice?: number;
 }
 
 export default function PriceChart({
@@ -44,6 +48,8 @@ export default function PriceChart({
   highlightedPatternIndex,
   onHoveredPattern,
   height = 400,
+  entryPrice,
+  exitPrice,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -147,6 +153,28 @@ export default function PriceChart({
       }
     }
 
+    // Entry/exit price lines (for portfolio trade detail)
+    if (entryPrice != null) {
+      candleSeries.createPriceLine({
+        price: entryPrice,
+        color: "rgba(59,130,246,0.8)",
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: `Entry $${entryPrice.toFixed(2)}`,
+      });
+    }
+    if (exitPrice != null) {
+      candleSeries.createPriceLine({
+        price: exitPrice,
+        color: "rgba(168,85,247,0.8)",
+        lineWidth: 2,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: `Exit $${exitPrice.toFixed(2)}`,
+      });
+    }
+
     chart.timeScale().fitContent();
 
     // Pattern overlays
@@ -212,6 +240,8 @@ export default function PriceChart({
     showPatterns,
     height,
     onHoveredPattern,
+    entryPrice,
+    exitPrice,
   ]);
 
   // Highlight a specific pattern overlay when hovered from text

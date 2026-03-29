@@ -3,11 +3,10 @@
 import { useState, useCallback, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { useDeepDive, useHistoricalData } from "@/hooks/useApiData";
+import { useDeepDive } from "@/hooks/useApiData";
 import type { DeepDiveAnalysis } from "@/types/analysis";
-import PriceChart from "@/components/charts/PriceChart";
-import ChartLegend from "@/components/charts/ChartLegend";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
+import TechnicalChart from "@/components/shared/TechnicalChart";
 import {
   TrendingUp,
   TrendingDown,
@@ -16,41 +15,23 @@ import {
   Target,
   AlertTriangle,
   Globe,
-  Eye,
-  EyeOff,
   Clock,
 } from "lucide-react";
-
-const TIMEFRAMES = ["1wk", "1mo", "3mo", "6mo", "1y"] as const;
-const TIMEFRAME_LABELS: Record<string, string> = {
-  "1wk": "1W",
-  "1mo": "1M",
-  "3mo": "3M",
-  "6mo": "6M",
-  "1y": "1Y",
-};
 
 interface WhaleDeepDiveProps {
   ticker: string;
 }
 
 export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
-  const [timeframe, setTimeframe] = useState<string>("3mo");
-  const [showPatterns, setShowPatterns] = useState(true);
   const [hoveredPatternIndex, setHoveredPatternIndex] = useState<number | null>(
     null,
   );
 
   const { data: deepDiveData, isLoading: ddLoading } = useDeepDive(ticker);
-  const { data: histData, isLoading: histLoading } = useHistoricalData(
-    ticker,
-    timeframe,
-  );
 
   const analysisRow = deepDiveData?.analyses?.[0];
   const deepDive = analysisRow?.output as DeepDiveAnalysis | undefined;
   const analysisCreatedAt = analysisRow?.createdAt ?? null;
-  const candles = histData?.candles ?? [];
 
   const handleChartHover = useCallback((idx: number | null) => {
     setHoveredPatternIndex(idx);
@@ -97,66 +78,13 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
       <Separator />
 
       {/* Price Chart with timeframe toggle */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">Price Action</p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowPatterns(!showPatterns)}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
-              aria-pressed={showPatterns}
-              title={
-                showPatterns ? "Hide pattern overlays" : "Show pattern overlays"
-              }
-            >
-              {showPatterns ? (
-                <Eye className="h-3 w-3" />
-              ) : (
-                <EyeOff className="h-3 w-3" />
-              )}
-              Patterns
-            </button>
-            <div className="flex gap-1">
-              {TIMEFRAMES.map((tf) => (
-                <button
-                  key={tf}
-                  onClick={() => setTimeframe(tf)}
-                  className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                    timeframe === tf
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                  aria-pressed={timeframe === tf}
-                >
-                  {TIMEFRAME_LABELS[tf]}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        {histLoading ? (
-          <div className="flex items-center justify-center h-75 text-sm text-muted-foreground animate-pulse">
-            Loading chart data...
-          </div>
-        ) : (
-          <>
-            <PriceChart
-              candles={candles}
-              supportResistance={deepDive.support_resistance}
-              technicalPatterns={deepDive.technical_patterns}
-              showPatterns={showPatterns}
-              highlightedPatternIndex={hoveredPatternIndex}
-              onHoveredPattern={handleChartHover}
-              height={300}
-            />
-            <ChartLegend
-              supportResistance={deepDive.support_resistance}
-              technicalPatterns={deepDive.technical_patterns}
-              showPatterns={showPatterns}
-            />
-          </>
-        )}
-      </div>
+      <TechnicalChart
+        ticker={ticker}
+        supportResistance={deepDive.support_resistance}
+        technicalPatterns={deepDive.technical_patterns}
+        hoveredPatternIndex={hoveredPatternIndex}
+        onHoveredPattern={handleChartHover}
+      />
 
       <Separator />
 

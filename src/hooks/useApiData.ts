@@ -233,8 +233,35 @@ export function usePortfolioTrades(status?: "open" | "closed") {
   });
 }
 
+export interface SourceWhale {
+  id: number;
+  ticker: string;
+  strike: number | null;
+  expiry: string | null;
+  callPut: string | null;
+  premium: number | null;
+  volume: number | null;
+  openInterest: number | null;
+  underlyingPrice: number | null;
+  sentiment: string | null;
+  qualityScore: number | null;
+  detectedAt: string | null;
+}
+
+export interface SourceAnalysis {
+  id: number;
+  type: string;
+  confidence: number | null;
+  createdAt: string | null;
+}
+
 export function usePortfolioTrade(id?: number) {
-  return useQuery<{ trade: SimTrade }>({
+  return useQuery<{
+    trade: SimTrade;
+    confidenceBreakdown: ConfidenceBreakdown | null;
+    sourceWhale: SourceWhale | null;
+    sourceAnalysis: SourceAnalysis | null;
+  }>({
     queryKey: ["portfolioTrade", id],
     queryFn: async () => {
       const res = await fetch(`/api/portfolio?view=trade&id=${id}`);

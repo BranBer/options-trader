@@ -4,8 +4,18 @@ import {
   simTrades,
   simPortfolio,
   simPortfolioSnapshots,
+  analyses,
+  whaleAlerts,
 } from "@/lib/db/schema";
 import { desc, eq, asc } from "drizzle-orm";
+import {
+  getMockPortfolioOverview,
+  getMockPortfolioTrades,
+  getMockEquityCurve,
+  getMockPortfolioTrade,
+} from "@/lib/mock/portfolio-mock-data";
+
+const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
@@ -13,6 +23,20 @@ export async function GET(req: NextRequest) {
   const tradeId = params.get("id");
   const status = params.get("status"); // 'open' | 'closed' | 'all'
   const limit = Math.min(Number(params.get("limit")) || 50, 200);
+
+  // --- Mock data mode ---
+  if (USE_MOCK) {
+    if (view === "trade" && tradeId) {
+      const result = getMockPortfolioTrade(Number(tradeId));
+      if (!result)
+        return NextResponse.json({ error: "Trade not found" }, { status: 404 });
+      return NextResponse.json(result);
+    }
+    if (view === "equity") return NextResponse.json(getMockEquityCurve());
+    if (view === "trades")
+      return NextResponse.json(getMockPortfolioTrades(status ?? undefined));
+    return NextResponse.json(getMockPortfolioOverview());
+  }
 
   // --- Single trade detail ---
   if (view === "trade" && tradeId) {
@@ -29,6 +53,56 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Trade not found" }, { status: 404 });
     }
 
+    // Fetch confidence breakdown from the source analysis if linked
+    let confidenceBreakdown = null;
+    let sourceAnalysis = null;
+    if (trade.sourceAnalysisId) {
+      const [analysis] = await db
+        .select()
+        .from(analyses)
+        .where(eq(analyses.id, trade.sourceAnalysisId));
+      if (analysis) {
+        if (analysis.confidenceBreakdown) {
+          try {
+            confidenceBreakdown = JSON.parse(analysis.confidenceBreakdown);
+          } catch {
+            // ignore malformed JSON
+          }
+        }
+        sourceAnalysis = {
+          id: analysis.id,
+          type: analysis.type,
+          confidence: analysis.confidence,
+          createdAt: analysis.createdAt,
+        };
+      }
+    }
+
+    // Fetch source whale alert if linked
+    let sourceWhale = null;
+    if (trade.sourceWhaleId) {
+      const [whale] = await db
+        .select()
+        .from(whaleAlerts)
+        .where(eq(whaleAlerts.id, trade.sourceWhaleId));
+      if (whale) {
+        sourceWhale = {
+          id: whale.id,
+          ticker: whale.ticker,
+          strike: whale.strike,
+          expiry: whale.expiry,
+          callPut: whale.callPut,
+          premium: whale.premium,
+          volume: whale.volume,
+          openInterest: whale.openInterest,
+          underlyingPrice: whale.underlyingPrice,
+          sentiment: whale.sentiment,
+          qualityScore: whale.qualityScore,
+          detectedAt: whale.detectedAt,
+        };
+      }
+    }
+
     return NextResponse.json({
       trade: {
         ...trade,
@@ -37,6 +111,9 @@ export async function GET(req: NextRequest) {
           ? JSON.parse(trade.geminiReasoning)
           : null,
       },
+      confidenceBreakdown,
+      sourceAnalysis,
+      sourceWhale,
     });
   }
 

@@ -17,6 +17,7 @@ import {
   usePortfolioTrades,
   useEquityCurve,
   usePortfolioTrade,
+  useDeepDive,
 } from "@/hooks/useApiData";
 import { formatCurrency, timeAgo } from "@/lib/utils/formatters";
 import type {
@@ -24,6 +25,10 @@ import type {
   PortfolioStats,
   GeminiTradeDecision,
 } from "@/types/portfolio";
+import type { DeepDiveAnalysis } from "@/types/analysis";
+import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
+import TechnicalChart from "@/components/shared/TechnicalChart";
+import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
 import {
   TrendingUp,
   TrendingDown,
@@ -60,9 +65,19 @@ export default function PortfolioPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Simulated Portfolio
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">
+            Simulated Portfolio
+          </h1>
+          {process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" && (
+            <Badge
+              variant="outline"
+              className="text-xs border-amber-500/50 text-amber-400"
+            >
+              MOCK DATA
+            </Badge>
+          )}
+        </div>
         <p className="text-muted-foreground text-sm">
           AI-managed paper trading account following whale activity and analysis
           signals. Starting balance: $2,000.
@@ -437,6 +452,10 @@ function TradeDetail({
   const { data, isLoading } = usePortfolioTrade(tradeId);
   const [showFullReasoning, setShowFullReasoning] = useState(false);
 
+  // Fetch deep-dive analysis for chart overlays (S/R levels, patterns)
+  const ticker = data?.trade?.ticker;
+  const { data: deepDiveData } = useDeepDive(ticker);
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -459,6 +478,9 @@ function TradeDetail({
   }
 
   const decision = trade.geminiReasoning as GeminiTradeDecision | null;
+  const deepDive = deepDiveData?.analyses?.[0]?.output as
+    | DeepDiveAnalysis
+    | undefined;
   const pnl = trade.pnl ?? 0;
   const pnlPct = trade.pnlPct ?? 0;
   const pnlColor =
@@ -515,6 +537,28 @@ function TradeDetail({
                   </p>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Confidence Breakdown — shows how the AI scored each signal factor */}
+        {data?.confidenceBreakdown && (
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <ConfidenceBreakdownPanel breakdown={data.confidenceBreakdown} />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Price Chart — stock price context with trade strike levels */}
+        {ticker && (
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <TechnicalChart
+                ticker={ticker}
+                supportResistance={deepDive?.support_resistance}
+                technicalPatterns={deepDive?.technical_patterns}
+              />
             </CardContent>
           </Card>
         )}
@@ -617,6 +661,15 @@ function TradeDetail({
           </CardContent>
         </Card>
 
+        {/* Options & Market Context — from deep dive analysis */}
+        {deepDive?.options_context && (
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <OptionsStatsPanel optionsContext={deepDive.options_context} />
+            </CardContent>
+          </Card>
+        )}
+
         {/* Gemini Reasoning */}
         {decision && (
           <Card>
@@ -680,6 +733,149 @@ function TradeDetail({
             </CardContent>
           </Card>
         )}
+
+        {/* Source Signals — trace trade back to whale alert & analysis */}
+        {(data?.sourceWhale || data?.sourceAnalysis) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                Source Signals
+                <Tooltip>
+                  <TooltipTrigger>
+                    <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="text-xs">
+                      Every trade originates from a detected whale alert that
+                      was analyzed by the AI pipeline. This shows the original
+                      signals that led to this trade.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {data.sourceWhale && (
+                <div className="rounded-md border p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-blue-400" />
+                    <span className="text-sm font-medium">
+                      Whale Alert #{data.sourceWhale.id}
+                    </span>
+                    <Badge
+                      variant={
+                        data.sourceWhale.sentiment === "bullish"
+                          ? "default"
+                          : "destructive"
+                      }
+                      className="text-xs"
+                    >
+                      {data.sourceWhale.sentiment}
+                    </Badge>
+                    {data.sourceWhale.qualityScore != null && (
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        Quality: {data.sourceWhale.qualityScore}/100
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">Strike</span>
+                      <p className="font-mono">
+                        ${data.sourceWhale.strike?.toFixed(0) ?? "—"}{" "}
+                        {data.sourceWhale.callPut === "C" ? "Call" : "Put"}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Expiry</span>
+                      <p className="font-mono">
+                        {data.sourceWhale.expiry ?? "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Premium</span>
+                      <p className="font-mono">
+                        {data.sourceWhale.premium != null
+                          ? formatCurrency(data.sourceWhale.premium)
+                          : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Vol / OI</span>
+                      <p className="font-mono">
+                        {data.sourceWhale.volume?.toLocaleString() ?? "—"} /{" "}
+                        {data.sourceWhale.openInterest?.toLocaleString() ?? "—"}
+                      </p>
+                    </div>
+                  </div>
+                  {data.sourceWhale.detectedAt && (
+                    <p className="text-xs text-muted-foreground">
+                      Detected:{" "}
+                      {new Date(data.sourceWhale.detectedAt).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {data.sourceAnalysis && (
+                <div className="rounded-md border p-3 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Target className="h-4 w-4 text-purple-400" />
+                    <span className="text-sm font-medium">
+                      AI Analysis #{data.sourceAnalysis.id}
+                    </span>
+                    <Badge variant="secondary" className="text-xs">
+                      {data.sourceAnalysis.type?.replace(/_/g, " ")}
+                    </Badge>
+                    {data.sourceAnalysis.confidence != null && (
+                      <span className="text-xs text-muted-foreground ml-auto font-mono">
+                        {(data.sourceAnalysis.confidence * 100).toFixed(0)}%
+                        confidence
+                      </span>
+                    )}
+                  </div>
+                  {data.sourceAnalysis.createdAt && (
+                    <p className="text-xs text-muted-foreground">
+                      Generated:{" "}
+                      {new Date(data.sourceAnalysis.createdAt).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Lifecycle Timeline — chronological journey of the trade */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              Trade Lifecycle
+              <Tooltip>
+                <TooltipTrigger>
+                  <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="text-xs">
+                    The full journey of this trade — from the original whale
+                    alert detection, through AI analysis, to entry and (if
+                    closed) exit.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TradeTimeline
+              whaleDetectedAt={data?.sourceWhale?.detectedAt ?? null}
+              analysisCreatedAt={data?.sourceAnalysis?.createdAt ?? null}
+              entryDate={trade.entryDate}
+              exitDate={trade.exitDate ?? null}
+              exitReason={trade.exitReason ?? null}
+              isOpen={isOpen}
+            />
+          </CardContent>
+        </Card>
       </div>
     </TooltipProvider>
   );
@@ -725,4 +921,89 @@ function formatExitReason(reason: string): string {
     insufficient_data: "No Data",
   };
   return map[reason] ?? reason;
+}
+
+function TradeTimeline({
+  whaleDetectedAt,
+  analysisCreatedAt,
+  entryDate,
+  exitDate,
+  exitReason,
+  isOpen,
+}: {
+  whaleDetectedAt: string | null;
+  analysisCreatedAt: string | null;
+  entryDate: string;
+  exitDate: string | null;
+  exitReason: string | null;
+  isOpen: boolean;
+}) {
+  const events: { label: string; time: string; icon: string; color: string }[] =
+    [];
+
+  if (whaleDetectedAt) {
+    events.push({
+      label: "Whale Alert Detected",
+      time: new Date(whaleDetectedAt).toLocaleString(),
+      icon: "🐋",
+      color: "border-blue-500",
+    });
+  }
+  if (analysisCreatedAt) {
+    events.push({
+      label: "AI Analysis Generated",
+      time: new Date(analysisCreatedAt).toLocaleString(),
+      icon: "🤖",
+      color: "border-purple-500",
+    });
+  }
+  events.push({
+    label: "Trade Entered",
+    time: new Date(entryDate).toLocaleString(),
+    icon: "📈",
+    color: "border-emerald-500",
+  });
+  if (!isOpen && exitDate) {
+    events.push({
+      label: `Trade Closed — ${formatExitReason(exitReason ?? "")}`,
+      time: new Date(exitDate).toLocaleString(),
+      icon: "🏁",
+      color:
+        exitReason === "profit_target"
+          ? "border-emerald-500"
+          : "border-red-500",
+    });
+  } else if (isOpen) {
+    events.push({
+      label: "Position Open",
+      time: "Now",
+      icon: "⏳",
+      color: "border-amber-500",
+    });
+  }
+
+  return (
+    <div className="relative space-y-0">
+      {events.map((event, i) => (
+        <div key={i} className="flex gap-3 pb-4 last:pb-0">
+          {/* Vertical line + dot */}
+          <div className="flex flex-col items-center">
+            <div
+              className={`w-6 h-6 rounded-full border-2 ${event.color} bg-background flex items-center justify-center text-xs`}
+            >
+              {event.icon}
+            </div>
+            {i < events.length - 1 && (
+              <div className="w-px flex-1 bg-border min-h-4" />
+            )}
+          </div>
+          {/* Content */}
+          <div className="pt-0.5">
+            <p className="text-sm font-medium">{event.label}</p>
+            <p className="text-xs text-muted-foreground">{event.time}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
