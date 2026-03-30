@@ -6,6 +6,7 @@ import { runAnalysisPipeline } from "@/lib/cron/pipelines/analysis-pipeline";
 import { runSimPipeline } from "@/lib/cron/pipelines/sim-pipeline";
 import { runExitMonitor } from "@/lib/cron/exit-monitor";
 import * as progress from "./pipeline-progress";
+import type { StageResults } from "./pipeline-progress";
 
 let lastRefreshAt: string | null = null;
 let isRunning = false;
@@ -13,19 +14,35 @@ let isRunning = false;
 /**
  * Master pipeline — orchestrates all data ingestion + analysis.
  * Called every 30 minutes by cron and on-demand via /api/cron.
+ *
+ * Story 17.1: Each stage is wrapped in its own try/catch so that
+ * a failure in analysis does not prevent the sim pipeline from running.
  */
 export async function runPipeline(): Promise<{
   status: string;
   timestamp: string;
+  stages: { fetch: string; classify: string; analysis: string; sim: string };
 }> {
   if (isRunning) {
     console.log("[Pipeline] Already running, skipping...");
-    return { status: "skipped", timestamp: lastRefreshAt ?? "never" };
+    return {
+      status: "skipped",
+      timestamp: lastRefreshAt ?? "never",
+      stages: {
+        fetch: "skipped",
+        classify: "skipped",
+        analysis: "skipped",
+        sim: "skipped",
+      },
+    };
   }
 
   isRunning = true;
   const startTime = new Date();
   console.log(`[Pipeline] Starting cycle at ${startTime.toISOString()}`);
+
+  const stages = { fetch: "ok", classify: "ok", analysis: "ok", sim: "ok" };
+  let hadError = false;
 
   progress.init([
     "Fetching data",
@@ -36,49 +53,109 @@ export async function runPipeline(): Promise<{
     "Sim portfolio",
   ]);
 
+  // Clear previous error on new cycle start
+  progress.clearLastError();
+
+  let rawArticles: Awaited<ReturnType<typeof fetchAllNews>> = [];
+
   try {
-    // Step 0: Fetch data (news + whale in parallel)
+    // Stage 1: Fetch data (news + whale in parallel)
     progress.activate(0);
-    const [rawArticles, whaleCount] = await Promise.all([
+    const [articles, whaleCount] = await Promise.all([
       fetchAllNews(),
       runWhalePipeline(),
     ]);
+    rawArticles = articles;
     progress.complete(0);
     console.log(
       `[Pipeline] Phase 1 fetch: ${rawArticles.length} articles, ${whaleCount} whale alerts`,
     );
+  } catch (error) {
+    console.error("[Pipeline] Stage fetch failed:", error);
+    stages.fetch = "error";
+    hadError = true;
+    progress.fail(0);
+    progress.setLastError(
+      "fetch",
+      error instanceof Error ? error.message : "Data fetch failed",
+    );
+  }
 
-    // Step 1: Classify news articles with Gemini
+  try {
+    // Stage 2: Classify news articles with Gemini
     progress.activate(1);
     const newsCount = await classifyAndStoreNews(rawArticles, (done, total) => {
       progress.updateDetail(1, `${done}/${total} batches`);
     });
     progress.complete(1);
     console.log(`[Pipeline] Phase 1 classify: ${newsCount} news events stored`);
+  } catch (error) {
+    console.error("[Pipeline] Stage classify failed:", error);
+    stages.classify = "error";
+    hadError = true;
+    progress.fail(1);
+    progress.setLastError(
+      "classify",
+      error instanceof Error ? error.message : "News classification failed",
+    );
+  }
 
-    // Steps 2-4: Analysis (pipeline updates progress internally)
+  try {
+    // Stage 3-5: Analysis (pipeline updates progress internally)
     const analysisCount = await runAnalysisPipeline();
     console.log(
       `[Pipeline] Phase 2 complete: ${analysisCount} analyses stored`,
     );
+  } catch (error) {
+    console.error("[Pipeline] Stage analysis failed:", error);
+    stages.analysis = "error";
+    hadError = true;
+    // Mark analysis steps as error
+    progress.fail(2);
+    progress.fail(3);
+    progress.fail(4);
+    progress.setLastError(
+      "analysis",
+      error instanceof Error ? error.message : "Analysis pipeline failed",
+    );
+  }
 
-    // Step 5: Sim portfolio (evaluate exits + open new positions)
+  try {
+    // Stage 6: Sim portfolio — ALWAYS runs even if analysis failed
     const simActions = await runSimPipeline();
     console.log(`[Pipeline] Phase 3 sim: ${simActions} actions`);
-
-    lastRefreshAt = new Date().toISOString();
-    const elapsed = Date.now() - startTime.getTime();
-    console.log(`[Pipeline] Cycle complete in ${elapsed}ms`);
-
-    progress.finish();
-    return { status: "ok", timestamp: lastRefreshAt };
   } catch (error) {
-    console.error("[Pipeline] Cycle failed:", error);
-    progress.finishWithError();
-    return { status: "error", timestamp: lastRefreshAt ?? "never" };
-  } finally {
-    isRunning = false;
+    console.error("[Pipeline] Stage sim failed:", error);
+    stages.sim = "error";
+    hadError = true;
+    progress.fail(5);
+    progress.setLastError(
+      "sim",
+      error instanceof Error ? error.message : "Sim pipeline failed",
+    );
   }
+
+  lastRefreshAt = new Date().toISOString();
+  const elapsed = Date.now() - startTime.getTime();
+  console.log(
+    `[Pipeline] Cycle complete in ${elapsed}ms (stages: ${JSON.stringify(stages)})`,
+  );
+
+  progress.setStageResults(stages as StageResults);
+
+  if (hadError) {
+    progress.finishWithError();
+  } else {
+    progress.clearLastError();
+    progress.finish();
+  }
+
+  isRunning = false;
+  return {
+    status: hadError ? "partial" : "ok",
+    timestamp: lastRefreshAt,
+    stages,
+  };
 }
 
 export function getLastRefreshAt(): string | null {

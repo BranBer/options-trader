@@ -47,6 +47,77 @@ const STEP_CROSS_REF = 2;
 const STEP_RECOMMENDATIONS = 3;
 const STEP_DEEP_DIVES = 4;
 
+// Story 17.2 — Reduced input limits for fallback
+const REDUCED_NEWS_LIMIT = 10;
+const REDUCED_WHALE_LIMIT = 15;
+
+/**
+ * Story 17.2 — Cross-reference with fallback: if the full call fails after
+ * retries, attempt a reduced-input call (fewer news/whales, no optional context).
+ */
+async function crossReferenceWithFallback(
+  news: Parameters<typeof crossReferenceAnalysis>[0],
+  whales: Parameters<typeof crossReferenceAnalysis>[1],
+  insiderContextJson?: string,
+  sectorRotationPrompt?: string,
+): Promise<Awaited<ReturnType<typeof crossReferenceAnalysis>>> {
+  try {
+    return await crossReferenceAnalysis(
+      news,
+      whales,
+      insiderContextJson,
+      sectorRotationPrompt,
+    );
+  } catch (fullError) {
+    console.warn(
+      "[AnalysisPipeline] Cross-reference failed with full input, retrying with reduced set",
+    );
+
+    // Reduced input: top news by impact, top whales by quality, no optional context
+    const reducedNews = [...news]
+      .sort((a, b) => b.impact_score - a.impact_score)
+      .slice(0, REDUCED_NEWS_LIMIT);
+    const reducedWhales = [...whales]
+      .sort((a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0))
+      .slice(0, REDUCED_WHALE_LIMIT);
+
+    try {
+      const result = await crossReferenceAnalysis(
+        reducedNews,
+        reducedWhales,
+        undefined, // Strip insider context
+        undefined, // Strip sector rotation context
+      );
+      console.log(
+        `[AnalysisPipeline] Reduced cross-reference succeeded: ${reducedNews.length} news, ${reducedWhales.length} whales → ${result.correlations.length} correlations`,
+      );
+      return result;
+    } catch (reducedError) {
+      console.error(
+        "[AnalysisPipeline] Cross-reference failed with reduced input too:",
+        reducedError instanceof Error ? reducedError.message : reducedError,
+      );
+      // Return empty result so pipeline can continue with prior-cycle data
+      return {
+        correlations: [],
+        uncorrelated_whales: [],
+        summary: "Cross-reference failed with both full and reduced input.",
+        analysis_metadata: {
+          news_events_analyzed: 0,
+          whale_trades_analyzed: 0,
+          correlations_found: 0,
+          timestamp: new Date().toISOString(),
+        },
+      };
+    }
+  }
+}
+
+// Story 17.5 — Track last *successful* pipeline completion, not just cross_reference insertion.
+// This prevents a partial run (cross_reference stored but later stages crash) from
+// making the staleness check skip re-processing on the next cycle.
+let _lastSuccessfulCompletionAt: string | null = null;
+
 /**
  * Analysis Pipeline: Cross-reference → Recommend → Store
  * Runs AFTER news and whale pipelines complete.
@@ -100,22 +171,18 @@ export async function runAnalysisPipeline(): Promise<number> {
     return 0;
   }
 
-  // Staleness check: skip if no new news/whales since last cross-reference run
-  const lastCrossRef = await db
-    .select({ createdAt: analyses.createdAt })
-    .from(analyses)
-    .where(eq(analyses.type, "cross_reference"))
-    .orderBy(desc(analyses.createdAt))
-    .limit(1);
-
-  if (lastCrossRef.length > 0 && lastCrossRef[0].createdAt) {
-    const lastRunTime = lastCrossRef[0].createdAt;
+  // Story 17.5 — Staleness check: use last successful completion timestamp
+  // instead of querying the cross_reference row (which may exist from a failed cycle)
+  if (_lastSuccessfulCompletionAt) {
     const newestNewsTime = recentNews[0]?.createdAt ?? "";
     const newestWhaleTime = recentWhales[0]?.createdAt ?? "";
 
-    if (newestNewsTime <= lastRunTime && newestWhaleTime <= lastRunTime) {
+    if (
+      newestNewsTime <= _lastSuccessfulCompletionAt &&
+      newestWhaleTime <= _lastSuccessfulCompletionAt
+    ) {
       console.log(
-        `[AnalysisPipeline] No new data since last run (${lastRunTime}) — skipping Gemini calls`,
+        `[AnalysisPipeline] No new data since last successful run (${_lastSuccessfulCompletionAt}) — skipping Gemini calls`,
       );
       progress.complete(STEP_CROSS_REF);
       progress.complete(STEP_RECOMMENDATIONS);
@@ -198,7 +265,7 @@ export async function runAnalysisPipeline(): Promise<number> {
     );
   }
 
-  const crossRef = await crossReferenceAnalysis(
+  const crossRef = await crossReferenceWithFallback(
     newsForCorrelation,
     whalesForCorrelation,
     insiderContextJson,
@@ -722,6 +789,9 @@ export async function runAnalysisPipeline(): Promise<number> {
       }
     }
   }
+
+  // Story 17.5 — Mark successful completion so staleness check uses this timestamp
+  _lastSuccessfulCompletionAt = new Date().toISOString();
 
   console.log(`[AnalysisPipeline] Complete: ${stored} analyses stored`);
   return stored;

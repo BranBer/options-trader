@@ -6,7 +6,11 @@ vi.mock("@/lib/cron/pipeline-progress", () => ({
     active: false,
     steps: [{ label: "Test step", status: "done" }],
     startedAt: "2026-03-29T12:00:00Z",
+    lastError: null,
+    stageResults: null,
   })),
+  getLastError: vi.fn(() => null),
+  getStageResults: vi.fn(() => null),
 }));
 
 vi.mock("@/lib/cron/scheduler", () => ({
@@ -31,6 +35,17 @@ vi.mock("@/lib/utils/api-budget", () => ({
   getBudgetSummary: vi.fn(() => ({
     yahoo: { used: 150, budget: 1800, pct: 8 },
     gemini: { used: 25, budget: 1400, pct: 2 },
+  })),
+}));
+
+vi.mock("@/lib/cron/pipelines/sim-pipeline", () => ({
+  getLastRunRejections: vi.fn(() => []),
+}));
+
+vi.mock("@/lib/services/gemini-analyzer", () => ({
+  getTokenUsageStats: vi.fn(() => ({
+    recentCalls: [],
+    byCallType: {},
   })),
 }));
 

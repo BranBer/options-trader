@@ -6,13 +6,31 @@ export interface PipelineStep {
   detail?: string;
 }
 
+export interface PipelineError {
+  stage: string;
+  message: string;
+  timestamp: string;
+}
+
+export interface StageResults {
+  fetch: "ok" | "error" | "pending";
+  classify: "ok" | "error" | "pending";
+  analysis: "ok" | "error" | "pending";
+  sim: "ok" | "error" | "pending";
+}
+
 export interface PipelineProgress {
   active: boolean;
   steps: PipelineStep[];
   startedAt: string | null;
+  lastError: PipelineError | null;
+  stageResults: StageResults | null;
 }
 
-const state: PipelineProgress = {
+let _lastError: PipelineError | null = null;
+let _stageResults: StageResults | null = null;
+
+const state: Omit<PipelineProgress, "lastError" | "stageResults"> = {
   active: false,
   steps: [],
   startedAt: null,
@@ -23,7 +41,29 @@ export function getProgress(): PipelineProgress {
     active: state.active,
     startedAt: state.startedAt,
     steps: state.steps.map((s) => ({ ...s })),
+    lastError: _lastError ? { ..._lastError } : null,
+    stageResults: _stageResults ? { ..._stageResults } : null,
   };
+}
+
+export function setLastError(stage: string, message: string): void {
+  _lastError = { stage, message, timestamp: new Date().toISOString() };
+}
+
+export function clearLastError(): void {
+  _lastError = null;
+}
+
+export function getLastError(): PipelineError | null {
+  return _lastError ? { ..._lastError } : null;
+}
+
+export function setStageResults(results: StageResults): void {
+  _stageResults = { ...results };
+}
+
+export function getStageResults(): StageResults | null {
+  return _stageResults ? { ..._stageResults } : null;
 }
 
 export function init(labels: string[]): void {

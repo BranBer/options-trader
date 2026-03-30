@@ -15,6 +15,7 @@ import {
   Loader2,
   Circle,
   Briefcase,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +39,13 @@ interface PipelineStatus {
   steps: PipelineStep[];
   startedAt: string | null;
   lastRefreshAt: string | null;
+  lastError: { stage: string; message: string; timestamp: string } | null;
+  stageResults: {
+    fetch: string;
+    classify: string;
+    analysis: string;
+    sim: string;
+  } | null;
 }
 
 const navLinks = [
@@ -220,6 +228,36 @@ export default function Navbar() {
               {activeStep.label}
               {activeStep.detail && ` (${activeStep.detail})`}
             </span>
+          )}
+
+          {/* Story 17.6 — Error indicator when a pipeline stage failed */}
+          {!pipelineActive && pipeline?.lastError && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <div className="flex items-center gap-1 text-amber-500" />
+                  }
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  <span className="text-xs hidden sm:inline">Partial</span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="end" className="w-72 p-3">
+                  <p className="text-xs font-semibold mb-1 text-amber-500">
+                    Pipeline Stage Failed
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium">
+                      {pipeline.lastError.stage}
+                    </span>
+                    : {pipeline.lastError.message}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    Sim portfolio ran on prior-cycle data
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
 
           {countdown > 0 && !pipelineActive && (

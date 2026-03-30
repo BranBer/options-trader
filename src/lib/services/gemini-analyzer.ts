@@ -65,6 +65,68 @@ function getGenAI(): GoogleGenerativeAI {
 
 // --- Generic retry helper ---
 
+/**
+ * Token limit audit (Story 17.4):
+ * | Call Type        | maxOutputTokens | Estimated Response | Headroom |
+ * |------------------|-----------------|--------------------|----------|
+ * | classifyNews     | 8,192           | 3,000–5,000        | 40-63%   |
+ * | crossReference   | 16,384          | 8,000–14,000       | 15-51%   |
+ * | recommendation   | 8,192           | 2,000–3,500        | 57-76%   |
+ * | deepDive         | 8,192           | 3,000–5,000        | 39-63%   |
+ * | simTradeEval     | 4,096           | 1,500–2,500        | 39-63%   |
+ */
+
+/** Story 17.4 / 18.2 — Token usage tracking for observability */
+interface TokenUsageRecord {
+  callType: string;
+  outputTokens: number;
+  maxOutputTokens: number;
+  usagePct: number;
+  timestamp: string;
+}
+
+const _tokenUsageLog: TokenUsageRecord[] = [];
+const MAX_TOKEN_LOG_SIZE = 200;
+
+export function getTokenUsageStats(): {
+  recentCalls: TokenUsageRecord[];
+  byCallType: Record<
+    string,
+    { count: number; avgTokens: number; maxTokens: number; avgUsagePct: number }
+  >;
+} {
+  const byCallType: Record<
+    string,
+    { count: number; totalTokens: number; maxTokens: number; totalPct: number }
+  > = {};
+  for (const r of _tokenUsageLog) {
+    const entry = byCallType[r.callType] ?? {
+      count: 0,
+      totalTokens: 0,
+      maxTokens: 0,
+      totalPct: 0,
+    };
+    entry.count++;
+    entry.totalTokens += r.outputTokens;
+    entry.maxTokens = Math.max(entry.maxTokens, r.outputTokens);
+    entry.totalPct += r.usagePct;
+    byCallType[r.callType] = entry;
+  }
+  const summary: Record<
+    string,
+    { count: number; avgTokens: number; maxTokens: number; avgUsagePct: number }
+  > = {};
+  for (const [k, v] of Object.entries(byCallType)) {
+    summary[k] = {
+      count: v.count,
+      avgTokens: Math.round(v.totalTokens / v.count),
+      maxTokens: v.maxTokens,
+      avgUsagePct: Math.round(v.totalPct / v.count),
+    };
+  }
+  return { recentCalls: _tokenUsageLog.slice(-20), byCallType: summary };
+}
+
 async function callGeminiWithRetry<T>(
   modelName: string,
   systemInstruction: string,
@@ -72,12 +134,18 @@ async function callGeminiWithRetry<T>(
   responseSchema: object,
   zodSchema: { parse: (data: unknown) => T },
   options: {
+    callType?: string;
     temperature?: number;
     maxOutputTokens?: number;
     maxRetries?: number;
   } = {},
 ): Promise<T> {
-  const { temperature = 0.1, maxOutputTokens = 8192, maxRetries = 3 } = options;
+  const {
+    callType = "unknown",
+    temperature = 0.1,
+    maxOutputTokens = 8192,
+    maxRetries = 3,
+  } = options;
   const ai = getGenAI();
   const model = ai.getGenerativeModel({
     model: modelName,
@@ -94,11 +162,38 @@ async function callGeminiWithRetry<T>(
     try {
       const result = await model.generateContent(userPrompt);
       const text = result.response.text();
+
+      // Story 17.4 — Log token usage from response metadata
+      const usage = result.response.usageMetadata;
+      const outputTokens = usage?.candidatesTokenCount ?? text.length / 4; // rough estimate if metadata missing
+      const usagePct = Math.round((outputTokens / maxOutputTokens) * 100);
+
+      console.log(
+        `[Gemini] ${callType} response: ${outputTokens} tokens (limit: ${maxOutputTokens}, usage: ${usagePct}%)`,
+      );
+      if (usagePct > 80) {
+        console.warn(
+          `[Gemini] ⚠️ ${callType} response used ${usagePct}% of token limit — consider increasing maxOutputTokens`,
+        );
+      }
+
+      // Track usage for API exposure
+      _tokenUsageLog.push({
+        callType,
+        outputTokens: Math.round(outputTokens),
+        maxOutputTokens,
+        usagePct,
+        timestamp: new Date().toISOString(),
+      });
+      if (_tokenUsageLog.length > MAX_TOKEN_LOG_SIZE) {
+        _tokenUsageLog.splice(0, _tokenUsageLog.length - MAX_TOKEN_LOG_SIZE);
+      }
+
       const parsed = JSON.parse(text);
       return zodSchema.parse(parsed);
     } catch (error) {
       console.error(
-        `[Gemini] Attempt ${attempt + 1}/${maxRetries} failed:`,
+        `[Gemini] ${callType} attempt ${attempt + 1}/${maxRetries} failed:`,
         error instanceof Error ? error.message : error,
       );
       if (attempt === maxRetries - 1) throw error;
@@ -106,7 +201,7 @@ async function callGeminiWithRetry<T>(
       await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
     }
   }
-  throw new Error("Gemini call failed after retries");
+  throw new Error(`Gemini ${callType} call failed after retries`);
 }
 
 // ============================================================
@@ -159,7 +254,7 @@ export async function classifyNews(
           prompt,
           NEWS_CLASSIFIER_RESPONSE_SCHEMA,
           newsClassificationSchema,
-          { temperature: 0.1, maxOutputTokens: 8192 },
+          { callType: "classifyNews", temperature: 0.1, maxOutputTokens: 8192 },
         );
       }),
     );
@@ -222,6 +317,7 @@ interface WhaleAlertForCorrelation {
   volume: number;
   openInterest: number;
   sentiment: string;
+  qualityScore?: number;
 }
 
 export async function crossReferenceAnalysis(
@@ -262,7 +358,7 @@ export async function crossReferenceAnalysis(
     prompt,
     CROSS_REFERENCE_RESPONSE_SCHEMA,
     crossReferenceAnalysisSchema,
-    { temperature: 0.2, maxOutputTokens: 16384 },
+    { callType: "crossReference", temperature: 0.2, maxOutputTokens: 16384 },
   );
 
   console.log(
@@ -335,7 +431,7 @@ export async function generateRecommendation(
     prompt,
     TRADE_ANALYZER_RESPONSE_SCHEMA,
     tradeRecommendationSchema,
-    { temperature: 0.3, maxOutputTokens: 4096 },
+    { callType: "recommendation", temperature: 0.3, maxOutputTokens: 8192 },
   );
 
   console.log(
@@ -472,7 +568,7 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
     prompt,
     DEEP_DIVE_RESPONSE_SCHEMA,
     deepDiveAnalysisSchema,
-    { temperature: 0.25, maxOutputTokens: 4096 },
+    { callType: "deepDive", temperature: 0.25, maxOutputTokens: 8192 },
   );
 
   console.log(
@@ -544,7 +640,7 @@ export async function evaluateTradeForSim(
     prompt,
     SIM_TRADE_EVALUATOR_RESPONSE_SCHEMA,
     geminiTradeDecisionSchema,
-    { temperature: 0.2, maxOutputTokens: 4096 },
+    { callType: "simTradeEval", temperature: 0.2, maxOutputTokens: 4096 },
   );
 
   console.log(
