@@ -64,3 +64,22 @@ export function fail(index: number): void {
 export function finish(): void {
   state.active = false;
 }
+
+/**
+ * Mark all pending/active steps as error, keep the bar visible
+ * for `visibleMs` so the user sees WHAT failed, then deactivate.
+ */
+export function finishWithError(visibleMs = 8000): void {
+  for (const step of state.steps) {
+    if (step.status === "active") {
+      step.status = "error";
+    } else if (step.status === "pending") {
+      step.status = "error";
+      step.detail = "skipped";
+    }
+  }
+  // Keep active so the Navbar shows the error state briefly
+  setTimeout(() => {
+    state.active = false;
+  }, visibleMs);
+}

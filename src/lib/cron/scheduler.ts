@@ -74,7 +74,7 @@ export async function runPipeline(): Promise<{
     return { status: "ok", timestamp: lastRefreshAt };
   } catch (error) {
     console.error("[Pipeline] Cycle failed:", error);
-    progress.finish();
+    progress.finishWithError();
     return { status: "error", timestamp: lastRefreshAt ?? "never" };
   } finally {
     isRunning = false;

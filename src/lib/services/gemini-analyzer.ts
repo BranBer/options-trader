@@ -262,7 +262,7 @@ export async function crossReferenceAnalysis(
     prompt,
     CROSS_REFERENCE_RESPONSE_SCHEMA,
     crossReferenceAnalysisSchema,
-    { temperature: 0.2, maxOutputTokens: 4096 },
+    { temperature: 0.2, maxOutputTokens: 16384 },
   );
 
   console.log(
