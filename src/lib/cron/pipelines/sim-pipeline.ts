@@ -8,8 +8,10 @@ import {
   takePortfolioSnapshot,
   getOrCreatePortfolio,
   getOpenPositionsSummary,
+  validateTradeLegs,
 } from "@/lib/services/sim-engine";
 import { fetchMarketData } from "@/lib/services/market-fetcher";
+import { isMarketOpen } from "@/lib/utils/market-hours";
 import type { TradeRecommendation, DeepDiveAnalysis } from "@/types/analysis";
 import * as progress from "@/lib/cron/pipeline-progress";
 
@@ -17,6 +19,26 @@ const MAX_OPEN_POSITIONS = 5;
 const MIN_CONFIDENCE_FOR_SIM = 0.45;
 const MIN_WHALE_QUALITY = 50;
 const SIM_STEP_INDEX = 5;
+
+/** Story 19.8 — Structured rejection record for observability */
+export interface TradeRejection {
+  ticker: string;
+  reason: string;
+  stage:
+    | "market_hours"
+    | "whale_quality"
+    | "market_data"
+    | "gemini_eval"
+    | "validation"
+    | "position_open";
+  timestamp: string;
+}
+
+/** Rejections from the latest pipeline run, exposed for API / tests */
+let _lastRunRejections: TradeRejection[] = [];
+export function getLastRunRejections(): TradeRejection[] {
+  return _lastRunRejections;
+}
 
 /**
  * Sim Portfolio Pipeline:
@@ -29,6 +51,21 @@ const SIM_STEP_INDEX = 5;
 export async function runSimPipeline(): Promise<number> {
   console.log("[SimPipeline] Starting...");
   progress.activate(SIM_STEP_INDEX, "evaluating positions");
+
+  // Reset rejection log for this run (Story 19.8)
+  _lastRunRejections = [];
+
+  // Story 19.7 — Market hours guard
+  const marketHours = isMarketOpen();
+  if (!marketHours.isOpen && !marketHours.isExtendedHours) {
+    console.log(
+      `[SimPipeline] Market closed (${marketHours.reason}) — skipping new entries, evaluating exits only`,
+    );
+    const closedCount = await evaluateOpenPositions();
+    await takePortfolioSnapshot();
+    progress.complete(SIM_STEP_INDEX);
+    return closedCount;
+  }
 
   // Step 1: Check existing open positions for exit
   const closedCount = await evaluateOpenPositions();
@@ -159,6 +196,12 @@ export async function runSimPipeline(): Promise<number> {
         console.log(
           `[SimPipeline] Skipping ${recData.ticker}: whale quality ${quality} < ${MIN_WHALE_QUALITY}`,
         );
+        _lastRunRejections.push({
+          ticker: recData.ticker,
+          reason: `Whale quality ${quality} < ${MIN_WHALE_QUALITY}`,
+          stage: "whale_quality",
+          timestamp: new Date().toISOString(),
+        });
         continue;
       }
 
@@ -206,6 +249,31 @@ export async function runSimPipeline(): Promise<number> {
       });
 
       if (decision.should_enter) {
+        // Validate trade legs before opening
+        const validation = validateTradeLegs(
+          decision.adjusted_entry.legs,
+          marketData.price,
+          portfolio.balance,
+          decision.adjusted_entry.strategy_name,
+        );
+
+        if (!validation.valid) {
+          console.warn(
+            `[SimPipeline] VALIDATION REJECT: ${recData.ticker} — ${validation.reason}`,
+          );
+          _lastRunRejections.push({
+            ticker: recData.ticker,
+            reason: validation.reason ?? "Unknown validation failure",
+            stage: "validation",
+            timestamp: new Date().toISOString(),
+          });
+          continue;
+        }
+
+        for (const w of validation.warnings) {
+          console.warn(`[SimPipeline] Warning: ${recData.ticker} — ${w}`);
+        }
+
         const tradeId = await openPosition({
           ticker: recData.ticker,
           decision,
@@ -228,7 +296,7 @@ export async function runSimPipeline(): Promise<number> {
   }
 
   console.log(
-    `[SimPipeline] Complete: ${closedCount} closed, ${newPositions} opened`,
+    `[SimPipeline] Complete: ${closedCount} closed, ${newPositions} opened, ${_lastRunRejections.length} rejected`,
   );
 
   // Step 8: Take equity snapshot

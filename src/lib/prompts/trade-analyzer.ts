@@ -14,6 +14,7 @@ Rules:
 9. During FOMC decision week (3 days before/after a meeting), expect elevated volatility. Widen stop-losses and prefer straddles/strangles over directional bets.
 10. The IV-RV spread indicates whether options are over- or under-priced relative to actual stock movement. A spread > 10% means options are expensive — favor credit strategies (selling premium). A spread < -5% means options are cheap — favor debit strategies (buying premium).
 11. OI walls are large concentrations of open interest where market-maker hedging creates price magnets or barriers. Max pain is the price at which open option positions lose the most — price often gravitates here near expiration.
+12. CRITICAL: All recommended expiry dates MUST be in the future and at least 7 calendar days from today's date. Never recommend options that have already expired or expire within the next week.
 
 Always respond with the exact JSON schema provided.`;
 
@@ -46,7 +47,13 @@ export function buildTradeAnalyzerPrompt(
   },
   sectorRotationContext?: string,
 ): string {
+  const todayStr = new Date().toLocaleDateString("en-CA", {
+    timeZone: "America/New_York",
+  });
   let prompt = `Based on the following correlated whale trade, news event, and market data, generate a structured trade recommendation.
+
+Today's Date: ${todayStr}
+IMPORTANT: All option expiry dates must be after ${todayStr}. Do not recommend expired options.
 
 Correlation:
 ${correlationJson}

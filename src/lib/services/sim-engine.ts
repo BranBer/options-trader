@@ -38,6 +38,332 @@ export async function getOrCreatePortfolio() {
 }
 
 // ============================================================
+// Trade leg validation
+// ============================================================
+
+/**
+ * Get the current date string in Eastern Time (YYYY-MM-DD).
+ * Options expire at 4:00 PM ET, so we use the ET date for comparison.
+ */
+function getTodayET(now: Date = new Date()): string {
+  return now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+/**
+ * Count trading (business) days between two dates, excluding weekends.
+ */
+function tradingDaysBetween(from: Date, to: Date): number {
+  let count = 0;
+  const current = new Date(from);
+  current.setDate(current.getDate() + 1); // start counting from next day
+  while (current <= to) {
+    const day = current.getDay();
+    if (day !== 0 && day !== 6) count++;
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
+}
+
+export interface TradeValidationResult {
+  valid: boolean;
+  reason?: string;
+  warnings: string[];
+}
+
+const MIN_DTE = 2;
+const MAX_OTM_PCT = 0.5;
+
+// Known multi-leg strategy patterns for Story 19.5
+const VERTICAL_SPREAD_NAMES = [
+  "bull call spread",
+  "bear call spread",
+  "bull put spread",
+  "bear put spread",
+  "call credit spread",
+  "call debit spread",
+  "put credit spread",
+  "put debit spread",
+  "vertical spread",
+];
+
+const IRON_CONDOR_NAMES = ["iron condor"];
+const STRADDLE_STRANGLE_NAMES = [
+  "straddle",
+  "strangle",
+  "long straddle",
+  "long strangle",
+];
+const SINGLE_LEG_NAMES = [
+  "long call",
+  "long put",
+  "naked call",
+  "naked put",
+  "cash secured put",
+];
+
+/**
+ * Story 19.5 — Validate that strategy legs are internally consistent.
+ * E.g. a vertical spread should have exactly 2 legs of the same type and expiry.
+ */
+export function validateStrategyConsistency(
+  strategyName: string,
+  legs: SimLeg[],
+): TradeValidationResult {
+  const warnings: string[] = [];
+  const name = strategyName.toLowerCase().trim();
+
+  // --- Vertical spreads ---
+  if (VERTICAL_SPREAD_NAMES.some((s) => name.includes(s))) {
+    if (legs.length !== 2) {
+      return {
+        valid: false,
+        reason: `Vertical spread "${strategyName}" requires exactly 2 legs, got ${legs.length}`,
+        warnings,
+      };
+    }
+    const actions = new Set(legs.map((l) => l.action));
+    if (actions.size !== 2) {
+      return {
+        valid: false,
+        reason: `Vertical spread must have one buy and one sell leg`,
+        warnings,
+      };
+    }
+    const types = new Set(legs.map((l) => l.type));
+    if (types.size !== 2) {
+      // same type = good for vertical spread
+    } else {
+      return {
+        valid: false,
+        reason: `Vertical spread legs must be the same type (both calls or both puts), got mixed`,
+        warnings,
+      };
+    }
+    const expiries = new Set(legs.map((l) => l.expiry));
+    if (expiries.size > 1) {
+      return {
+        valid: false,
+        reason: `Vertical spread legs must share the same expiry date`,
+        warnings,
+      };
+    }
+    const strikes = new Set(legs.map((l) => l.strike));
+    if (strikes.size < 2) {
+      return {
+        valid: false,
+        reason: `Vertical spread legs must have different strikes`,
+        warnings,
+      };
+    }
+  }
+
+  // --- Iron condor ---
+  else if (IRON_CONDOR_NAMES.some((s) => name.includes(s))) {
+    if (legs.length !== 4) {
+      return {
+        valid: false,
+        reason: `Iron condor requires exactly 4 legs, got ${legs.length}`,
+        warnings,
+      };
+    }
+    const calls = legs.filter((l) => l.type === "call");
+    const puts = legs.filter((l) => l.type === "put");
+    if (calls.length !== 2 || puts.length !== 2) {
+      return {
+        valid: false,
+        reason: `Iron condor requires 2 calls and 2 puts`,
+        warnings,
+      };
+    }
+    const expiries = new Set(legs.map((l) => l.expiry));
+    if (expiries.size > 1) {
+      return {
+        valid: false,
+        reason: `Iron condor legs must share the same expiry date`,
+        warnings,
+      };
+    }
+  }
+
+  // --- Straddle / Strangle ---
+  else if (STRADDLE_STRANGLE_NAMES.some((s) => name.includes(s))) {
+    if (legs.length !== 2) {
+      return {
+        valid: false,
+        reason: `${strategyName} requires exactly 2 legs, got ${legs.length}`,
+        warnings,
+      };
+    }
+    const types = new Set(legs.map((l) => l.type));
+    if (types.size !== 2) {
+      return {
+        valid: false,
+        reason: `${strategyName} requires one call and one put`,
+        warnings,
+      };
+    }
+    const expiries = new Set(legs.map((l) => l.expiry));
+    if (expiries.size > 1) {
+      return {
+        valid: false,
+        reason: `${strategyName} legs must share the same expiry date`,
+        warnings,
+      };
+    }
+    if (name.includes("straddle")) {
+      const strikes = new Set(legs.map((l) => l.strike));
+      if (strikes.size > 1) {
+        return {
+          valid: false,
+          reason: `Straddle legs must have the same strike`,
+          warnings,
+        };
+      }
+    }
+  }
+
+  // --- Single-leg ---
+  else if (SINGLE_LEG_NAMES.some((s) => name.includes(s))) {
+    if (legs.length !== 1) {
+      warnings.push(`"${strategyName}" expected 1 leg but got ${legs.length}`);
+    }
+  }
+
+  // Unrecognized strategy — allow through with warning
+  else {
+    warnings.push(
+      `Unrecognized strategy "${strategyName}" — skipping consistency check`,
+    );
+  }
+
+  return { valid: true, warnings };
+}
+
+/**
+ * Validate trade legs before opening a position.
+ * Checks: expiry validity, minimum DTE, strike reasonableness, premium sanity, strategy consistency.
+ */
+export function validateTradeLegs(
+  legs: SimLeg[],
+  currentPrice: number,
+  portfolioBalance: number,
+  strategyName?: string,
+  now: Date = new Date(),
+): TradeValidationResult {
+  const warnings: string[] = [];
+  const todayStr = getTodayET(now);
+
+  // --- Expiry validation ---
+  for (const leg of legs) {
+    const expDate = new Date(leg.expiry);
+    if (isNaN(expDate.getTime())) {
+      return {
+        valid: false,
+        reason: `Invalid expiry date format: "${leg.expiry}"`,
+        warnings,
+      };
+    }
+    // Normalize to date-only string for comparison (YYYY-MM-DD)
+    const legDateStr = expDate.toISOString().split("T")[0];
+    if (legDateStr <= todayStr) {
+      return {
+        valid: false,
+        reason: `Leg expires in the past or today: ${leg.action.toUpperCase()} ${leg.type.toUpperCase()} $${leg.strike} exp ${leg.expiry}`,
+        warnings,
+      };
+    }
+  }
+
+  // --- Minimum DTE validation ---
+  const today = new Date(todayStr + "T16:00:00-05:00"); // 4 PM ET
+  const dtePerLeg = legs.map((leg) => {
+    const expDate = new Date(leg.expiry + "T16:00:00-05:00");
+    return { leg, dte: tradingDaysBetween(today, expDate) };
+  });
+
+  const allBelowMinDTE = dtePerLeg.every((l) => l.dte < MIN_DTE);
+  if (allBelowMinDTE) {
+    return {
+      valid: false,
+      reason: `All legs expire within ${MIN_DTE} trading days — excessive theta risk`,
+      warnings,
+    };
+  }
+  const lowDTELegs = dtePerLeg.filter((l) => l.dte < MIN_DTE);
+  if (lowDTELegs.length > 0) {
+    for (const { leg, dte } of lowDTELegs) {
+      warnings.push(
+        `Low DTE: ${leg.action.toUpperCase()} ${leg.type.toUpperCase()} $${leg.strike} exp ${leg.expiry} has only ${dte} trading day(s)`,
+      );
+    }
+  }
+
+  // --- Strike reasonableness ---
+  // Determine if a spread (has both buy and sell of same type)
+  const hasBuyCall = legs.some((l) => l.action === "buy" && l.type === "call");
+  const hasSellCall = legs.some(
+    (l) => l.action === "sell" && l.type === "call",
+  );
+  const hasBuyPut = legs.some((l) => l.action === "buy" && l.type === "put");
+  const hasSellPut = legs.some((l) => l.action === "sell" && l.type === "put");
+  const isCallSpread = hasBuyCall && hasSellCall;
+  const isPutSpread = hasBuyPut && hasSellPut;
+
+  for (const leg of legs) {
+    const isPartOfSpread =
+      (leg.type === "call" && isCallSpread) ||
+      (leg.type === "put" && isPutSpread);
+    // For spread protective (buy) legs, relax the check
+    if (isPartOfSpread && leg.action === "buy") continue;
+
+    const otmPct =
+      leg.type === "call"
+        ? (leg.strike - currentPrice) / currentPrice
+        : (currentPrice - leg.strike) / currentPrice;
+
+    if (otmPct > MAX_OTM_PCT) {
+      return {
+        valid: false,
+        reason: `Strike $${leg.strike} is ${(otmPct * 100).toFixed(0)}% OTM from current price $${currentPrice.toFixed(2)} — unreasonably far out`,
+        warnings,
+      };
+    }
+  }
+
+  // --- Premium sanity ---
+  for (const leg of legs) {
+    if (leg.premium <= 0 && leg.action === "buy") {
+      return {
+        valid: false,
+        reason: `Buy leg has non-positive premium: $${leg.premium} for ${leg.type.toUpperCase()} $${leg.strike}`,
+        warnings,
+      };
+    }
+    if (leg.premium > currentPrice * 0.5) {
+      return {
+        valid: false,
+        reason: `Leg premium $${leg.premium.toFixed(2)} exceeds 50% of stock price $${currentPrice.toFixed(2)}`,
+        warnings,
+      };
+    }
+  }
+
+  // --- Strategy consistency (Story 19.5) ---
+  if (strategyName) {
+    const consistency = validateStrategyConsistency(strategyName, legs);
+    if (!consistency.valid)
+      return {
+        valid: false,
+        reason: consistency.reason,
+        warnings: [...warnings, ...consistency.warnings],
+      };
+    warnings.push(...consistency.warnings);
+  }
+
+  return { valid: true, warnings };
+}
+
+// ============================================================
 // Open a new position
 // ============================================================
 
