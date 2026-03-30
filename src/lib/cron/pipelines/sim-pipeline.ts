@@ -1,5 +1,11 @@
 import { db } from "@/lib/db/client";
-import { analyses, simTrades, whaleAlerts } from "@/lib/db/schema";
+import {
+  analyses,
+  marketSnapshots,
+  simEvaluations,
+  simTrades,
+  whaleAlerts,
+} from "@/lib/db/schema";
 import { desc, gte, eq, and } from "drizzle-orm";
 import { evaluateTradeForSim } from "@/lib/services/gemini-analyzer";
 import {
@@ -11,14 +17,31 @@ import {
   validateTradeLegs,
 } from "@/lib/services/sim-engine";
 import { fetchMarketData } from "@/lib/services/market-fetcher";
+import { fetchEarningsDate } from "@/lib/services/market-fetcher";
 import { isMarketOpen } from "@/lib/utils/market-hours";
+import { getEarningsProximity } from "@/lib/utils/earnings-proximity";
+import { getSector, areCorrelated } from "@/lib/utils/sector-map";
 import type { TradeRecommendation, DeepDiveAnalysis } from "@/types/analysis";
+import type { GeminiTradeDecision } from "@/types/portfolio";
 import * as progress from "@/lib/cron/pipeline-progress";
 
 const MAX_OPEN_POSITIONS = 5;
 const MIN_CONFIDENCE_FOR_SIM = 0.45;
 const MIN_WHALE_QUALITY = 50;
 const SIM_STEP_INDEX = 5;
+
+// Story 20.1 — IV environment thresholds
+const IV_RV_WARN_THRESHOLD = 0.15;
+const IV_RV_REJECT_THRESHOLD = 0.25;
+const IV_RV_CREDIT_WARN_THRESHOLD = -0.1;
+
+// Story 20.2 — Earnings proximity thresholds
+const EARNINGS_BLOCK_DAYS = 3;
+const EARNINGS_WARN_DAYS = 7;
+
+// Story 20.3 — Concentration limits
+const MAX_POSITIONS_PER_SECTOR = 2;
+const MAX_SAME_DIRECTION = 3;
 
 /** Story 19.8 — Structured rejection record for observability */
 export interface TradeRejection {
@@ -30,6 +53,9 @@ export interface TradeRejection {
     | "market_data"
     | "gemini_eval"
     | "validation"
+    | "iv_environment"
+    | "earnings_proximity"
+    | "concentration"
     | "position_open";
   timestamp: string;
 }
@@ -38,6 +64,238 @@ export interface TradeRejection {
 let _lastRunRejections: TradeRejection[] = [];
 export function getLastRunRejections(): TradeRejection[] {
   return _lastRunRejections;
+}
+
+// ============================================================
+// Story 20.1 — IV Environment Fitness Check
+// ============================================================
+
+export interface IVCheckResult {
+  allowed: boolean;
+  reason?: string;
+  warning?: string;
+}
+
+/**
+ * Checks whether the IV environment is appropriate for the proposed strategy.
+ * Debit strategies in high-IV → warn/reject. Credit strategies in low-IV → warn.
+ */
+export async function checkIVEnvironment(
+  ticker: string,
+  netPremium: number,
+): Promise<IVCheckResult> {
+  // Fetch the most recent market snapshot with IV-RV spread data
+  const [snapshot] = await db
+    .select({ ivRvSpread: marketSnapshots.ivRvSpread })
+    .from(marketSnapshots)
+    .where(eq(marketSnapshots.ticker, ticker))
+    .orderBy(desc(marketSnapshots.capturedAt))
+    .limit(1);
+
+  const spread = snapshot?.ivRvSpread;
+  if (spread == null) {
+    return { allowed: true }; // No data — skip check
+  }
+
+  const isDebit = netPremium > 0;
+
+  if (isDebit) {
+    if (spread > IV_RV_REJECT_THRESHOLD) {
+      return {
+        allowed: false,
+        reason: `Options extremely overpriced (IV-RV spread ${spread.toFixed(2)}) — debit strategy inadvisable`,
+      };
+    }
+    if (spread > IV_RV_WARN_THRESHOLD) {
+      return {
+        allowed: true,
+        warning: `IV CAUTION: ${ticker} debit strategy in high-IV environment (IV-RV spread: ${spread.toFixed(2)})`,
+      };
+    }
+  } else {
+    // Credit strategy
+    if (spread < IV_RV_CREDIT_WARN_THRESHOLD) {
+      return {
+        allowed: true,
+        warning: `IV CAUTION: ${ticker} credit strategy in low-IV environment (IV-RV spread: ${spread.toFixed(2)})`,
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+// ============================================================
+// Story 20.2 — Earnings Proximity Entry Block
+// ============================================================
+
+export interface EarningsCheckResult {
+  allowed: boolean;
+  reason?: string;
+  warning?: string;
+}
+
+/**
+ * Checks if earnings are imminent and the strategy is at risk of IV crush.
+ * Debit strategies within 3 days of earnings → reject (unless catalyst exception).
+ * Credit strategies → allow (they benefit from IV crush).
+ */
+export async function checkEarningsProximity(
+  ticker: string,
+  netPremium: number,
+  deepDiveConfidence?: number,
+): Promise<EarningsCheckResult> {
+  let earningsDate: string | null = null;
+  try {
+    earningsDate = await fetchEarningsDate(ticker);
+  } catch {
+    return { allowed: true }; // Can't fetch → skip
+  }
+
+  const proximity = getEarningsProximity(earningsDate);
+
+  if (proximity.daysToEarnings == null || proximity.daysToEarnings < 0) {
+    return { allowed: true }; // No upcoming earnings or already passed
+  }
+
+  const isDebit = netPremium > 0;
+  const days = proximity.daysToEarnings;
+
+  // 7-day warning window (all strategies)
+  let warning: string | undefined;
+  if (days <= EARNINGS_WARN_DAYS) {
+    warning = `Earnings proximity warning: ${ticker} reports in ${days} days`;
+  }
+
+  // 3-day block window (debit only)
+  if (days <= EARNINGS_BLOCK_DAYS && isDebit) {
+    // Exception: deep dive with high confidence explicitly factoring in earnings
+    if (deepDiveConfidence != null && deepDiveConfidence > 0.7) {
+      return {
+        allowed: true,
+        warning: `Earnings in ${days} days — allowed due to high confidence (${deepDiveConfidence.toFixed(2)}) catalyst override`,
+      };
+    }
+    return {
+      allowed: false,
+      reason: `Earnings in ${days} days — debit strategy will likely lose to IV crush`,
+    };
+  }
+
+  return { allowed: true, warning };
+}
+
+// ============================================================
+// Story 20.3 — Position Concentration Guard
+// ============================================================
+
+export interface ConcentrationCheckResult {
+  allowed: boolean;
+  reason?: string;
+  warnings: string[];
+}
+
+/**
+ * Checks that opening a new position won't over-concentrate the portfolio
+ * in a single sector or direction.
+ */
+export function checkConcentration(
+  ticker: string,
+  direction: string,
+  openPositions: Array<{ ticker: string; direction: string }>,
+): ConcentrationCheckResult {
+  const warnings: string[] = [];
+  const newSector = getSector(ticker);
+
+  // Sector concentration check
+  if (newSector !== "Unknown") {
+    const sameSectorSameDirection = openPositions.filter(
+      (p) => getSector(p.ticker) === newSector && p.direction === direction,
+    );
+    if (sameSectorSameDirection.length >= MAX_POSITIONS_PER_SECTOR) {
+      return {
+        allowed: false,
+        reason: `Sector concentration: already hold ${sameSectorSameDirection.length} ${direction} positions in ${newSector}`,
+        warnings,
+      };
+    }
+  }
+
+  // Correlation check (warning-only)
+  for (const pos of openPositions) {
+    if (areCorrelated(ticker, pos.ticker)) {
+      warnings.push(
+        `Correlation warning: ${ticker} is highly correlated with open position ${pos.ticker}`,
+      );
+    }
+  }
+
+  // Direction concentration check
+  const sameDirectionCount = openPositions.filter(
+    (p) => p.direction === direction,
+  ).length;
+  if (sameDirectionCount >= MAX_SAME_DIRECTION) {
+    return {
+      allowed: false,
+      reason: `Directional concentration: already hold ${sameDirectionCount} ${direction} positions (max ${MAX_SAME_DIRECTION})`,
+      warnings,
+    };
+  }
+
+  // All-same-direction warning
+  if (openPositions.length >= 2) {
+    const directions = new Set(openPositions.map((p) => p.direction));
+    if (directions.size === 1 && directions.has(direction)) {
+      warnings.push(
+        `All ${openPositions.length} open positions are ${direction} — adding another increases directional exposure`,
+      );
+    }
+  }
+
+  return { allowed: true, warnings };
+}
+
+// ============================================================
+// Story 20.4 — Audit trail helper
+// ============================================================
+
+async function recordEvaluation(params: {
+  ticker: string;
+  decision: GeminiTradeDecision;
+  confidence: number | null;
+  whaleQualityScore: number | null;
+  currentPrice: number;
+  portfolioBalance: number;
+  sourceAnalysisId: number | null;
+  rejectionGate?: string;
+  rejectionReason?: string;
+}) {
+  try {
+    await db.insert(simEvaluations).values({
+      ticker: params.ticker,
+      shouldEnter: params.decision.should_enter,
+      reasoning: params.decision.reasoning,
+      strategyName: params.decision.should_enter
+        ? params.decision.adjusted_entry.strategy_name
+        : null,
+      legs: params.decision.should_enter
+        ? JSON.stringify(params.decision.adjusted_entry.legs)
+        : null,
+      positionSize: params.decision.position_size_dollars,
+      netPremium: params.decision.should_enter
+        ? params.decision.adjusted_entry.net_premium
+        : null,
+      confidence: params.confidence,
+      whaleQualityScore: params.whaleQualityScore,
+      currentPrice: params.currentPrice,
+      portfolioBalance: params.portfolioBalance,
+      sourceAnalysisId: params.sourceAnalysisId,
+      rejectionGate: params.rejectionGate ?? null,
+      rejectionReason: params.rejectionReason ?? null,
+    });
+  } catch (err) {
+    console.error("[SimPipeline] Failed to record evaluation:", err);
+  }
 }
 
 /**
@@ -116,7 +374,15 @@ export async function runSimPipeline(): Promise<number> {
     .select({ sourceAnalysisId: simTrades.sourceAnalysisId })
     .from(simTrades)
     .where(gte(simTrades.createdAt, since));
-  const evaluatedIdSet = new Set(evaluatedIds.map((r) => r.sourceAnalysisId));
+  // Story 20.4 — also skip recommendations already logged in audit trail
+  const auditedIds = await db
+    .select({ sourceAnalysisId: simEvaluations.sourceAnalysisId })
+    .from(simEvaluations)
+    .where(gte(simEvaluations.createdAt, since));
+  const evaluatedIdSet = new Set([
+    ...evaluatedIds.map((r) => r.sourceAnalysisId),
+    ...auditedIds.map((r) => r.sourceAnalysisId),
+  ]);
   const unevaluatedRecs = recentRecs.filter((r) => !evaluatedIdSet.has(r.id));
 
   if (unevaluatedRecs.length < recentRecs.length) {
@@ -267,11 +533,125 @@ export async function runSimPipeline(): Promise<number> {
             stage: "validation",
             timestamp: new Date().toISOString(),
           });
+          await recordEvaluation({
+            ticker: recData.ticker,
+            decision,
+            confidence: rec.confidence,
+            whaleQualityScore: quality,
+            currentPrice: marketData.price,
+            portfolioBalance: portfolio.balance,
+            sourceAnalysisId: rec.id,
+            rejectionGate: "validation",
+            rejectionReason: validation.reason,
+          });
           continue;
         }
 
         for (const w of validation.warnings) {
           console.warn(`[SimPipeline] Warning: ${recData.ticker} — ${w}`);
+        }
+
+        // Story 20.1 — IV Environment Fitness Check
+        const ivCheck = await checkIVEnvironment(
+          recData.ticker,
+          decision.adjusted_entry.net_premium,
+        );
+        if (!ivCheck.allowed) {
+          console.warn(
+            `[SimPipeline] IV REJECT: ${recData.ticker} — ${ivCheck.reason}`,
+          );
+          _lastRunRejections.push({
+            ticker: recData.ticker,
+            reason: ivCheck.reason!,
+            stage: "iv_environment",
+            timestamp: new Date().toISOString(),
+          });
+          await recordEvaluation({
+            ticker: recData.ticker,
+            decision,
+            confidence: rec.confidence,
+            whaleQualityScore: quality,
+            currentPrice: marketData.price,
+            portfolioBalance: portfolio.balance,
+            sourceAnalysisId: rec.id,
+            rejectionGate: "iv_environment",
+            rejectionReason: ivCheck.reason,
+          });
+          continue;
+        }
+        if (ivCheck.warning) {
+          console.warn(`[SimPipeline] ${ivCheck.warning}`);
+        }
+
+        // Story 20.2 — Earnings Proximity Entry Block
+        const earningsCheck = await checkEarningsProximity(
+          recData.ticker,
+          decision.adjusted_entry.net_premium,
+          rec.confidence ?? undefined,
+        );
+        if (!earningsCheck.allowed) {
+          console.warn(
+            `[SimPipeline] EARNINGS REJECT: ${recData.ticker} — ${earningsCheck.reason}`,
+          );
+          _lastRunRejections.push({
+            ticker: recData.ticker,
+            reason: earningsCheck.reason!,
+            stage: "earnings_proximity",
+            timestamp: new Date().toISOString(),
+          });
+          await recordEvaluation({
+            ticker: recData.ticker,
+            decision,
+            confidence: rec.confidence,
+            whaleQualityScore: quality,
+            currentPrice: marketData.price,
+            portfolioBalance: portfolio.balance,
+            sourceAnalysisId: rec.id,
+            rejectionGate: "earnings_proximity",
+            rejectionReason: earningsCheck.reason,
+          });
+          continue;
+        }
+        if (earningsCheck.warning) {
+          console.warn(
+            `[SimPipeline] Earnings: ${recData.ticker} — ${earningsCheck.warning}`,
+          );
+        }
+
+        // Story 20.3 — Position Concentration Guard
+        const concentrationCheck = checkConcentration(
+          recData.ticker,
+          recData.direction,
+          openTrades.map((t) => ({
+            ticker: t.ticker,
+            direction: t.direction,
+          })),
+        );
+        if (!concentrationCheck.allowed) {
+          console.warn(
+            `[SimPipeline] CONCENTRATION REJECT: ${recData.ticker} — ${concentrationCheck.reason}`,
+          );
+          _lastRunRejections.push({
+            ticker: recData.ticker,
+            reason: concentrationCheck.reason!,
+            stage: "concentration",
+            timestamp: new Date().toISOString(),
+          });
+          await recordEvaluation({
+            ticker: recData.ticker,
+            decision,
+            confidence: rec.confidence,
+            whaleQualityScore: quality,
+            currentPrice: marketData.price,
+            portfolioBalance: portfolio.balance,
+            sourceAnalysisId: rec.id,
+            rejectionGate: "concentration",
+            rejectionReason: concentrationCheck.reason,
+          });
+          continue;
+        }
+        for (const w of concentrationCheck.warnings) {
+          console.warn(`[SimPipeline] Concentration: ${recData.ticker} — ${w}`);
         }
 
         const tradeId = await openPosition({
@@ -288,7 +668,31 @@ export async function runSimPipeline(): Promise<number> {
             SIM_STEP_INDEX,
             `opened ${newPositions} new position(s)`,
           );
+
+          // Story 20.4 — Log accepted evaluation
+          await recordEvaluation({
+            ticker: recData.ticker,
+            decision,
+            confidence: rec.confidence,
+            whaleQualityScore: quality,
+            currentPrice: marketData.price,
+            portfolioBalance: portfolio.balance,
+            sourceAnalysisId: rec.id,
+          });
         }
+      } else {
+        // Story 20.4 — Log Gemini rejection
+        await recordEvaluation({
+          ticker: recData.ticker,
+          decision,
+          confidence: rec.confidence,
+          whaleQualityScore: quality,
+          currentPrice: marketData.price,
+          portfolioBalance: portfolio.balance,
+          sourceAnalysisId: rec.id,
+          rejectionGate: "gemini_eval",
+          rejectionReason: decision.reasoning,
+        });
       }
     } catch (err) {
       console.error("[SimPipeline] Error evaluating recommendation:", err);

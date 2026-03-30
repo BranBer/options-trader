@@ -4,10 +4,11 @@ import {
   simTrades,
   simPortfolio,
   simPortfolioSnapshots,
+  simEvaluations,
   analyses,
   whaleAlerts,
 } from "@/lib/db/schema";
-import { desc, eq, asc } from "drizzle-orm";
+import { desc, eq, asc, gte } from "drizzle-orm";
 import {
   getMockPortfolioOverview,
   getMockPortfolioTrades,
@@ -114,6 +115,48 @@ export async function GET(req: NextRequest) {
       confidenceBreakdown,
       sourceAnalysis,
       sourceWhale,
+    });
+  }
+
+  // --- Story 20.4: Evaluations audit trail ---
+  if (view === "evaluations") {
+    const filterStatus = params.get("status"); // 'accepted' | 'rejected' | null (all)
+
+    let query = db.select().from(simEvaluations);
+
+    if (filterStatus === "accepted") {
+      query = query.where(eq(simEvaluations.shouldEnter, true)) as typeof query;
+    } else if (filterStatus === "rejected") {
+      query = query.where(
+        eq(simEvaluations.shouldEnter, false),
+      ) as typeof query;
+    }
+
+    const evals = await query
+      .orderBy(desc(simEvaluations.createdAt))
+      .limit(limit);
+
+    // Compute acceptance rate for the last 24h
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const recentEvals = await db
+      .select({
+        shouldEnter: simEvaluations.shouldEnter,
+      })
+      .from(simEvaluations)
+      .where(gte(simEvaluations.createdAt, since24h));
+
+    const total = recentEvals.length;
+    const accepted = recentEvals.filter((e) => e.shouldEnter).length;
+    const acceptanceRate = total > 0 ? (accepted / total) * 100 : null;
+
+    return NextResponse.json({
+      evaluations: evals,
+      stats: {
+        total24h: total,
+        accepted24h: accepted,
+        rejected24h: total - accepted,
+        acceptanceRate24h: acceptanceRate,
+      },
     });
   }
 

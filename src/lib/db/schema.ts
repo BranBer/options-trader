@@ -128,3 +128,33 @@ export const simPortfolioSnapshots = sqliteTable("sim_portfolio_snapshots", {
   snapshotDate: text("snapshot_date").notNull(),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+// ============================================================
+// Epic 20 — Gemini Decision Audit Trail (Story 20.4)
+// ============================================================
+
+export const simEvaluations = sqliteTable(
+  "sim_evaluations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ticker: text("ticker").notNull(),
+    shouldEnter: integer("should_enter", { mode: "boolean" }).notNull(),
+    reasoning: text("reasoning"),
+    strategyName: text("strategy_name"),
+    legs: text("legs"), // JSON array of SimLeg
+    positionSize: real("position_size"),
+    netPremium: real("net_premium"),
+    confidence: real("confidence"), // composite confidence from analysis
+    whaleQualityScore: integer("whale_quality_score"),
+    currentPrice: real("current_price"),
+    portfolioBalance: real("portfolio_balance"),
+    sourceAnalysisId: integer("source_analysis_id"),
+    rejectionGate: text("rejection_gate"), // which gate rejected: 'iv_environment' | 'earnings_proximity' | 'concentration' | 'validation' | null
+    rejectionReason: text("rejection_reason"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_sim_evaluations_ticker").on(table.ticker),
+    index("idx_sim_evaluations_should_enter").on(table.shouldEnter),
+  ],
+);
