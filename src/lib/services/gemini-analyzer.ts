@@ -72,7 +72,7 @@ function getGenAI(): GoogleGenerativeAI {
  * | classifyNews     | 8,192           | 3,000–5,000        | 40-63%   |
  * | crossReference   | 16,384          | 8,000–14,000       | 15-51%   |
  * | recommendation   | 8,192           | 2,000–3,500        | 57-76%   |
- * | deepDive         | 8,192           | 3,000–5,000        | 39-63%   |
+ * | deepDive         | 16,384          | 5,000–8,000        | 51-69%   |
  * | simTradeEval     | 4,096           | 1,500–2,500        | 39-63%   |
  */
 
@@ -568,7 +568,7 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
     prompt,
     DEEP_DIVE_RESPONSE_SCHEMA,
     deepDiveAnalysisSchema,
-    { callType: "deepDive", temperature: 0.25, maxOutputTokens: 8192 },
+    { callType: "deepDive", temperature: 0.25, maxOutputTokens: 16384 },
   );
 
   console.log(
