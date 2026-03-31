@@ -10,7 +10,7 @@ import {
   fetchOptionsChain,
 } from "@/lib/services/market-fetcher";
 import type {
-  GeminiTradeDecision,
+  TradeDecision,
   SimLeg,
   PositionValuation,
 } from "@/types/portfolio";
@@ -369,7 +369,7 @@ export function validateTradeLegs(
 
 interface OpenPositionInput {
   ticker: string;
-  decision: GeminiTradeDecision;
+  decision: TradeDecision;
   sourceAnalysisId?: number;
   sourceWhaleId?: number;
 }

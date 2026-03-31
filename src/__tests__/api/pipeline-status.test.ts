@@ -34,7 +34,7 @@ vi.mock("@/lib/cron/exit-monitor", () => ({
 vi.mock("@/lib/utils/api-budget", () => ({
   getBudgetSummary: vi.fn(() => ({
     yahoo: { used: 150, budget: 1800, pct: 8 },
-    gemini: { used: 25, budget: 1400, pct: 2 },
+    finnhub: { used: 10, budget: 250, pct: 4 },
   })),
 }));
 
@@ -42,7 +42,7 @@ vi.mock("@/lib/cron/pipelines/sim-pipeline", () => ({
   getLastRunRejections: vi.fn(() => []),
 }));
 
-vi.mock("@/lib/services/gemini-analyzer", () => ({
+vi.mock("@/lib/services/llm-analyzer", () => ({
   getTokenUsageStats: vi.fn(() => ({
     recentCalls: [],
     byCallType: {},

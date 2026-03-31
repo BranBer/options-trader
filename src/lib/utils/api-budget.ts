@@ -16,7 +16,6 @@ const DEFAULT_BUDGETS: Record<string, number> = {
   finnhub: 250,
   polygon: 4,
   marketaux: 80,
-  gemini: 1400,
 };
 
 function getUTCDate(): string {

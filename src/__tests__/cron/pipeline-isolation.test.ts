@@ -55,7 +55,7 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
 
   it("continues to sim pipeline when analysis throws", async () => {
     mockRunAnalysisPipeline.mockRejectedValue(
-      new Error("Gemini cross-reference failed"),
+      new Error("LLM cross-reference failed"),
     );
 
     const result = await runPipeline();
@@ -104,14 +104,14 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
   });
 
   it("sets lastError on pipeline-progress when a stage fails", async () => {
-    mockRunAnalysisPipeline.mockRejectedValue(new Error("Gemini down"));
+    mockRunAnalysisPipeline.mockRejectedValue(new Error("LLM down"));
 
     await runPipeline();
 
     const prog = progress.getProgress();
     expect(prog.lastError).not.toBeNull();
     expect(prog.lastError!.stage).toBe("analysis");
-    expect(prog.lastError!.message).toBe("Gemini down");
+    expect(prog.lastError!.message).toBe("LLM down");
   });
 
   it("clears lastError when all stages succeed", async () => {
@@ -152,7 +152,7 @@ describe("Story 17.3 — Sim Pipeline Prior-Cycle Independence", () => {
 
   it("sim pipeline runs when analysis pipeline throws", async () => {
     mockRunAnalysisPipeline.mockRejectedValue(
-      new Error("Gemini quota exceeded"),
+      new Error("LLM quota exceeded"),
     );
 
     const result = await runPipeline();

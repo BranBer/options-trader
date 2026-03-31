@@ -20,7 +20,7 @@ Rules:
 
 Your response determines whether real (simulated) capital is allocated. Be conservative and thoughtful.`;
 
-// ---------- Gemini Response Schema ----------
+// ---------- LLM Response Schema ----------
 
 export const SIM_TRADE_EVALUATOR_RESPONSE_SCHEMA = {
   type: "object",

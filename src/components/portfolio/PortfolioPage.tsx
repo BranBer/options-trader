@@ -23,7 +23,7 @@ import { formatCurrency, timeAgo } from "@/lib/utils/formatters";
 import type {
   SimTrade,
   PortfolioStats,
-  GeminiTradeDecision,
+  TradeDecision,
 } from "@/types/portfolio";
 import type { DeepDiveAnalysis } from "@/types/analysis";
 import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
@@ -477,7 +477,7 @@ function TradeDetail({
     );
   }
 
-  const decision = trade.geminiReasoning as GeminiTradeDecision | null;
+  const decision = trade.geminiReasoning as TradeDecision | null;
   const deepDive = deepDiveData?.analyses?.[0]?.output as
     | DeepDiveAnalysis
     | undefined;

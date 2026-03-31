@@ -8,7 +8,7 @@ import { getLastRefreshAt } from "@/lib/cron/scheduler";
 import { getExitMonitorStatus } from "@/lib/cron/exit-monitor";
 import { getBudgetSummary } from "@/lib/utils/api-budget";
 import { getLastRunRejections } from "@/lib/cron/pipelines/sim-pipeline";
-import { getTokenUsageStats } from "@/lib/services/gemini-analyzer";
+import { getTokenUsageStats } from "@/lib/services/llm-analyzer";
 
 export const dynamic = "force-dynamic";
 

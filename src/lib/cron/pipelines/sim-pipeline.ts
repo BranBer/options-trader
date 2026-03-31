@@ -7,7 +7,7 @@ import {
   whaleAlerts,
 } from "@/lib/db/schema";
 import { desc, gte, eq, and } from "drizzle-orm";
-import { evaluateTradeForSim } from "@/lib/services/gemini-analyzer";
+import { evaluateTradeForSim } from "@/lib/services/llm-analyzer";
 import {
   openPosition,
   evaluateOpenPositions,
@@ -22,7 +22,7 @@ import { isMarketOpen } from "@/lib/utils/market-hours";
 import { getEarningsProximity } from "@/lib/utils/earnings-proximity";
 import { getSector, areCorrelated } from "@/lib/utils/sector-map";
 import type { TradeRecommendation, DeepDiveAnalysis } from "@/types/analysis";
-import type { GeminiTradeDecision } from "@/types/portfolio";
+import type { TradeDecision } from "@/types/portfolio";
 import * as progress from "@/lib/cron/pipeline-progress";
 
 const MAX_OPEN_POSITIONS = 5;
@@ -51,7 +51,7 @@ export interface TradeRejection {
     | "market_hours"
     | "whale_quality"
     | "market_data"
-    | "gemini_eval"
+    | "llm_eval"
     | "validation"
     | "iv_environment"
     | "earnings_proximity"
@@ -261,7 +261,7 @@ export function checkConcentration(
 
 async function recordEvaluation(params: {
   ticker: string;
-  decision: GeminiTradeDecision;
+  decision: TradeDecision;
   confidence: number | null;
   whaleQualityScore: number | null;
   currentPrice: number;
@@ -302,7 +302,7 @@ async function recordEvaluation(params: {
  * Sim Portfolio Pipeline:
  * 1. Evaluate open positions for exit (profit target / stop loss / time)
  * 2. Find new trade recommendations with high enough confidence
- * 3. Ask Gemini to evaluate each for the sim portfolio
+ * 3. Ask LLM to evaluate each for the sim portfolio
  * 4. Open positions for accepted trades
  * 5. Take equity snapshot
  */
@@ -478,7 +478,7 @@ export async function runSimPipeline(): Promise<number> {
       // Get deep dive context if available
       const deepDive = deepDiveMap.get(recData.ticker);
 
-      // Ask Gemini to evaluate
+      // Ask LLM to evaluate
       const decision = await evaluateTradeForSim({
         ticker: recData.ticker,
         currentPrice: marketData.price,
@@ -681,7 +681,7 @@ export async function runSimPipeline(): Promise<number> {
           });
         }
       } else {
-        // Story 20.4 — Log Gemini rejection
+        // Story 20.4 — Log LLM rejection
         await recordEvaluation({
           ticker: recData.ticker,
           decision,
@@ -690,7 +690,7 @@ export async function runSimPipeline(): Promise<number> {
           currentPrice: marketData.price,
           portfolioBalance: portfolio.balance,
           sourceAnalysisId: rec.id,
-          rejectionGate: "gemini_eval",
+          rejectionGate: "llm_eval",
           rejectionReason: decision.reasoning,
         });
       }

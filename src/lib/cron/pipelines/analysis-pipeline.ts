@@ -9,7 +9,7 @@ import {
   crossReferenceAnalysis,
   generateRecommendation,
   generateDeepDive,
-} from "@/lib/services/gemini-analyzer";
+} from "@/lib/services/llm-analyzer";
 import {
   fetchMarketData,
   fetchOptionsChain,

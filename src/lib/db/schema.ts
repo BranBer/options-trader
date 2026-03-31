@@ -92,7 +92,7 @@ export const analyses = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     type: text("type"), // 'news_classification' | 'cross_reference' | 'trade_recommendation'
     inputRefs: text("input_refs"), // JSON: references to news_event ids, whale_alert ids
-    output: text("output"), // full Gemini structured JSON
+    output: text("output"), // full LLM structured JSON
     confidence: real("confidence"),
     confidenceBreakdown: text("confidence_breakdown"), // JSON CompositeConfidenceBreakdown
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
@@ -122,7 +122,7 @@ export const simTrades = sqliteTable("sim_trades", {
   pnlPct: real("pnl_pct"),
   status: text("status").notNull().default("open"), // 'open' | 'closed' | 'expired'
   exitReason: text("exit_reason"), // 'profit_target' | 'stop_loss' | 'time_exit' | 'expiry'
-  geminiReasoning: text("gemini_reasoning"), // JSON GeminiTradeDecision
+  geminiReasoning: text("gemini_reasoning"), // JSON TradeDecision
   profitTargetPct: real("profit_target_pct"),
   stopLossPct: real("stop_loss_pct"),
   timeExitDays: integer("time_exit_days"),

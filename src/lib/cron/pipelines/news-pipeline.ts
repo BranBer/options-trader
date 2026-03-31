@@ -1,5 +1,5 @@
 import { fetchAllNews } from "@/lib/services/news-fetcher";
-import { classifyNews } from "@/lib/services/gemini-analyzer";
+import { classifyNews } from "@/lib/services/llm-analyzer";
 import { db } from "@/lib/db/client";
 import { newsEvents } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
@@ -40,12 +40,12 @@ export async function classifyAndStoreNews(
 
   if (newArticles.length === 0) {
     console.log(
-      "[NewsPipeline] All articles already classified, skipping Gemini call",
+      "[NewsPipeline] All articles already classified, skipping LLM call",
     );
     return 0;
   }
 
-  // Classify with Gemini (only new articles)
+  // Classify with LLM (only new articles)
   const classification = await classifyNews(newArticles, onBatchProgress);
   if (classification.articles.length === 0) {
     console.log("[NewsPipeline] No market-relevant articles found");

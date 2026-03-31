@@ -54,7 +54,7 @@ vi.mock("@/lib/utils/market-hours", () => ({
   })),
 }));
 
-vi.mock("@/lib/services/gemini-analyzer", () => ({
+vi.mock("@/lib/services/llm-analyzer", () => ({
   evaluateTradeForSim: vi.fn(),
 }));
 

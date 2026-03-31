@@ -6,7 +6,7 @@ import type {
   SimTrade,
   PortfolioStats,
   EquityCurvePoint,
-  GeminiTradeDecision,
+  TradeDecision,
   SimLeg,
 } from "@/types/portfolio";
 
@@ -86,7 +86,7 @@ const nvdaBullCallSpread: SimTrade = {
     ],
     educational_summary:
       "We're betting NVDA stock will go up. We bought a cheaper call option and sold a more expensive one above it. This limits both our profit and loss. Think of it like renting a section of NVDA's upside between $950 and $980. We paid $8.50 for this 'rent' and can make up to $21.50 if NVDA goes above $980.",
-  } as GeminiTradeDecision,
+  } as TradeDecision,
   profitTargetPct: 80,
   stopLossPct: 50,
   timeExitDays: 14,
@@ -199,7 +199,7 @@ const spyIronCondor: SimTrade = {
     ],
     educational_summary:
       "We're betting SPY will stay between $560 and $585. We collected premium by selling options on both sides and bought insurance further out. If SPY stays in this range, all options expire worthless and we keep the $2.30 credit. It's like selling insurance on a calm day — we profit from nothing happening.",
-  } as GeminiTradeDecision,
+  } as TradeDecision,
   profitTargetPct: 65,
   stopLossPct: 100,
   timeExitDays: 21,
@@ -280,7 +280,7 @@ const aaplPutCreditSpread: SimTrade = {
     ],
     educational_summary:
       "We're betting AAPL stays above $215. We sold an expensive put and bought a cheaper one below it for protection. We collected $1.70 upfront. If AAPL stays above $215, we keep the full credit. The risk is if AAPL drops below $210, where we'd lose up to $3.30. This trade profits from stability or upward movement.",
-  } as GeminiTradeDecision,
+  } as TradeDecision,
   profitTargetPct: 60,
   stopLossPct: 100,
   timeExitDays: 21,
@@ -345,7 +345,7 @@ const tslaLongCall: SimTrade = {
     ],
     educational_summary:
       "We bought a single call option on TSLA betting the stock goes above $280. This is the simplest options trade — we pay $12 upfront (premium) and profit if TSLA rises enough to cover our cost. The most we can lose is the $12 we paid. We set a 5-day time limit because this is a catalyst-driven trade.",
-  } as GeminiTradeDecision,
+  } as TradeDecision,
   profitTargetPct: 100,
   stopLossPct: 50,
   timeExitDays: 5,
@@ -427,7 +427,7 @@ const amdBullCallSpread: SimTrade = {
     ],
     educational_summary:
       "We're betting AMD goes up over the next month. We bought a call at $165 and sold one at $180 to reduce our cost from $8.50 to $5.30. If AMD reaches $180 by May 2, our spread is worth $15, giving us a profit of $9.70. If AMD stays below $165, we lose our $5.30 investment.",
-  } as GeminiTradeDecision,
+  } as TradeDecision,
   profitTargetPct: 80,
   stopLossPct: 50,
   timeExitDays: 30,
@@ -508,7 +508,7 @@ const metaPutCreditSpread: SimTrade = {
     ],
     educational_summary:
       "We're betting META stays above $580. We sold a put at $580 (collecting premium) and bought insurance at $570 in case we're wrong. We received $3.50 upfront. If META stays above $580 by May 9, we keep all of it. The worst case is a $6.50 loss if META drops below $570. This trade profits from META being stable or going up.",
-  } as GeminiTradeDecision,
+  } as TradeDecision,
   profitTargetPct: 50,
   stopLossPct: 100,
   timeExitDays: 35,

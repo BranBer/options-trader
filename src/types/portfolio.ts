@@ -26,8 +26,8 @@ export const simLegSchema = z.object({
 });
 export type SimLeg = z.infer<typeof simLegSchema>;
 
-// --- Gemini Trade Decision ---
-export const geminiTradeDecisionSchema = z.object({
+// --- Trade Decision ---
+export const tradeDecisionSchema = z.object({
   should_enter: z.boolean(),
   reasoning: z.string(),
   position_size_dollars: z.number(),
@@ -44,7 +44,7 @@ export const geminiTradeDecisionSchema = z.object({
   risk_notes: z.array(z.string()),
   educational_summary: z.string(), // plain-English explanation for beginners
 });
-export type GeminiTradeDecision = z.infer<typeof geminiTradeDecisionSchema>;
+export type TradeDecision = z.infer<typeof tradeDecisionSchema>;
 
 // --- Sim Trade (DB row mapped) ---
 export interface SimTrade {
@@ -63,7 +63,7 @@ export interface SimTrade {
   pnlPct: number | null;
   status: SimTradeStatus;
   exitReason: string | null;
-  geminiReasoning: GeminiTradeDecision | null;
+  geminiReasoning: TradeDecision | null;
   profitTargetPct: number | null;
   stopLossPct: number | null;
   timeExitDays: number | null;

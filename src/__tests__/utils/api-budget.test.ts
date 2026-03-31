@@ -37,8 +37,8 @@ describe("api-budget", () => {
       expect(getBudget("yahoo")).toBe(1800);
     });
 
-    it("returns known budget for gemini", () => {
-      expect(getBudget("gemini")).toBe(1400);
+    it("returns known budget for finnhub", () => {
+      expect(getBudget("finnhub")).toBe(250);
     });
 
     it("returns default 1000 for unknown providers", () => {
@@ -81,7 +81,6 @@ describe("api-budget", () => {
       expect(summary).toHaveProperty("finnhub");
       expect(summary).toHaveProperty("polygon");
       expect(summary).toHaveProperty("marketaux");
-      expect(summary).toHaveProperty("gemini");
     });
 
     it("each provider summary has correct shape", () => {

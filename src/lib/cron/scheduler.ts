@@ -82,7 +82,7 @@ export async function runPipeline(): Promise<{
   }
 
   try {
-    // Stage 2: Classify news articles with Gemini
+    // Stage 2: Classify news articles with LLM
     progress.activate(1);
     const newsCount = await classifyAndStoreNews(rawArticles, (done, total) => {
       progress.updateDetail(1, `${done}/${total} batches`);
@@ -163,13 +163,13 @@ export function getLastRefreshAt(): string | null {
 }
 
 /**
- * Start the 30-minute cron job and 5-minute exit monitor.
+ * Start the 10-minute cron job and 5-minute exit monitor.
  * Should be called once during server initialization.
  */
 export function startScheduler() {
-  console.log("[Scheduler] Starting 30-minute cron job...");
+  console.log("[Scheduler] Starting 10-minute cron job...");
 
-  cron.schedule("*/30 * * * *", async () => {
+  cron.schedule("*/10 * * * *", async () => {
     console.log("[Scheduler] Cron trigger");
     await runPipeline();
   });
