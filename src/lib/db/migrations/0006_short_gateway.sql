@@ -1,0 +1,11 @@
+ALTER TABLE `whale_alerts` ADD `delta` real;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `gamma` real;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `theta` real;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `vega` real;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `implied_volatility` real;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `break_even_price` real;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `inferred_sentiment` text;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `sentiment_confidence` text;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `intent_hint` text;--> statement-breakpoint
+ALTER TABLE `whale_alerts` ADD `dedup_date` text;--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_whale_dedup` ON `whale_alerts` (`ticker`,`strike`,`expiry`,`call_put`,`dedup_date`);

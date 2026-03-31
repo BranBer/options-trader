@@ -4,6 +4,7 @@ import {
   integer,
   real,
   index,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
@@ -30,22 +31,46 @@ export const newsEvents = sqliteTable(
   (table) => [index("idx_news_events_url").on(table.url)],
 );
 
-export const whaleAlerts = sqliteTable("whale_alerts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  ticker: text("ticker").notNull(),
-  strike: real("strike"),
-  expiry: text("expiry"),
-  callPut: text("call_put"), // 'C' | 'P'
-  premium: real("premium"),
-  volume: integer("volume"),
-  openInterest: integer("open_interest"),
-  underlyingPrice: real("underlying_price"),
-  sentiment: text("sentiment"), // 'bullish' | 'bearish'
-  source: text("source"),
-  detectedAt: text("detected_at"),
-  qualityScore: integer("quality_score"),
-  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
-});
+export const whaleAlerts = sqliteTable(
+  "whale_alerts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ticker: text("ticker").notNull(),
+    strike: real("strike"),
+    expiry: text("expiry"),
+    callPut: text("call_put"), // 'C' | 'P'
+    premium: real("premium"),
+    volume: integer("volume"),
+    openInterest: integer("open_interest"),
+    underlyingPrice: real("underlying_price"),
+    sentiment: text("sentiment"), // 'bullish' | 'bearish'
+    source: text("source"),
+    detectedAt: text("detected_at"),
+    qualityScore: integer("quality_score"),
+    // Epic 21 — Greeks & sentiment inference fields
+    delta: real("delta"),
+    gamma: real("gamma"),
+    theta: real("theta"),
+    vega: real("vega"),
+    impliedVolatility: real("implied_volatility"),
+    breakEvenPrice: real("break_even_price"),
+    inferredSentiment: text("inferred_sentiment"), // 'strongly_bullish' | 'bullish' | 'neutral' | 'bearish' | 'strongly_bearish'
+    sentimentConfidence: text("sentiment_confidence"), // 'high' | 'medium' | 'low'
+    intentHint: text("intent_hint"), // 'speculative' | 'institutional' | 'hedge' | 'unknown'
+    // Dedup: date-only key derived from detectedAt, set by pipeline
+    dedupDate: text("dedup_date"), // 'YYYY-MM-DD' for composite unique constraint
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_whale_dedup").on(
+      table.ticker,
+      table.strike,
+      table.expiry,
+      table.callPut,
+      table.dedupDate,
+    ),
+  ],
+);
 
 export const marketSnapshots = sqliteTable("market_snapshots", {
   id: integer("id").primaryKey({ autoIncrement: true }),

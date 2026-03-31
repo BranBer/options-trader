@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db/client";
 import { whaleAlerts, marketSnapshots } from "@/lib/db/schema";
 import { desc, gte, eq, and } from "drizzle-orm";
+import { computeMarketPulse } from "@/lib/utils/sentiment-inference";
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
@@ -29,7 +30,10 @@ export async function GET(req: NextRequest) {
 
   // Fetch latest market snapshot for each unique ticker in results
   const uniqueTickers = [...new Set(alerts.map((a) => a.ticker))];
-  const marketMap = new Map<string, { price: number | null; dayChangePct: number | null }>();
+  const marketMap = new Map<
+    string,
+    { price: number | null; dayChangePct: number | null }
+  >();
   for (const t of uniqueTickers) {
     const [snap] = await db
       .select()
@@ -37,7 +41,8 @@ export async function GET(req: NextRequest) {
       .where(eq(marketSnapshots.ticker, t))
       .orderBy(desc(marketSnapshots.capturedAt))
       .limit(1);
-    if (snap) marketMap.set(t, { price: snap.price, dayChangePct: snap.dayChangePct });
+    if (snap)
+      marketMap.set(t, { price: snap.price, dayChangePct: snap.dayChangePct });
   }
 
   const enriched = alerts.map((a) => ({
@@ -46,5 +51,13 @@ export async function GET(req: NextRequest) {
     dayChangePct: marketMap.get(a.ticker)?.dayChangePct ?? null,
   }));
 
-  return NextResponse.json({ alerts: enriched });
+  // Compute market pulse from all alerts in window (not just limited/filtered)
+  const allAlerts = await db
+    .select()
+    .from(whaleAlerts)
+    .where(gte(whaleAlerts.detectedAt, since));
+
+  const pulse = computeMarketPulse(allAlerts);
+
+  return NextResponse.json({ alerts: enriched, marketPulse: pulse });
 }

@@ -14,6 +14,13 @@ export const whaleAlertSchema = z.object({
   source: z.string(),
   detectedAt: z.string(),
   qualityScore: z.number().int().min(0).max(100).optional(),
+  // Epic 21 — Greeks & enrichment
+  delta: z.number().optional(),
+  gamma: z.number().optional(),
+  theta: z.number().optional(),
+  vega: z.number().optional(),
+  impliedVolatility: z.number().optional(),
+  breakEvenPrice: z.number().optional(),
 });
 
 export type WhaleAlert = z.infer<typeof whaleAlertSchema>;

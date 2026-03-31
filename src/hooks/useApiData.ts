@@ -38,6 +38,30 @@ export interface WhaleAlert {
   currentPrice: number | null;
   dayChangePct: number | null;
   qualityScore: number | null;
+  // Epic 21 fields
+  delta: number | null;
+  impliedVolatility: number | null;
+  breakEvenPrice: number | null;
+  inferredSentiment: string | null;
+  sentimentConfidence: string | null;
+  intentHint: string | null;
+}
+
+export interface MarketPulse {
+  totalAlerts: number;
+  callCount: number;
+  putCount: number;
+  pcRatio: number;
+  callPremium: number;
+  putPremium: number;
+  netSentimentScore: number;
+  sentimentLabel: string;
+  topBearishSignals: Array<{
+    ticker: string;
+    strike: number;
+    premium: number;
+    type: string;
+  }>;
 }
 
 export interface ConfidenceFactor {
@@ -88,7 +112,7 @@ export function useWhaleAlerts(params?: {
   if (params?.sentiment) sp.set("sentiment", params.sentiment);
   if (params?.limit) sp.set("limit", String(params.limit));
 
-  return useQuery<{ alerts: WhaleAlert[] }>({
+  return useQuery<{ alerts: WhaleAlert[]; marketPulse: MarketPulse }>({
     queryKey: ["whaleAlerts", params],
     queryFn: async () => {
       const res = await fetch(`/api/whales?${sp.toString()}`);

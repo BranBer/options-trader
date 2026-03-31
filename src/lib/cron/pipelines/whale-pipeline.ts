@@ -8,8 +8,10 @@ import {
 import { db } from "@/lib/db/client";
 import { whaleAlerts, marketSnapshots } from "@/lib/db/schema";
 import { scoreWhaleQuality } from "@/lib/utils/whale-quality";
+import { inferSentiment } from "@/lib/utils/sentiment-inference";
 import { classifyRotation } from "@/lib/utils/sector-rotation";
 import type { SectorRotationContext } from "@/lib/utils/sector-rotation";
+import { sql } from "drizzle-orm";
 
 /**
  * Whale Pipeline: Fetch whale alerts → Enrich with market data → Store
@@ -115,26 +117,68 @@ export async function runWhalePipeline(): Promise<number> {
     console.warn("[WhalePipeline] Sector fetch failed (non-critical):", err);
   }
 
-  // Step 5: Enrich and store whale alerts
+  // Step 5: Enrich and store whale alerts (upsert — dedup by contract+date)
   let stored = 0;
   for (const alert of alerts) {
     const market = marketMap.get(alert.ticker);
     const quality = scoreWhaleQuality(alert, market?.price);
+    const sentimentResult = inferSentiment(alert, market?.price);
+    const dedupDate = alert.detectedAt
+      ? alert.detectedAt.slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
     try {
-      await db.insert(whaleAlerts).values({
-        ticker: alert.ticker,
-        strike: alert.strike,
-        expiry: alert.expiry,
-        callPut: alert.callPut,
-        premium: alert.premium,
-        volume: alert.volume,
-        openInterest: alert.openInterest,
-        underlyingPrice: market?.price ?? alert.underlyingPrice ?? null,
-        sentiment: alert.sentiment,
-        source: alert.source,
-        detectedAt: alert.detectedAt,
-        qualityScore: quality,
-      });
+      await db
+        .insert(whaleAlerts)
+        .values({
+          ticker: alert.ticker,
+          strike: alert.strike,
+          expiry: alert.expiry,
+          callPut: alert.callPut,
+          premium: alert.premium,
+          volume: alert.volume,
+          openInterest: alert.openInterest,
+          underlyingPrice: market?.price ?? alert.underlyingPrice ?? null,
+          sentiment: alert.sentiment,
+          source: alert.source,
+          detectedAt: alert.detectedAt,
+          qualityScore: quality,
+          delta: alert.delta ?? null,
+          gamma: alert.gamma ?? null,
+          theta: alert.theta ?? null,
+          vega: alert.vega ?? null,
+          impliedVolatility: alert.impliedVolatility ?? null,
+          breakEvenPrice: alert.breakEvenPrice ?? null,
+          inferredSentiment: sentimentResult.inferred,
+          sentimentConfidence: sentimentResult.confidence,
+          intentHint: sentimentResult.intent,
+          dedupDate,
+        })
+        .onConflictDoUpdate({
+          target: [
+            whaleAlerts.ticker,
+            whaleAlerts.strike,
+            whaleAlerts.expiry,
+            whaleAlerts.callPut,
+            whaleAlerts.dedupDate,
+          ],
+          set: {
+            premium: sql`excluded.premium`,
+            volume: sql`excluded.volume`,
+            openInterest: sql`excluded.open_interest`,
+            underlyingPrice: sql`excluded.underlying_price`,
+            qualityScore: sql`excluded.quality_score`,
+            detectedAt: sql`excluded.detected_at`,
+            delta: sql`excluded.delta`,
+            gamma: sql`excluded.gamma`,
+            theta: sql`excluded.theta`,
+            vega: sql`excluded.vega`,
+            impliedVolatility: sql`excluded.implied_volatility`,
+            breakEvenPrice: sql`excluded.break_even_price`,
+            inferredSentiment: sql`excluded.inferred_sentiment`,
+            sentimentConfidence: sql`excluded.sentiment_confidence`,
+            intentHint: sql`excluded.intent_hint`,
+          },
+        });
       stored++;
     } catch (error) {
       console.warn(

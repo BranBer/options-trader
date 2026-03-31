@@ -98,6 +98,7 @@ interface PolygonOptionSnapshot {
     vega: number;
   };
   implied_volatility?: number;
+  break_even_price?: number;
 }
 
 /**
@@ -173,6 +174,12 @@ export async function fetchPolygonOptions(
             snap.details.contract_type === "call" ? "bullish" : "bearish",
           source: "polygon",
           detectedAt: new Date().toISOString(),
+          delta: snap.greeks?.delta,
+          gamma: snap.greeks?.gamma,
+          theta: snap.greeks?.theta,
+          vega: snap.greeks?.vega,
+          impliedVolatility: snap.implied_volatility,
+          breakEvenPrice: snap.break_even_price,
         });
       }
 

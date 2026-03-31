@@ -43,6 +43,13 @@
       "when": 1774905692698,
       "tag": "0005_brief_thunderbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1774968017774,
+      "tag": "0006_short_gateway",
+      "breakpoints": true
     }
   ]
 }

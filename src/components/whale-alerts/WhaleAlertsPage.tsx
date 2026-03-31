@@ -35,6 +35,7 @@ import {
 } from "@/lib/utils/formatters";
 import WhaleAlertDetail from "./WhaleAlertDetail";
 import WhaleAlertFilters, { type WhaleFilters } from "./WhaleAlertFilters";
+import MarketPulseBar from "./MarketPulseBar";
 
 export default function WhaleAlertsPage() {
   const [filters, setFilters] = useState<WhaleFilters>({});
@@ -48,6 +49,7 @@ export default function WhaleAlertsPage() {
   });
 
   const alerts = data?.alerts ?? [];
+  const marketPulse = data?.marketPulse;
 
   const handleRowKeyDown = (
     event: KeyboardEvent<HTMLTableRowElement>,
@@ -69,6 +71,8 @@ export default function WhaleAlertsPage() {
       </div>
 
       <WhaleAlertFilters filters={filters} onChange={setFilters} />
+
+      {marketPulse && <MarketPulseBar pulse={marketPulse} />}
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Table */}
@@ -183,17 +187,7 @@ export default function WhaleAlertsPage() {
                               : "â€”"}
                           </TableCell>
                           <TableCell>
-                            <span
-                              className={
-                                alert.sentiment === "bullish"
-                                  ? "text-emerald-400"
-                                  : alert.sentiment === "bearish"
-                                    ? "text-red-400"
-                                    : "text-muted-foreground"
-                              }
-                            >
-                              {alert.sentiment ?? "â€”"}
-                            </span>
+                            <SentimentBadge alert={alert} />
                           </TableCell>
                           <TableCell className="text-center">
                             {alert.qualityScore != null ? (
@@ -245,5 +239,64 @@ function QualityBadge({ score }: { score: number }) {
     <Badge variant={variant} className={`text-xs ${color}`}>
       {score}
     </Badge>
+  );
+}
+
+const sentimentConfig: Record<
+  string,
+  { label: string; color: string; icon: typeof TrendingUp }
+> = {
+  strongly_bullish: {
+    label: "Strong Bull",
+    color: "text-emerald-400",
+    icon: TrendingUp,
+  },
+  bullish: { label: "Bullish", color: "text-emerald-300", icon: TrendingUp },
+  neutral: { label: "Neutral", color: "text-muted-foreground", icon: Minus },
+  bearish: { label: "Bearish", color: "text-red-300", icon: TrendingDown },
+  strongly_bearish: {
+    label: "Strong Bear",
+    color: "text-red-400",
+    icon: TrendingDown,
+  },
+};
+
+const intentLabels: Record<string, string> = {
+  speculative: "Spec",
+  institutional: "Inst",
+  hedge: "Hedge",
+};
+
+function SentimentBadge({ alert }: { alert: WhaleAlert }) {
+  const key = alert.inferredSentiment ?? alert.sentiment ?? "";
+  const config = sentimentConfig[key] ?? {
+    label:
+      alert.sentiment === "bullish"
+        ? "Bullish"
+        : alert.sentiment === "bearish"
+          ? "Bearish"
+          : "—",
+    color:
+      alert.sentiment === "bullish"
+        ? "text-emerald-400"
+        : alert.sentiment === "bearish"
+          ? "text-red-400"
+          : "text-muted-foreground",
+    icon: Minus,
+  };
+  const Icon = config.icon;
+  const intent =
+    alert.intentHint && alert.intentHint !== "unknown"
+      ? (intentLabels[alert.intentHint] ?? alert.intentHint)
+      : null;
+
+  return (
+    <div className="flex items-center gap-1">
+      <Icon className={`h-3 w-3 ${config.color}`} />
+      <span className={`text-xs ${config.color}`}>{config.label}</span>
+      {intent && (
+        <span className="text-[10px] text-muted-foreground/60">({intent})</span>
+      )}
+    </div>
   );
 }
