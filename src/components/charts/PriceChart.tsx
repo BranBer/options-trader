@@ -8,16 +8,34 @@ import {
   ColorType,
   CandlestickSeries,
   HistogramSeries,
+  LineSeries,
   type CandlestickData,
   type HistogramData,
+  type LineData,
   type Time,
 } from "lightweight-charts";
 import type { DeepDiveAnalysis, TechnicalPattern } from "@/types/analysis";
+import {
+  ema,
+  bollingerBands,
+  rsi as calcRsi,
+  macd as calcMacd,
+  volumeSMA,
+} from "@/lib/utils/technical-indicators";
 import {
   createPatternOverlays,
   detachPatternOverlays,
   type AttachedOverlays,
 } from "./primitives/PatternMarkerHelper";
+
+export interface IndicatorConfig {
+  ema9?: boolean;
+  ema21?: boolean;
+  bollinger?: boolean;
+  volumeMA?: boolean;
+  rsi?: boolean;
+  macd?: boolean;
+}
 
 interface PriceChartProps {
   candles: Array<{
@@ -38,6 +56,10 @@ interface PriceChartProps {
   entryPrice?: number;
   /** Trade exit price — shown as a horizontal line */
   exitPrice?: number;
+  /** Options context for OI walls / max pain / GEX flip lines */
+  optionsContext?: DeepDiveAnalysis["options_context"];
+  /** Which computed indicators to display */
+  indicators?: IndicatorConfig;
 }
 
 export default function PriceChart({
@@ -50,6 +72,8 @@ export default function PriceChart({
   height = 400,
   entryPrice,
   exitPrice,
+  optionsContext,
+  indicators,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -66,9 +90,15 @@ export default function PriceChart({
       chartRef.current = null;
     }
 
+    // Compute dynamic height based on active sub-panes
+    const hasRSI = indicators?.rsi ?? false;
+    const hasMACD = indicators?.macd ?? false;
+    const extraPanes = (hasRSI ? 1 : 0) + (hasMACD ? 1 : 0);
+    const dynamicHeight = height + extraPanes * 80;
+
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height,
+      height: dynamicHeight,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#a1a1aa",
@@ -120,8 +150,11 @@ export default function PriceChart({
       priceScaleId: "volume",
     });
 
+    // Scale margins adjust based on active sub-panes
+    const volumeTop = hasRSI || hasMACD ? 0.7 : 0.8;
+
     chart.priceScale("volume").applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
+      scaleMargins: { top: volumeTop, bottom: 0 },
     });
 
     const volumeData: HistogramData<Time>[] = candles.map((c) => ({
@@ -153,6 +186,56 @@ export default function PriceChart({
       }
     }
 
+    // Options context lines: max pain, OI walls, GEX flip
+    if (optionsContext) {
+      const { max_pain, oi_walls, gex_summary } = optionsContext;
+
+      if (max_pain != null) {
+        candleSeries.createPriceLine({
+          price: max_pain,
+          color: "rgba(251,191,36,0.7)", // amber
+          lineWidth: 2,
+          lineStyle: 2, // dashed
+          axisLabelVisible: true,
+          title: `MaxPain $${max_pain.toFixed(0)}`,
+        });
+      }
+
+      if (oi_walls) {
+        for (const wall of oi_walls.call_walls.slice(0, 3)) {
+          candleSeries.createPriceLine({
+            price: wall.strike,
+            color: "rgba(239,68,68,0.4)",
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: `Call OI ${(wall.oi / 1000).toFixed(1)}k`,
+          });
+        }
+        for (const wall of oi_walls.put_walls.slice(0, 3)) {
+          candleSeries.createPriceLine({
+            price: wall.strike,
+            color: "rgba(34,197,94,0.4)",
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: `Put OI ${(wall.oi / 1000).toFixed(1)}k`,
+          });
+        }
+      }
+
+      if (gex_summary?.gex_flip_level != null) {
+        candleSeries.createPriceLine({
+          price: gex_summary.gex_flip_level,
+          color: "rgba(168,85,247,0.7)", // purple
+          lineWidth: 2,
+          lineStyle: 1, // dotted
+          axisLabelVisible: true,
+          title: `GEX Flip $${gex_summary.gex_flip_level.toFixed(0)}`,
+        });
+      }
+    }
+
     // Entry/exit price lines (for portfolio trade detail)
     if (entryPrice != null) {
       candleSeries.createPriceLine({
@@ -173,6 +256,176 @@ export default function PriceChart({
         axisLabelVisible: true,
         title: `Exit $${exitPrice.toFixed(2)}`,
       });
+    }
+
+    // ——— Computed Technical Indicators ———
+    const closes = candles.map((c) => c.close);
+    const times = candles.map((c) => c.time as Time);
+
+    function addLineSeries(
+      data: (number | null)[],
+      color: string,
+      lineWidth: 1 | 2 | 3 | 4 = 1,
+      priceScaleId?: string,
+    ) {
+      const series = chart.addSeries(LineSeries, {
+        color,
+        lineWidth,
+        crosshairMarkerVisible: false,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        ...(priceScaleId ? { priceScaleId } : {}),
+      });
+      const lineData: LineData<Time>[] = [];
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] != null) {
+          lineData.push({ time: times[i], value: data[i]! });
+        }
+      }
+      series.setData(lineData);
+      return series;
+    }
+
+    // EMA 9 (cyan)
+    if (indicators?.ema9) {
+      addLineSeries(ema(closes, 9), "rgba(6,182,212,0.8)", 1);
+    }
+
+    // EMA 21 (orange)
+    if (indicators?.ema21) {
+      addLineSeries(ema(closes, 21), "rgba(249,115,22,0.8)", 1);
+    }
+
+    // Bollinger Bands (blue fill)
+    if (indicators?.bollinger) {
+      const bb = bollingerBands(closes, 20, 2);
+      addLineSeries(bb.upper, "rgba(96,165,250,0.5)", 1);
+      addLineSeries(bb.middle, "rgba(96,165,250,0.3)", 1);
+      addLineSeries(bb.lower, "rgba(96,165,250,0.5)", 1);
+    }
+
+    // Volume MA (white line on volume pane)
+    if (indicators?.volumeMA) {
+      const volMA = volumeSMA(
+        candles as {
+          time: string | number;
+          open: number;
+          high: number;
+          low: number;
+          close: number;
+          volume: number;
+        }[],
+        20,
+      );
+      addLineSeries(volMA, "rgba(255,255,255,0.6)", 1, "volume");
+    }
+
+    // RSI pane
+    if (indicators?.rsi) {
+      const rsiData = calcRsi(closes, 14);
+      const rsiSeries = chart.addSeries(LineSeries, {
+        color: "rgba(147,51,234,0.9)",
+        lineWidth: 1,
+        priceScaleId: "rsi",
+        priceLineVisible: false,
+        lastValueVisible: true,
+        crosshairMarkerVisible: false,
+      });
+      chart.priceScale("rsi").applyOptions({
+        scaleMargins: {
+          top: hasMACD ? 0.75 : 0.82,
+          bottom: hasMACD ? 0.13 : 0.0,
+        },
+        borderVisible: false,
+      });
+      const rsiLineData: LineData<Time>[] = [];
+      for (let i = 0; i < rsiData.length; i++) {
+        if (rsiData[i] != null) {
+          rsiLineData.push({ time: times[i], value: rsiData[i]! });
+        }
+      }
+      rsiSeries.setData(rsiLineData);
+      // Overbought / oversold reference lines
+      rsiSeries.createPriceLine({
+        price: 70,
+        color: "rgba(239,68,68,0.3)",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: false,
+        title: "",
+      });
+      rsiSeries.createPriceLine({
+        price: 30,
+        color: "rgba(34,197,94,0.3)",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: false,
+        title: "",
+      });
+    }
+
+    // MACD pane
+    if (indicators?.macd) {
+      const macdResult = calcMacd(closes, 12, 26, 9);
+
+      // MACD line (blue)
+      const macdSeries = chart.addSeries(LineSeries, {
+        color: "rgba(59,130,246,0.9)",
+        lineWidth: 1,
+        priceScaleId: "macd",
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      chart.priceScale("macd").applyOptions({
+        scaleMargins: { top: hasRSI ? 0.88 : 0.85, bottom: 0.0 },
+        borderVisible: false,
+      });
+      const macdLineData: LineData<Time>[] = [];
+      for (let i = 0; i < macdResult.macd.length; i++) {
+        if (macdResult.macd[i] != null) {
+          macdLineData.push({ time: times[i], value: macdResult.macd[i]! });
+        }
+      }
+      macdSeries.setData(macdLineData);
+
+      // Signal line (orange)
+      const signalSeries = chart.addSeries(LineSeries, {
+        color: "rgba(249,115,22,0.9)",
+        lineWidth: 1,
+        priceScaleId: "macd",
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      const signalLineData: LineData<Time>[] = [];
+      for (let i = 0; i < macdResult.signal.length; i++) {
+        if (macdResult.signal[i] != null) {
+          signalLineData.push({ time: times[i], value: macdResult.signal[i]! });
+        }
+      }
+      signalSeries.setData(signalLineData);
+
+      // MACD histogram
+      const macdHistSeries = chart.addSeries(HistogramSeries, {
+        priceScaleId: "macd",
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const macdHistData: HistogramData<Time>[] = [];
+      for (let i = 0; i < macdResult.histogram.length; i++) {
+        if (macdResult.histogram[i] != null) {
+          macdHistData.push({
+            time: times[i],
+            value: macdResult.histogram[i]!,
+            color:
+              macdResult.histogram[i]! >= 0
+                ? "rgba(34,197,94,0.4)"
+                : "rgba(239,68,68,0.4)",
+          });
+        }
+      }
+      macdHistSeries.setData(macdHistData);
     }
 
     chart.timeScale().fitContent();
@@ -242,6 +495,8 @@ export default function PriceChart({
     onHoveredPattern,
     entryPrice,
     exitPrice,
+    optionsContext,
+    indicators,
   ]);
 
   // Highlight a specific pattern overlay when hovered from text

@@ -7,6 +7,7 @@ import { useDeepDive } from "@/hooks/useApiData";
 import type { DeepDiveAnalysis } from "@/types/analysis";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
 import TechnicalChart from "@/components/shared/TechnicalChart";
+import { InfoTooltip } from "@/components/charts/IndicatorExplainers";
 import {
   TrendingUp,
   TrendingDown,
@@ -20,6 +21,18 @@ import {
 
 interface WhaleDeepDiveProps {
   ticker: string;
+}
+
+/** Map Gemini indicator names to our explainer keys */
+function matchIndicatorKey(name: string): string | null {
+  const lower = name.toLowerCase();
+  if (/\bema\b.*9/.test(lower)) return "ema9";
+  if (/\bema\b.*21/.test(lower)) return "ema21";
+  if (/bollinger/i.test(lower)) return "bollinger";
+  if (/\brsi\b/i.test(lower)) return "rsi";
+  if (/\bmacd\b/i.test(lower)) return "macd";
+  if (/volume.*(?:ma|average)/i.test(lower)) return "volumeMA";
+  return null;
 }
 
 export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
@@ -84,6 +97,7 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
         technicalPatterns={deepDive.technical_patterns}
         hoveredPatternIndex={hoveredPatternIndex}
         onHoveredPattern={handleChartHover}
+        optionsContext={deepDive.options_context}
       />
 
       <Separator />
@@ -165,7 +179,15 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
                   className="rounded-md border p-2 text-xs space-y-1"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-medium">{ind.name}</span>
+                    <span className="font-medium flex items-center gap-1">
+                      {ind.name}
+                      {matchIndicatorKey(ind.name) && (
+                        <InfoTooltip
+                          text=""
+                          indicatorKey={matchIndicatorKey(ind.name)!}
+                        />
+                      )}
+                    </span>
                     <Badge
                       variant={
                         signal === "bullish"

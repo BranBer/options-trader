@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatNumber } from "@/lib/utils/formatters";
+import { IndicatorGuidePanel } from "@/components/charts/IndicatorExplainers";
 
 interface OptionsStatsPanelProps {
   optionsContext: DeepDiveAnalysis["options_context"];
@@ -214,6 +215,14 @@ export default function OptionsStatsPanel({
         <>
           <Separator className="my-3" />
           <GEXDisplay gex={gex_summary} />
+        </>
+      )}
+
+      {/* Contextual learning panel */}
+      {(max_pain != null || oi_walls || gex_summary) && (
+        <>
+          <Separator className="my-3" />
+          <IndicatorGuidePanel showOptionsContext />
         </>
       )}
     </div>

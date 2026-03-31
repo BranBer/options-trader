@@ -24,10 +24,11 @@ import type {
   TradeRecommendation,
 } from "@/types/analysis";
 import WhaleDeepDive from "@/components/analysis/WhaleDeepDive";
+import { IndicatorGuide } from "@/components/charts/IndicatorExplainers";
 import { InfiniteScrollTrigger } from "@/components/shared/InfiniteScrollTrigger";
 import { VirtualizedAnalysisList } from "@/components/shared/VirtualizedAnalysisList";
 import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
-import { ChevronDown, ChevronUp, HelpCircle } from "lucide-react";
+import { ChevronDown, ChevronUp, HelpCircle, BookOpen } from "lucide-react";
 
 export default function AnalysisPage() {
   const {
@@ -64,6 +65,10 @@ export default function AnalysisPage() {
           </TabsTrigger>
           <TabsTrigger value="recommendations">
             Recommendations ({recommendations.length})
+          </TabsTrigger>
+          <TabsTrigger value="guide">
+            <BookOpen className="h-3.5 w-3.5 mr-1" />
+            TA Guide
           </TabsTrigger>
         </TabsList>
 
@@ -117,6 +122,125 @@ export default function AnalysisPage() {
               }
             />
           )}
+        </TabsContent>
+
+        <TabsContent value="guide" className="mt-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <BookOpen className="h-5 w-5" />
+                Technical Analysis Guide for Options Traders
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Learn how to use each chart indicator and what it means for your
+                options trades. Click any indicator below to expand its full
+                explanation.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {/* Chart Overlay Indicators */}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold">
+                    Chart Overlay Indicators
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    These indicators are drawn directly on the price chart.
+                    Enable them using the &quot;Indicators&quot; button above
+                    any chart in the Deep Dive view.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <IndicatorGuide indicatorKey="ema9" />
+                    <IndicatorGuide indicatorKey="ema21" />
+                    <IndicatorGuide indicatorKey="bollinger" />
+                    <IndicatorGuide indicatorKey="volumeMA" />
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Oscillator Indicators */}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold">
+                    Momentum Oscillators
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    These appear in separate panes below the chart and measure
+                    momentum and trend strength.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <IndicatorGuide indicatorKey="rsi" />
+                    <IndicatorGuide indicatorKey="macd" />
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Options-Specific Indicators */}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold">
+                    Options Flow Indicators
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    These are derived from the options market and appear
+                    automatically on charts when Deep Dive data is available.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <IndicatorGuide indicatorKey="maxPain" />
+                    <IndicatorGuide indicatorKey="oiWalls" />
+                    <IndicatorGuide indicatorKey="gexFlip" />
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Quick Tips */}
+                <div className="rounded-md bg-amber-500/5 border border-amber-500/20 p-4 space-y-2">
+                  <h3 className="text-sm font-semibold text-amber-400">
+                    Quick Tips for Using Indicators
+                  </h3>
+                  <ul className="text-xs text-muted-foreground space-y-1.5 list-disc list-inside">
+                    <li>
+                      <span className="text-foreground/80 font-medium">
+                        Don&apos;t use indicators in isolation
+                      </span>{" "}
+                      — combine 2-3 indicators for confirmation before entering
+                      a trade.
+                    </li>
+                    <li>
+                      <span className="text-foreground/80 font-medium">
+                        Match your timeframe
+                      </span>{" "}
+                      — if you&apos;re trading weekly options, use the 1W or 1M
+                      chart. For monthly options, use 3M.
+                    </li>
+                    <li>
+                      <span className="text-foreground/80 font-medium">
+                        Volume confirms everything
+                      </span>{" "}
+                      — a signal without volume is just noise. Always check the
+                      Volume MA.
+                    </li>
+                    <li>
+                      <span className="text-foreground/80 font-medium">
+                        Options-specific levels matter most
+                      </span>{" "}
+                      — Max Pain, OI Walls, and GEX Flip are unique to options
+                      and give you an edge that stock-only traders don&apos;t
+                      have.
+                    </li>
+                    <li>
+                      <span className="text-foreground/80 font-medium">
+                        Respect the trend
+                      </span>{" "}
+                      — if both EMAs are pointing the same direction, trade with
+                      them, not against them.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
