@@ -78,6 +78,7 @@ export default function PriceChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const overlaysRef = useRef<AttachedOverlays | null>(null);
 
@@ -90,15 +91,12 @@ export default function PriceChart({
       chartRef.current = null;
     }
 
-    // Compute dynamic height based on active sub-panes
     const hasRSI = indicators?.rsi ?? false;
     const hasMACD = indicators?.macd ?? false;
-    const extraPanes = (hasRSI ? 1 : 0) + (hasMACD ? 1 : 0);
-    const dynamicHeight = height + extraPanes * 80;
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: dynamicHeight,
+      height,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#a1a1aa",
@@ -150,8 +148,10 @@ export default function PriceChart({
       priceScaleId: "volume",
     });
 
-    // Scale margins adjust based on active sub-panes
-    const volumeTop = hasRSI || hasMACD ? 0.7 : 0.8;
+    // Scale margins: compress candle+volume area when sub-panes are active
+    const subPaneCount = (hasRSI ? 1 : 0) + (hasMACD ? 1 : 0);
+    const volumeTop =
+      subPaneCount === 2 ? 0.55 : subPaneCount === 1 ? 0.65 : 0.8;
 
     chart.priceScale("volume").applyOptions({
       scaleMargins: { top: volumeTop, bottom: 0 },
@@ -333,8 +333,8 @@ export default function PriceChart({
       });
       chart.priceScale("rsi").applyOptions({
         scaleMargins: {
-          top: hasMACD ? 0.75 : 0.82,
-          bottom: hasMACD ? 0.13 : 0.0,
+          top: hasMACD ? 0.72 : 0.78,
+          bottom: hasMACD ? 0.15 : 0.02,
         },
         borderVisible: false,
       });
@@ -378,7 +378,7 @@ export default function PriceChart({
         crosshairMarkerVisible: false,
       });
       chart.priceScale("macd").applyOptions({
-        scaleMargins: { top: hasRSI ? 0.88 : 0.85, bottom: 0.0 },
+        scaleMargins: { top: hasRSI ? 0.88 : 0.82, bottom: 0.02 },
         borderVisible: false,
       });
       const macdLineData: LineData<Time>[] = [];
