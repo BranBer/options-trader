@@ -71,6 +71,11 @@ function getModel(): string {
   return process.env.OPEN_ROUTER_MODEL ?? "qwen/qwen3.5-9b";
 }
 
+/** @internal Reset client singleton — for tests only */
+export function _resetClient(): void {
+  client = null;
+}
+
 // --- Token usage tracking (Story 17.4) ---
 
 interface TokenUsageRecord {
