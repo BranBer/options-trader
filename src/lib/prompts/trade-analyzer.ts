@@ -1,6 +1,6 @@
 // ---------- System Instruction ----------
 
-export const TRADE_ANALYZER_SYSTEM_INSTRUCTION = `You are an options trading strategist. Given a correlated set of whale options activity, macro events, and current market data, you generate a structured trade thesis and recommendation.
+export const TRADE_ANALYZER_SYSTEM_INSTRUCTION = `You are an options trading strategist. Given whale options activity (with or without a correlated news event), macro context, and current market data, you generate a structured trade thesis and recommendation.
 
 Rules:
 1. Never guarantee returns. Frame everything as probabilistic analysis.
@@ -50,12 +50,12 @@ export function buildTradeAnalyzerPrompt(
   const todayStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/New_York",
   });
-  let prompt = `Based on the following correlated whale trade, news event, and market data, generate a structured trade recommendation.
+  let prompt = `Based on the following whale trade signal and market data, generate a structured trade recommendation.
 
 Today's Date: ${todayStr}
 IMPORTANT: All option expiry dates must be after ${todayStr}. Do not recommend expired options.
 
-Correlation:
+Whale Trade Signal:
 ${correlationJson}
 
 Market Data for ${ticker}:

@@ -85,8 +85,8 @@ export const tradeRecommendationSchema = z.object({
       "normal",
       "low",
     ]),
-    catalyst_date: z.string().nullable(),
-    days_to_catalyst: z.number().int().nullable(),
+    catalyst_date: z.string().nullable().optional(),
+    days_to_catalyst: z.number().int().nullable().optional(),
   }),
   risk_factors: z.array(z.string()),
   whale_alignment: z.object({
@@ -105,7 +105,7 @@ export const technicalPatternSchema = z.object({
   type: z.enum(["bullish", "bearish", "neutral"]),
   description: z.string(),
   confidence: z.number().min(0).max(1),
-  price_target: z.number().nullable(),
+  price_target: z.number().nullable().optional(),
   // Chart overlay coordinates (nullable for backward compat with existing data)
   drawing_type: z
     .enum(["trendline", "channel", "spike_region", "marker", "none"])
@@ -195,7 +195,7 @@ export const deepDiveAnalysisSchema = z.object({
       .object({
         net_gex: z.number(),
         dealer_positioning: z.enum(["long_gamma", "short_gamma", "neutral"]),
-        gex_flip_level: z.number().nullable(),
+        gex_flip_level: z.number().nullable().optional(),
         interpretation: z.string().optional(),
       })
       .nullable()

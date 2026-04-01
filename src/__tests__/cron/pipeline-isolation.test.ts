@@ -151,9 +151,7 @@ describe("Story 17.3 — Sim Pipeline Prior-Cycle Independence", () => {
   });
 
   it("sim pipeline runs when analysis pipeline throws", async () => {
-    mockRunAnalysisPipeline.mockRejectedValue(
-      new Error("LLM quota exceeded"),
-    );
+    mockRunAnalysisPipeline.mockRejectedValue(new Error("LLM quota exceeded"));
 
     const result = await runPipeline();
 

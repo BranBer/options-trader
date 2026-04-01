@@ -54,7 +54,7 @@ export default function AnalysisPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">AI Analysis</h1>
         <p className="text-muted-foreground text-sm">
-          Gemini-powered cross-references and trade recommendations.
+          AI-powered cross-references and trade recommendations.
         </p>
       </div>
 

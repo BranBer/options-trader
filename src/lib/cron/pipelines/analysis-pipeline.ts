@@ -182,7 +182,7 @@ export async function runAnalysisPipeline(): Promise<number> {
       newestWhaleTime <= _lastSuccessfulCompletionAt
     ) {
       console.log(
-        `[AnalysisPipeline] No new data since last successful run (${_lastSuccessfulCompletionAt}) — skipping Gemini calls`,
+        `[AnalysisPipeline] No new data since last successful run (${_lastSuccessfulCompletionAt}) — skipping LLM calls`,
       );
       progress.complete(STEP_CROSS_REF);
       progress.complete(STEP_RECOMMENDATIONS);
@@ -191,7 +191,7 @@ export async function runAnalysisPipeline(): Promise<number> {
     }
   }
 
-  // Step 3: Cross-reference with Gemini
+  // Step 3: Cross-reference with LLM
   progress.activate(STEP_CROSS_REF);
   const newsForCorrelation = recentNews.map((n) => ({
     headline: n.headline,
@@ -306,11 +306,14 @@ export async function runAnalysisPipeline(): Promise<number> {
     (c) => c.correlation_confidence >= MIN_CORRELATION_CONFIDENCE,
   );
 
+  const MIN_RECOMMENDATIONS = 3;
+  let recsGenerated = 0;
+
   progress.activate(
     STEP_RECOMMENDATIONS,
     highConfCorrelations.length > 0
       ? `0/${highConfCorrelations.length} tickers`
-      : "skipped",
+      : "whale signals",
   );
 
   if (highConfCorrelations.length > 0) {
@@ -429,8 +432,10 @@ export async function runAnalysisPipeline(): Promise<number> {
       );
 
       for (const result of results) {
-        if (result.status === "fulfilled") stored += result.value;
-        else
+        if (result.status === "fulfilled") {
+          stored += result.value;
+          recsGenerated += result.value;
+        } else
           console.error(
             "[AnalysisPipeline] Recommendation failed:",
             result.reason,
@@ -441,6 +446,173 @@ export async function runAnalysisPipeline(): Promise<number> {
         STEP_RECOMMENDATIONS,
         `${recsDone}/${highConfCorrelations.length} tickers`,
       );
+    }
+  }
+
+  // Step 4b: Fallback — generate whale-signal-only recommendations if correlations were insufficient
+  if (recsGenerated < MIN_RECOMMENDATIONS) {
+    const remaining = MIN_RECOMMENDATIONS - recsGenerated;
+    const recTickers = new Set(
+      highConfCorrelations.map((c) => c.whale_trade.ticker),
+    );
+
+    // Sort uncorrelated whales by premium descending, skip already-recommended tickers
+    const fallbackWhales = (crossRef.uncorrelated_whales ?? [])
+      .filter((u) => !recTickers.has(u.ticker))
+      .sort((a, b) => b.premium - a.premium)
+      .slice(0, remaining);
+
+    if (fallbackWhales.length > 0) {
+      console.log(
+        `[AnalysisPipeline] Generating ${fallbackWhales.length} whale-signal-only recommendations (fallback)`,
+      );
+
+      for (
+        let i = 0;
+        i < fallbackWhales.length;
+        i += RECOMMEND_CONCURRENCY
+      ) {
+        const chunk = fallbackWhales.slice(i, i + RECOMMEND_CONCURRENCY);
+        const results = await Promise.allSettled(
+          chunk.map(async (uncorr) => {
+            const ticker = uncorr.ticker;
+            // Find full whale alert details
+            const whaleRow = recentWhales.find((w) => w.ticker === ticker);
+
+            // Build a synthetic correlation for the recommendation prompt
+            const syntheticCorrelation = {
+              whale_trade: {
+                ticker,
+                strike: whaleRow?.strike ?? 0,
+                expiry: whaleRow?.expiry ?? "",
+                type: uncorr.type as "call" | "put",
+                premium: uncorr.premium,
+                volume: whaleRow?.volume ?? 0,
+              },
+              related_event: {
+                headline:
+                  "No specific news catalyst — pure whale-signal trade",
+                impact_score: 0,
+                event_type: "whale_signal_only",
+              },
+              correlation_confidence: 0,
+              alignment: "confirming" as const,
+              thesis: uncorr.note,
+              smart_money_signal: "bullish" as const,
+            };
+
+            const [marketData] = await fetchMarketData([ticker]);
+            const chain = await fetchOptionsChain(ticker);
+
+            let realizedVol: number | null = null;
+            let ivRvSpread: number | null = null;
+            let atmIV: number | null = null;
+            if (chain && marketData) {
+              const allContracts = [
+                ...chain.nearestExpiry.calls,
+                ...chain.nearestExpiry.puts,
+              ];
+              const atmContracts = allContracts.filter(
+                (c) =>
+                  Math.abs(c.strike - marketData.price) / marketData.price <
+                    0.05 && c.iv > 0,
+              );
+              if (atmContracts.length > 0) {
+                atmIV =
+                  atmContracts.reduce((s, c) => s + c.iv, 0) /
+                  atmContracts.length;
+                const candles = await fetchHistoricalData(ticker, "3mo");
+                realizedVol = computeRealizedVol(candles);
+                if (realizedVol != null && atmIV != null) {
+                  ivRvSpread = atmIV - realizedVol;
+                }
+              }
+            }
+
+            const earningsDate = await fetchEarningsDate(ticker);
+            const earningsCtx = getEarningsProximity(
+              earningsDate,
+              whaleRow?.expiry ?? "",
+            );
+
+            const recommendation = await generateRecommendation(
+              syntheticCorrelation,
+              {
+                price: marketData?.price ?? 0,
+                ivRank: undefined,
+                avgVolume: marketData?.volume ?? 0,
+                todayVolume: marketData?.volume ?? 0,
+                optionsChainSummary: chain
+                  ? `${chain.expirations.length} expirations, nearest: ${chain.nearestExpiry.date} (${chain.nearestExpiry.calls.length} calls, ${chain.nearestExpiry.puts.length} puts)`
+                  : "No options chain data available",
+                macroContext: {
+                  ...macroBase,
+                  earningsDate: earningsCtx.earningsDate,
+                  ivCrushRisk: earningsCtx.ivCrushRisk,
+                },
+                optionsAnalytics: chain
+                  ? {
+                      maxPain: chain.maxPain ?? null,
+                      oiWalls: chain.oiWalls ?? null,
+                      ivRvSpread,
+                      realizedVol,
+                      gex: chain.gex ?? null,
+                    }
+                  : undefined,
+                sectorRotationContext: sectorRotationPrompt,
+              },
+            );
+
+            if (marketData) {
+              try {
+                await db.insert(marketSnapshots).values({
+                  ticker: marketData.ticker,
+                  price: marketData.price,
+                  volume: marketData.volume,
+                  iv: atmIV ?? marketData.iv ?? null,
+                  ivRank: marketData.ivRank ?? null,
+                  dayChangePct: marketData.dayChangePct,
+                  realizedVol,
+                  ivRvSpread,
+                });
+              } catch {
+                /* ignore duplicate snapshot */
+              }
+            }
+
+            await db.insert(analyses).values({
+              type: "trade_recommendation",
+              inputRefs: JSON.stringify({
+                whaleSignalTicker: ticker,
+                whaleSignalOnly: true,
+              }),
+              output: JSON.stringify(recommendation),
+              confidence: recommendation.confidence,
+            });
+
+            console.log(
+              `[AnalysisPipeline] Whale-signal recommendation for ${ticker}: ${recommendation.direction} ` +
+                `(${recommendation.primary_strategy.name}, confidence: ${recommendation.confidence})`,
+            );
+            return 1;
+          }),
+        );
+
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            stored += result.value;
+            recsGenerated += result.value;
+          } else
+            console.error(
+              "[AnalysisPipeline] Whale-signal recommendation failed:",
+              result.reason,
+            );
+        }
+        progress.updateDetail(
+          STEP_RECOMMENDATIONS,
+          `${recsGenerated} recs (${fallbackWhales.length} whale-signal)`,
+        );
+      }
     }
   }
   progress.complete(STEP_RECOMMENDATIONS);
