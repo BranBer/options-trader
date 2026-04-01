@@ -588,7 +588,7 @@ const MOCK_CONFIDENCE_BREAKDOWNS: Record<
     composite: 0.78,
     factors: [
       {
-        name: "Gemini Correlation",
+        name: "AI Correlation",
         value: 0.85,
         weight: 0.25,
         contribution: 0.2125,
@@ -655,7 +655,7 @@ const MOCK_CONFIDENCE_BREAKDOWNS: Record<
     composite: 0.71,
     factors: [
       {
-        name: "Gemini Correlation",
+        name: "AI Correlation",
         value: 0.6,
         weight: 0.25,
         contribution: 0.15,
@@ -720,7 +720,7 @@ const MOCK_CONFIDENCE_BREAKDOWNS: Record<
     composite: 0.62,
     factors: [
       {
-        name: "Gemini Correlation",
+        name: "AI Correlation",
         value: 0.7,
         weight: 0.25,
         contribution: 0.175,
@@ -785,7 +785,7 @@ const MOCK_CONFIDENCE_BREAKDOWNS: Record<
     composite: 0.74,
     factors: [
       {
-        name: "Gemini Correlation",
+        name: "AI Correlation",
         value: 0.8,
         weight: 0.25,
         contribution: 0.2,

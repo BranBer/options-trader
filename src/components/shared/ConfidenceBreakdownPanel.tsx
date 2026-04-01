@@ -11,7 +11,7 @@ import { type ConfidenceBreakdown } from "@/hooks/useApiData";
 import { ChevronDown, ChevronUp, HelpCircle } from "lucide-react";
 
 export const FACTOR_TOOLTIPS: Record<string, string> = {
-  "Gemini Correlation":
+  "AI Correlation":
     "How confidently the AI model linked this whale trade to a related news event or catalyst.",
   "Whale Quality":
     "Quality score of the underlying whale trade — based on Volume/OI ratio, OTM aggressiveness, premium size, and timing.",

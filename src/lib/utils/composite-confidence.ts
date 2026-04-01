@@ -15,7 +15,7 @@ export interface CompositeConfidenceBreakdown {
 }
 
 interface CompositeInputs {
-  /** Gemini's raw correlation confidence (0-1) */
+  /** AI model's raw correlation confidence (0-1) */
   geminiCorrelationConf: number;
   /** Whale quality score (0-100) from scoreWhaleQuality */
   whaleQualityScore?: number | null;
@@ -42,7 +42,7 @@ interface CompositeInputs {
  * If a factor is unavailable, its weight is redistributed proportionally.
  */
 const FACTOR_WEIGHTS = {
-  geminiCorrelationConf: 0.2,
+  geminiCorrelationConf: 0.2, // AI Correlation
   whaleQualityScore: 0.15,
   technicalAlignment: 0.15,
   ivRegime: 0.1,
@@ -71,7 +71,7 @@ export function computeCompositeConfidence(
 
   // Factor 1: Gemini correlation confidence (always available)
   rawFactors.push({
-    name: "Gemini Correlation",
+    name: "AI Correlation",
     key: "geminiCorrelationConf",
     value: inputs.geminiCorrelationConf,
     description: `Raw AI correlation confidence: ${(inputs.geminiCorrelationConf * 100).toFixed(0)}%`,
