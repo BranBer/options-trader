@@ -186,7 +186,10 @@ async function callLLMWithRetry<T>(
       // Qwen 3.5 needs reasoning suppressed to avoid wasting output tokens.
       // Newer models (3.6+) require reasoning and reject effort: "none".
       const modelLower = model.toLowerCase();
-      if (modelLower.includes("qwen3.5") || modelLower.includes("qwen/qwen3.5")) {
+      if (
+        modelLower.includes("qwen3.5") ||
+        modelLower.includes("qwen/qwen3.5")
+      ) {
         params.reasoning = { effort: "none" };
       }
 

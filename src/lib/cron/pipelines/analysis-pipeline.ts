@@ -456,22 +456,34 @@ export async function runAnalysisPipeline(): Promise<number> {
       highConfCorrelations.map((c) => c.whale_trade.ticker),
     );
 
-    // Sort uncorrelated whales by premium descending, skip already-recommended tickers
-    const fallbackWhales = (crossRef.uncorrelated_whales ?? [])
-      .filter((u) => !recTickers.has(u.ticker))
-      .sort((a, b) => b.premium - a.premium)
-      .slice(0, remaining);
+    // Sort whale alerts by premium descending, deduplicate by ticker, skip already-recommended
+    const fallbackWhales: Array<{
+      ticker: string;
+      type: "call" | "put";
+      premium: number;
+      note: string;
+    }> = [];
+    const fbSeen = new Set<string>();
+    for (const w of [...recentWhales].sort(
+      (a, b) => (b.premium ?? 0) - (a.premium ?? 0),
+    )) {
+      if (fbSeen.has(w.ticker) || recTickers.has(w.ticker)) continue;
+      fbSeen.add(w.ticker);
+      fallbackWhales.push({
+        ticker: w.ticker,
+        type: w.callPut === "P" ? "put" : "call",
+        premium: w.premium ?? 0,
+        note: `${w.callPut === "P" ? "Put" : "Call"} $${((w.premium ?? 0) / 1e6).toFixed(1)}M premium`,
+      });
+      if (fallbackWhales.length >= remaining) break;
+    }
 
     if (fallbackWhales.length > 0) {
       console.log(
         `[AnalysisPipeline] Generating ${fallbackWhales.length} whale-signal-only recommendations (fallback)`,
       );
 
-      for (
-        let i = 0;
-        i < fallbackWhales.length;
-        i += RECOMMEND_CONCURRENCY
-      ) {
+      for (let i = 0; i < fallbackWhales.length; i += RECOMMEND_CONCURRENCY) {
         const chunk = fallbackWhales.slice(i, i + RECOMMEND_CONCURRENCY);
         const results = await Promise.allSettled(
           chunk.map(async (uncorr) => {
@@ -490,8 +502,7 @@ export async function runAnalysisPipeline(): Promise<number> {
                 volume: whaleRow?.volume ?? 0,
               },
               related_event: {
-                headline:
-                  "No specific news catalyst — pure whale-signal trade",
+                headline: "No specific news catalyst — pure whale-signal trade",
                 impact_score: 0,
                 event_type: "whale_signal_only",
               },
@@ -662,7 +673,7 @@ export async function runAnalysisPipeline(): Promise<number> {
     });
   }
 
-  // Fill remaining slots with uncorrelated whales
+  // Fill remaining slots with uncorrelated whales from LLM output
   for (const u of crossRef.uncorrelated_whales ?? []) {
     if (seenTickers.has(u.ticker) || deepDiveQueue.length >= MAX_DEEP_DIVES)
       continue;
@@ -680,6 +691,29 @@ export async function runAnalysisPipeline(): Promise<number> {
         volume: whaleRow?.volume ?? 0,
         openInterest: whaleRow?.openInterest ?? 0,
         sentiment: whaleRow?.sentiment ?? "neutral",
+      },
+    });
+  }
+
+  // Fill remaining slots from top whale alerts by premium (covers tickers the LLM may have omitted)
+  const whalesByPremium = [...recentWhales]
+    .filter((w) => (w.premium ?? 0) > 0)
+    .sort((a, b) => (b.premium ?? 0) - (a.premium ?? 0));
+  for (const w of whalesByPremium) {
+    if (seenTickers.has(w.ticker) || deepDiveQueue.length >= MAX_DEEP_DIVES)
+      continue;
+    seenTickers.add(w.ticker);
+    deepDiveQueue.push({
+      ticker: w.ticker,
+      whaleTrade: {
+        ticker: w.ticker,
+        strike: w.strike ?? 0,
+        expiry: w.expiry ?? "",
+        callPut: w.callPut ?? "C",
+        premium: w.premium ?? 0,
+        volume: w.volume ?? 0,
+        openInterest: w.openInterest ?? 0,
+        sentiment: w.sentiment ?? "neutral",
       },
     });
   }
