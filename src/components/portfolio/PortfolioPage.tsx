@@ -29,6 +29,7 @@ import type { DeepDiveAnalysis } from "@/types/analysis";
 import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
 import TechnicalChart from "@/components/shared/TechnicalChart";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
+import LineChart from "@/components/shared/LineChart";
 import {
   TrendingUp,
   TrendingDown,
@@ -116,11 +117,11 @@ function PortfolioOverview() {
 
   if (isLoading) {
     return (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i}>
-            <CardContent className="pt-6">
-              <div className="h-16 animate-pulse rounded bg-muted" />
+            <CardContent className="pt-4">
+              <div className="h-12 animate-pulse rounded bg-muted" />
             </CardContent>
           </Card>
         ))}
@@ -148,7 +149,7 @@ function PortfolioOverview() {
 
   return (
     <TooltipProvider>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Balance"
           value={formatCurrency(p.balance)}
@@ -214,11 +215,11 @@ function StatCard({
 
   return (
     <Card>
-      <CardContent className="pt-6">
+      <CardContent className="pt-4 pb-3">
         <div className="flex items-center justify-between">
           <Tooltip>
             <TooltipTrigger>
-              <span className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+              <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                 {title}
                 <HelpCircle className="h-3 w-3" />
               </span>
@@ -229,8 +230,8 @@ function StatCard({
           </Tooltip>
           <Icon className={`h-4 w-4 ${trendColor}`} />
         </div>
-        <p className={`mt-1 text-2xl font-bold ${trendColor}`}>{value}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        <p className={`mt-0.5 text-xl font-bold ${trendColor}`}>{value}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </CardContent>
     </Card>
   );
@@ -368,12 +369,11 @@ function TradeRow({
 
 function EquityCurveSection() {
   const { data, isLoading } = useEquityCurve();
+  const snapshots = data?.snapshots ?? [];
 
   if (isLoading) {
     return <div className="h-48 animate-pulse rounded bg-muted" />;
   }
-
-  const snapshots = data?.snapshots ?? [];
 
   if (snapshots.length === 0) {
     return (
@@ -389,10 +389,10 @@ function EquityCurveSection() {
     );
   }
 
-  // Simple text-based equity curve (chart library can be added later)
-  const maxBalance = Math.max(...snapshots.map((s) => s.balance));
-  const minBalance = Math.min(...snapshots.map((s) => s.balance));
-  const range = maxBalance - minBalance || 1;
+  const chartData = snapshots.map((s) => ({
+    date: new Date(s.date),
+    value: s.balance,
+  }));
 
   return (
     <Card>
@@ -402,37 +402,10 @@ function EquityCurveSection() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-1">
-          <div className="flex justify-between text-xs text-muted-foreground mb-2">
-            <span>{formatCurrency(maxBalance)}</span>
-            <span>{formatCurrency(minBalance)}</span>
-          </div>
-          <ScrollArea className="h-48">
-            <div className="space-y-1">
-              {snapshots.map((s, i) => {
-                const pct = ((s.balance - minBalance) / range) * 100;
-                const color =
-                  s.totalPnl >= 0 ? "bg-emerald-500/70" : "bg-red-500/70";
-                return (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <span className="w-20 text-muted-foreground shrink-0">
-                      {s.date}
-                    </span>
-                    <div className="flex-1 h-4 bg-muted rounded-sm overflow-hidden">
-                      <div
-                        className={`h-full ${color} rounded-sm transition-all`}
-                        style={{ width: `${Math.max(pct, 2)}%` }}
-                      />
-                    </div>
-                    <span className="w-16 text-right font-mono">
-                      {formatCurrency(s.balance)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </ScrollArea>
-        </div>
+        <LineChart
+          data={chartData}
+          formatValue={(v) => `$${v.toLocaleString()}`}
+        />
       </CardContent>
     </Card>
   );
