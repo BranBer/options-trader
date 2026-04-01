@@ -605,6 +605,62 @@ function TradeDetail({
             value={`${trade.timeExitDays ?? "—"} days`}
             icon={Clock}
           />
+          {/* IV Regime — from confidence breakdown factors */}
+          {data?.confidenceBreakdown?.factors &&
+            (() => {
+              const ivFactor = data.confidenceBreakdown.factors.find(
+                (f) => f.name === "IV Regime",
+              );
+              if (!ivFactor) return null;
+              const regime =
+                ivFactor.value >= 0.7
+                  ? "Elevated"
+                  : ivFactor.value >= 0.4
+                    ? "Normal"
+                    : "Low";
+              const color =
+                ivFactor.value >= 0.7
+                  ? "text-amber-400"
+                  : ivFactor.value >= 0.4
+                    ? "text-emerald-400"
+                    : "text-blue-400";
+              return (
+                <MetricCard
+                  label="IV Regime"
+                  value={regime}
+                  icon={Activity}
+                  valueColor={color}
+                />
+              );
+            })()}
+          {/* Insider Alignment — from confidence breakdown factors */}
+          {data?.confidenceBreakdown?.factors &&
+            (() => {
+              const insiderFactor = data.confidenceBreakdown.factors.find(
+                (f) => f.name === "Insider Alignment",
+              );
+              if (!insiderFactor) return null;
+              const alignment =
+                insiderFactor.value >= 0.6
+                  ? "Bullish"
+                  : insiderFactor.value >= 0.4
+                    ? "Neutral"
+                    : "Bearish";
+              const color =
+                insiderFactor.value >= 0.6
+                  ? "text-emerald-400"
+                  : insiderFactor.value >= 0.4
+                    ? "text-muted-foreground"
+                    : "text-red-400";
+              return (
+                <MetricCard
+                  label="Insider Alignment"
+                  value={alignment}
+                  icon={TrendingUp}
+                  valueColor={color}
+                />
+              );
+            })()}
         </div>
 
         {/* Strategy Legs */}

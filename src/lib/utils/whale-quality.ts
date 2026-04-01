@@ -4,15 +4,23 @@ import type { WhaleAlert } from "@/types/whale";
  * Score a whale trade's quality/conviction from 0-100.
  *
  * Factors:
- *   Volume/OI ratio   (30%) — >1 suggests new position opening
- *   OTM aggressiveness (25%) — further OTM = more conviction
- *   Premium size       (20%) — logarithmic: $100K=20, $500K=50, $1M+=80
- *   Expiry timing      (15%) — weeklies (<7 DTE) = unusual conviction
- *   Sweep likelihood   (10%) — high volume relative to typical size
+ *   Volume/OI ratio      (25.5%) — >1 suggests new position opening
+ *   OTM aggressiveness   (21.25%) — further OTM = more conviction
+ *   Premium size         (17%) — logarithmic: $100K=20, $500K=50, $1M+=80
+ *   Expiry timing        (12.75%) — weeklies (<7 DTE) = unusual conviction
+ *   Sweep likelihood     (8.5%) — high volume relative to typical size
+ *   Technical alignment  (15%) — patterns confirming whale direction
  */
 export function scoreWhaleQuality(
   alert: WhaleAlert,
   underlyingPrice?: number,
+  technicalData?: {
+    price: number;
+    sma20: number | null;
+    rsi: number | null;
+    supportLevels: number[];
+    resistanceLevels: number[];
+  },
 ): number {
   const price = underlyingPrice ?? alert.underlyingPrice ?? 0;
 
@@ -84,13 +92,136 @@ export function scoreWhaleQuality(
     else sweepScore = 10;
   }
 
-  // Weighted composite
+  // 6. Technical alignment (15%) — price action confirms whale direction
+  let technicalScore = 50; // Neutral default
+  if (technicalData) {
+    let score = 0;
+    let factors = 0;
+
+    // Sub-factor 1: Price vs 20-day SMA (trend confirmation)
+    if (technicalData.sma20 != null) {
+      const isAboveSMA = technicalData.price > technicalData.sma20;
+      if (
+        (alert.sentiment === "bullish" && isAboveSMA) ||
+        (alert.sentiment === "bearish" && !isAboveSMA)
+      ) {
+        score += 1.0; // Confirms direction
+      } else if (
+        (alert.sentiment === "bullish" && !isAboveSMA) ||
+        (alert.sentiment === "bearish" && isAboveSMA)
+      ) {
+        score += 0.2; // Contradicts direction
+      } else {
+        score += 0.5; // Neutral
+      }
+      factors++;
+    }
+
+    // Sub-factor 2: RSI momentum alignment
+    if (technicalData.rsi != null) {
+      const rsi = technicalData.rsi;
+      if (
+        (alert.sentiment === "bullish" && rsi > 50 && rsi < 70) ||
+        (alert.sentiment === "bearish" && rsi < 50 && rsi > 30)
+      ) {
+        score += 1.0; // Momentum confirms
+      } else if (
+        (alert.sentiment === "bullish" && rsi > 70) ||
+        (alert.sentiment === "bearish" && rsi < 30)
+      ) {
+        score += 0.3; // Overbought/oversold — risky
+      } else {
+        score += 0.5; // Neutral
+      }
+      factors++;
+    }
+
+    // Sub-factor 3: Support/resistance proximity
+    const allLevels = [
+      ...technicalData.supportLevels,
+      ...technicalData.resistanceLevels,
+    ];
+    if (allLevels.length > 0) {
+      const nearKeyLevel = allLevels.some(
+        (level) =>
+          Math.abs(technicalData.price - level) / technicalData.price < 0.02,
+      );
+      score += nearKeyLevel ? 1.0 : 0.5;
+      factors++;
+    }
+
+    technicalScore = factors > 0 ? (score / factors) * 100 : 50;
+  }
+
+  // Weighted composite (rebalanced for 6 factors)
   const composite =
-    voiScore * 0.3 +
-    otmScore * 0.25 +
-    premiumScore * 0.2 +
-    expiryScore * 0.15 +
-    sweepScore * 0.1;
+    voiScore * 0.255 +
+    otmScore * 0.2125 +
+    premiumScore * 0.17 +
+    expiryScore * 0.1275 +
+    sweepScore * 0.085 +
+    technicalScore * 0.15;
 
   return Math.round(Math.max(0, Math.min(100, composite)));
+}
+
+/**
+ * Compute technical alignment score for a whale alert.
+ * Returns 0-100 score based on how well technical indicators confirm the whale direction.
+ */
+export function computeTechnicalAlignmentScore(
+  alert: WhaleAlert,
+  technicalData: {
+    price: number;
+    sma20: number | null;
+    rsi: number | null;
+    supportLevels: number[];
+    resistanceLevels: number[];
+  },
+): number {
+  let score = 0;
+  let factors = 0;
+
+  // Trend confirmation: price vs 20-day SMA
+  if (technicalData.sma20 != null) {
+    const isAboveSMA = technicalData.price > technicalData.sma20;
+    if (
+      (alert.sentiment === "bullish" && isAboveSMA) ||
+      (alert.sentiment === "bearish" && !isAboveSMA)
+    ) {
+      score += 1.0;
+    } else {
+      score += 0.2;
+    }
+    factors++;
+  }
+
+  // Momentum alignment: RSI
+  if (technicalData.rsi != null) {
+    if (
+      (alert.sentiment === "bullish" && technicalData.rsi > 50) ||
+      (alert.sentiment === "bearish" && technicalData.rsi < 50)
+    ) {
+      score += 1.0;
+    } else {
+      score += 0.3;
+    }
+    factors++;
+  }
+
+  // Support/resistance proximity
+  const allLevels = [
+    ...technicalData.supportLevels,
+    ...technicalData.resistanceLevels,
+  ];
+  if (allLevels.length > 0) {
+    const nearKeyLevel = allLevels.some(
+      (level) =>
+        Math.abs(technicalData.price - level) / technicalData.price < 0.02,
+    );
+    score += nearKeyLevel ? 1.0 : 0.5;
+    factors++;
+  }
+
+  return factors > 0 ? Math.round((score / factors) * 100) : 50;
 }
