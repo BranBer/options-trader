@@ -52,8 +52,10 @@ const VALID_CLASSIFICATION_RESPONSE = {
       event_type: "central_bank",
       country_code: "US",
       region: "North America",
-      one_line_summary: "Federal Reserve raises interest rates by 25 basis points",
-      reasoning: "Rate hikes increase borrowing costs, negative for growth stocks",
+      one_line_summary:
+        "Federal Reserve raises interest rates by 25 basis points",
+      reasoning:
+        "Rate hikes increase borrowing costs, negative for growth stocks",
     },
     {
       original_headline: "Local bakery wins award",
@@ -109,7 +111,8 @@ const VALID_CROSS_REFERENCE_RESPONSE = {
       note: "Large put position with no clear news catalyst",
     },
   ],
-  summary: "One high-confidence correlation found between AAPL whale activity and Fed rate decision.",
+  summary:
+    "One high-confidence correlation found between AAPL whale activity and Fed rate decision.",
   analysis_metadata: {
     news_events_analyzed: 5,
     whale_trades_analyzed: 10,
@@ -126,8 +129,20 @@ const VALID_RECOMMENDATION_RESPONSE = {
   primary_strategy: {
     name: "Bull Call Spread",
     legs: [
-      { action: "buy", type: "call", strike: 195, expiry: "2026-04-18", estimated_premium: 8.5 },
-      { action: "sell", type: "call", strike: 205, expiry: "2026-04-18", estimated_premium: 3.2 },
+      {
+        action: "buy",
+        type: "call",
+        strike: 195,
+        expiry: "2026-04-18",
+        estimated_premium: 8.5,
+      },
+      {
+        action: "sell",
+        type: "call",
+        strike: 205,
+        expiry: "2026-04-18",
+        estimated_premium: 3.2,
+      },
     ],
     max_profit: "$4.70 per share ($470 per contract)",
     max_loss: "$5.30 per share ($530 per contract)",
@@ -167,12 +182,32 @@ const VALID_DEEP_DIVE_RESPONSE = {
     },
   ],
   support_resistance: [
-    { level: 190, type: "support", strength: "strong", note: "Prior consolidation zone" },
-    { level: 210, type: "resistance", strength: "moderate", note: "52-week high area" },
+    {
+      level: 190,
+      type: "support",
+      strength: "strong",
+      note: "Prior consolidation zone",
+    },
+    {
+      level: 210,
+      type: "resistance",
+      strength: "moderate",
+      note: "52-week high area",
+    },
   ],
   indicators: [
-    { name: "RSI", value: "42", signal: "neutral", explanation: "Neither overbought nor oversold" },
-    { name: "MACD", value: "Bullish crossover", signal: "bullish", explanation: "MACD crossed above signal line" },
+    {
+      name: "RSI",
+      value: "42",
+      signal: "neutral",
+      explanation: "Neither overbought nor oversold",
+    },
+    {
+      name: "MACD",
+      value: "Bullish crossover",
+      signal: "bullish",
+      explanation: "MACD crossed above signal line",
+    },
   ],
   options_context: {
     iv_percentile: "72nd percentile",
@@ -181,31 +216,65 @@ const VALID_DEEP_DIVE_RESPONSE = {
     unusual_activity_note: "Significant call buying at $200 strike",
     greeks_summary: "Delta-heavy position with moderate theta decay",
     greeks_breakdown: [
-      { greek: "delta", value: "0.55", plain_english: "Position gains ~$55 per $1 move up", implication: "favorable" },
-      { greek: "theta", value: "-0.12", plain_english: "Loses ~$12 per day to time decay", implication: "unfavorable" },
-      { greek: "gamma", value: "0.03", plain_english: "Delta changes by 0.03 per $1 move", implication: "favorable" },
-      { greek: "vega", value: "0.18", plain_english: "Position gains ~$18 per 1% IV increase", implication: "neutral" },
+      {
+        greek: "delta",
+        value: "0.55",
+        plain_english: "Position gains ~$55 per $1 move up",
+        implication: "favorable",
+      },
+      {
+        greek: "theta",
+        value: "-0.12",
+        plain_english: "Loses ~$12 per day to time decay",
+        implication: "unfavorable",
+      },
+      {
+        greek: "gamma",
+        value: "0.03",
+        plain_english: "Delta changes by 0.03 per $1 move",
+        implication: "favorable",
+      },
+      {
+        greek: "vega",
+        value: "0.18",
+        plain_english: "Position gains ~$18 per 1% IV increase",
+        implication: "neutral",
+      },
     ],
   },
   entry_exit: {
     recommended_option_type: "Call spread",
     entry_price_range: { low: 4.8, high: 5.5 },
     strike_selection: "$195/$205 strikes for defined risk",
-    expiry_guidance: "April 18 — 18 DTE, sufficient time for thesis to play out",
+    expiry_guidance:
+      "April 18 — 18 DTE, sufficient time for thesis to play out",
     profit_target: "Take profit at 50% of max gain ($2.35)",
     stop_loss: "Close at 50% loss ($2.65)",
     position_sizing: "Risk no more than 2% of portfolio",
     rationale: "Defined-risk spread captures upside with limited downside",
   },
-  global_events_connection: "Fed rate decision may create short-term volatility but historical pattern shows recovery within 2 weeks",
+  global_events_connection:
+    "Fed rate decision may create short-term volatility but historical pattern shows recovery within 2 weeks",
   risk_assessment: {
     overall_risk: "moderate",
-    key_risks: ["Further rate hikes", "Earnings miss in April", "Broader market selloff"],
+    key_risks: [
+      "Further rate hikes",
+      "Earnings miss in April",
+      "Broader market selloff",
+    ],
     max_recommended_allocation: "2% of portfolio",
   },
   educational_notes: [
-    { term: "Bull Call Spread", explanation: "A strategy that profits from a moderate price increase using two call options" },
-    { term: "IV Percentile", explanation: "Shows where current implied volatility ranks relative to the past year" },
+    {
+      term: "Bull Call Spread",
+      explanation:
+        "A strategy that profits from a moderate price increase using two call options",
+    },
+    {
+      term: "IV Percentile",
+      explanation:
+        "Shows where current implied volatility ranks relative to the past year",
+    },
   ],
   disclaimer: "Educational analysis only. Not financial advice.",
 };
@@ -217,8 +286,22 @@ const VALID_TRADE_DECISION_RESPONSE = {
   adjusted_entry: {
     strategy_name: "Bull Call Spread",
     legs: [
-      { action: "buy", type: "call", strike: 195, expiry: "2026-04-18", premium: 8.5, quantity: 1 },
-      { action: "sell", type: "call", strike: 205, expiry: "2026-04-18", premium: 3.2, quantity: 1 },
+      {
+        action: "buy",
+        type: "call",
+        strike: 195,
+        expiry: "2026-04-18",
+        premium: 8.5,
+        quantity: 1,
+      },
+      {
+        action: "sell",
+        type: "call",
+        strike: 205,
+        expiry: "2026-04-18",
+        premium: 3.2,
+        quantity: 1,
+      },
     ],
     net_premium: 5.3,
   },
@@ -228,7 +311,8 @@ const VALID_TRADE_DECISION_RESPONSE = {
     time_exit_days: 14,
   },
   risk_notes: ["Elevated IV may compress", "Earnings in 3 weeks"],
-  educational_summary: "This trade uses a bull call spread to bet on AAPL rising to $205 within 18 days, risking $530 to potentially gain $470.",
+  educational_summary:
+    "This trade uses a bull call spread to bet on AAPL rising to $205 within 18 days, risking $530 to potentially gain $470.",
 };
 
 // ---------------------------------------------------------------------------
@@ -290,7 +374,9 @@ describe("callLLMWithRetry — via classifyNews", () => {
 
     // Should filter to only impact >= 3 articles
     expect(result.articles).toHaveLength(1);
-    expect(result.articles[0].original_headline).toBe("Fed raises rates by 25bps");
+    expect(result.articles[0].original_headline).toBe(
+      "Fed raises rates by 25bps",
+    );
     expect(result.processing_metadata.total_relevant).toBe(1);
     expect(mockCreate).toHaveBeenCalledTimes(1);
   });
@@ -352,11 +438,14 @@ describe("callLLMWithRetry — via classifyNews", () => {
 
   it("batches articles and merges results", async () => {
     // Create 25 articles to force 2 batches (MAX_ARTICLES_PER_BATCH = 20)
-    const manyArticles: RawNewsArticle[] = Array.from({ length: 25 }, (_, i) => ({
-      headline: `Article ${i}`,
-      source: "finnhub" as const,
-      publishedAt: "2026-03-31T10:00:00Z",
-    }));
+    const manyArticles: RawNewsArticle[] = Array.from(
+      { length: 25 },
+      (_, i) => ({
+        headline: `Article ${i}`,
+        source: "finnhub" as const,
+        publishedAt: "2026-03-31T10:00:00Z",
+      }),
+    );
 
     const batch1Response = {
       articles: [
@@ -365,7 +454,12 @@ describe("callLLMWithRetry — via classifyNews", () => {
           original_headline: "Batch 1 article",
         },
       ],
-      processing_metadata: { total_input: 20, total_relevant: 1, total_discarded: 19, processing_timestamp: "2026-03-31T10:00:00Z" },
+      processing_metadata: {
+        total_input: 20,
+        total_relevant: 1,
+        total_discarded: 19,
+        processing_timestamp: "2026-03-31T10:00:00Z",
+      },
     };
     const batch2Response = {
       articles: [
@@ -374,7 +468,12 @@ describe("callLLMWithRetry — via classifyNews", () => {
           original_headline: "Batch 2 article",
         },
       ],
-      processing_metadata: { total_input: 5, total_relevant: 1, total_discarded: 4, processing_timestamp: "2026-03-31T10:00:00Z" },
+      processing_metadata: {
+        total_input: 5,
+        total_relevant: 1,
+        total_discarded: 4,
+        processing_timestamp: "2026-03-31T10:00:00Z",
+      },
     };
 
     mockLLMResponse(batch1Response, 500);
@@ -392,7 +491,9 @@ describe("callLLMWithRetry — via classifyNews", () => {
 
     const callArgs = mockCreate.mock.calls[0][0];
     const systemMsg = callArgs.messages[0].content;
-    expect(systemMsg).toContain("You MUST respond with ONLY a valid JSON object");
+    expect(systemMsg).toContain(
+      "You MUST respond with ONLY a valid JSON object",
+    );
     expect(systemMsg).toContain('"original_headline"');
   });
 
@@ -429,7 +530,10 @@ describe("callLLMWithRetry — via classifyNews", () => {
 
 describe("extractJson — response parsing resilience", () => {
   it("handles JSON inside markdown code fences", async () => {
-    const fenced = "Here is the analysis:\n```json\n" + JSON.stringify(VALID_CLASSIFICATION_RESPONSE) + "\n```\nDone.";
+    const fenced =
+      "Here is the analysis:\n```json\n" +
+      JSON.stringify(VALID_CLASSIFICATION_RESPONSE) +
+      "\n```\nDone.";
     mockLLMResponseRaw(fenced, 800);
 
     const result = await classifyNews(SAMPLE_ARTICLES);
@@ -437,7 +541,10 @@ describe("extractJson — response parsing resilience", () => {
   });
 
   it("extracts JSON object from prose wrapper", async () => {
-    const prose = "Based on my analysis, here is the result: " + JSON.stringify(VALID_CLASSIFICATION_RESPONSE) + " That concludes my review.";
+    const prose =
+      "Based on my analysis, here is the result: " +
+      JSON.stringify(VALID_CLASSIFICATION_RESPONSE) +
+      " That concludes my review.";
     mockLLMResponseRaw(prose, 800);
 
     const result = await classifyNews(SAMPLE_ARTICLES);
@@ -459,7 +566,9 @@ describe("extractJson — response parsing resilience", () => {
 
 describe("Zod schema validation — newsClassificationSchema", () => {
   it("accepts valid classification response", () => {
-    expect(() => newsClassificationSchema.parse(VALID_CLASSIFICATION_RESPONSE)).not.toThrow();
+    expect(() =>
+      newsClassificationSchema.parse(VALID_CLASSIFICATION_RESPONSE),
+    ).not.toThrow();
   });
 
   it("rejects missing required field (articles)", () => {
@@ -482,14 +591,19 @@ describe("Zod schema validation — newsClassificationSchema", () => {
 
 describe("Zod schema validation — crossReferenceAnalysisSchema", () => {
   it("accepts valid cross-reference response", () => {
-    expect(() => crossReferenceAnalysisSchema.parse(VALID_CROSS_REFERENCE_RESPONSE)).not.toThrow();
+    expect(() =>
+      crossReferenceAnalysisSchema.parse(VALID_CROSS_REFERENCE_RESPONSE),
+    ).not.toThrow();
   });
 
   it("accepts empty correlations array", () => {
     const empty = {
       ...VALID_CROSS_REFERENCE_RESPONSE,
       correlations: [],
-      analysis_metadata: { ...VALID_CROSS_REFERENCE_RESPONSE.analysis_metadata, correlations_found: 0 },
+      analysis_metadata: {
+        ...VALID_CROSS_REFERENCE_RESPONSE.analysis_metadata,
+        correlations_found: 0,
+      },
     };
     expect(() => crossReferenceAnalysisSchema.parse(empty)).not.toThrow();
   });
@@ -509,7 +623,9 @@ describe("Zod schema validation — crossReferenceAnalysisSchema", () => {
 
 describe("Zod schema validation — tradeRecommendationSchema", () => {
   it("accepts valid recommendation response", () => {
-    expect(() => tradeRecommendationSchema.parse(VALID_RECOMMENDATION_RESPONSE)).not.toThrow();
+    expect(() =>
+      tradeRecommendationSchema.parse(VALID_RECOMMENDATION_RESPONSE),
+    ).not.toThrow();
   });
 
   it("rejects missing primary_strategy", () => {
@@ -532,7 +648,9 @@ describe("Zod schema validation — tradeRecommendationSchema", () => {
 
 describe("Zod schema validation — deepDiveAnalysisSchema", () => {
   it("accepts valid deep dive response", () => {
-    expect(() => deepDiveAnalysisSchema.parse(VALID_DEEP_DIVE_RESPONSE)).not.toThrow();
+    expect(() =>
+      deepDiveAnalysisSchema.parse(VALID_DEEP_DIVE_RESPONSE),
+    ).not.toThrow();
   });
 
   it("accepts optional nullable fields as null", () => {
@@ -547,9 +665,12 @@ describe("Zod schema validation — deepDiveAnalysisSchema", () => {
 
   it("accepts optional nullable fields as undefined (omitted)", () => {
     const withoutOptional = structuredClone(VALID_DEEP_DIVE_RESPONSE);
-    delete (withoutOptional.technical_patterns[0] as Record<string, unknown>).price_target;
-    delete (withoutOptional.options_context as Record<string, unknown>).max_pain;
-    delete (withoutOptional.options_context as Record<string, unknown>).greeks_breakdown;
+    delete (withoutOptional.technical_patterns[0] as Record<string, unknown>)
+      .price_target;
+    delete (withoutOptional.options_context as Record<string, unknown>)
+      .max_pain;
+    delete (withoutOptional.options_context as Record<string, unknown>)
+      .greeks_breakdown;
     expect(() => deepDiveAnalysisSchema.parse(withoutOptional)).not.toThrow();
   });
 
@@ -562,7 +683,9 @@ describe("Zod schema validation — deepDiveAnalysisSchema", () => {
 
 describe("Zod schema validation — tradeDecisionSchema", () => {
   it("accepts valid trade decision response", () => {
-    expect(() => tradeDecisionSchema.parse(VALID_TRADE_DECISION_RESPONSE)).not.toThrow();
+    expect(() =>
+      tradeDecisionSchema.parse(VALID_TRADE_DECISION_RESPONSE),
+    ).not.toThrow();
   });
 
   it("rejects should_enter as string instead of boolean", () => {
@@ -582,9 +705,21 @@ describe("Zod schema validation — tradeDecisionSchema", () => {
 
 describe("crossReferenceAnalysis", () => {
   it("returns empty result for empty news", async () => {
-    const result = await crossReferenceAnalysis([], [
-      { ticker: "AAPL", strike: 200, expiry: "2026-04-18", callPut: "C", premium: 500000, volume: 5000, openInterest: 10000, sentiment: "bullish" },
-    ]);
+    const result = await crossReferenceAnalysis(
+      [],
+      [
+        {
+          ticker: "AAPL",
+          strike: 200,
+          expiry: "2026-04-18",
+          callPut: "C",
+          premium: 500000,
+          volume: 5000,
+          openInterest: 10000,
+          sentiment: "bullish",
+        },
+      ],
+    );
     expect(result.correlations).toHaveLength(0);
     expect(result.summary).toContain("Insufficient");
     expect(mockCreate).not.toHaveBeenCalled();
@@ -592,7 +727,16 @@ describe("crossReferenceAnalysis", () => {
 
   it("returns empty result for empty whales", async () => {
     const result = await crossReferenceAnalysis(
-      [{ headline: "Test", impact_score: 5, sentiment: "bullish", event_type: "earnings", affected_sectors: [], affected_tickers: [] }],
+      [
+        {
+          headline: "Test",
+          impact_score: 5,
+          sentiment: "bullish",
+          event_type: "earnings",
+          affected_sectors: [],
+          affected_tickers: [],
+        },
+      ],
       [],
     );
     expect(result.correlations).toHaveLength(0);
@@ -603,8 +747,28 @@ describe("crossReferenceAnalysis", () => {
     mockLLMResponse(VALID_CROSS_REFERENCE_RESPONSE, 600);
 
     const result = await crossReferenceAnalysis(
-      [{ headline: "Fed raises rates", impact_score: 8, sentiment: "bearish", event_type: "central_bank", affected_sectors: ["Financials"], affected_tickers: ["SPY"] }],
-      [{ ticker: "AAPL", strike: 200, expiry: "2026-04-18", callPut: "C", premium: 500000, volume: 5000, openInterest: 10000, sentiment: "bullish" }],
+      [
+        {
+          headline: "Fed raises rates",
+          impact_score: 8,
+          sentiment: "bearish",
+          event_type: "central_bank",
+          affected_sectors: ["Financials"],
+          affected_tickers: ["SPY"],
+        },
+      ],
+      [
+        {
+          ticker: "AAPL",
+          strike: 200,
+          expiry: "2026-04-18",
+          callPut: "C",
+          premium: 500000,
+          volume: 5000,
+          openInterest: 10000,
+          sentiment: "bullish",
+        },
+      ],
     );
 
     expect(result.correlations).toHaveLength(1);
@@ -631,7 +795,10 @@ describe("generateRecommendation", () => {
   it("calls LLM and returns parsed recommendation", async () => {
     mockLLMResponse(VALID_RECOMMENDATION_RESPONSE, 1200);
 
-    const result = await generateRecommendation(mockCorrelation, mockMarketData);
+    const result = await generateRecommendation(
+      mockCorrelation,
+      mockMarketData,
+    );
     expect(result.ticker).toBe("AAPL");
     expect(result.direction).toBe("bullish");
     expect(result.primary_strategy.legs).toHaveLength(2);
@@ -647,10 +814,30 @@ describe("generateRecommendation", () => {
 describe("generateDeepDive", () => {
   const mockInput = {
     ticker: "AAPL",
-    whaleTrade: { ticker: "AAPL", strike: 200, expiry: "2026-04-18", callPut: "C", premium: 500000 },
+    whaleTrade: {
+      ticker: "AAPL",
+      strike: 200,
+      expiry: "2026-04-18",
+      callPut: "C",
+      premium: 500000,
+    },
     historicalData: [
-      { time: "2026-03-28", open: 193, high: 196, low: 192, close: 195, volume: 50000000 },
-      { time: "2026-03-31", open: 195, high: 197, low: 194, close: 196, volume: 55000000 },
+      {
+        time: "2026-03-28",
+        open: 193,
+        high: 196,
+        low: 192,
+        close: 195,
+        volume: 50000000,
+      },
+      {
+        time: "2026-03-31",
+        open: 195,
+        high: 197,
+        low: 194,
+        close: 196,
+        volume: 55000000,
+      },
     ],
     optionsChain: null,
     currentPrice: 196,
@@ -683,8 +870,20 @@ describe("evaluateTradeForSim", () => {
       strategy: {
         name: "Bull Call Spread",
         legs: [
-          { action: "buy", type: "call", strike: 195, expiry: "2026-04-18", estimated_premium: 8.5 },
-          { action: "sell", type: "call", strike: 205, expiry: "2026-04-18", estimated_premium: 3.2 },
+          {
+            action: "buy",
+            type: "call",
+            strike: 195,
+            expiry: "2026-04-18",
+            estimated_premium: 8.5,
+          },
+          {
+            action: "sell",
+            type: "call",
+            strike: 205,
+            expiry: "2026-04-18",
+            estimated_premium: 3.2,
+          },
         ],
         max_loss: "$530",
         max_profit: "$470",
