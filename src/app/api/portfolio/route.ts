@@ -15,12 +15,15 @@ import {
   getMockEquityCurve,
   getMockPortfolioTrade,
 } from "@/lib/mock/portfolio-mock-data";
+import { runAttribution } from "@/lib/analytics/attribution-engine";
+import { runPostmortemEngine } from "@/lib/analytics/postmortem-engine";
+import { runReplayHarness } from "@/lib/analytics/replay-harness";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
-  const view = params.get("view") ?? "overview"; // 'overview' | 'trades' | 'equity' | 'trade'
+  const view = params.get("view") ?? "overview"; // 'overview' | 'trades' | 'equity' | 'trade' | 'attribution' | 'postmortem' | 'benchmark'
   const tradeId = params.get("id");
   const status = params.get("status"); // 'open' | 'closed' | 'all'
   const limit = Math.min(Number(params.get("limit")) || 50, 200);
@@ -199,6 +202,157 @@ export async function GET(req: NextRequest) {
           : null,
       })),
       total: trades.length,
+    });
+  }
+
+  // --- Story 30.6: Opportunity Attribution Diagnostics ---
+  if (view === "attribution") {
+    // Fetch all whale alerts
+    const whales = await db
+      .select()
+      .from(whaleAlerts)
+      .orderBy(desc(whaleAlerts.detectedAt))
+      .limit(limit);
+
+    // Fetch all trades
+    const trades = await db.select().from(simTrades);
+
+    const whalesForEngine = whales.map((w) => ({
+      ticker: w.ticker,
+      strike: w.strike ?? 0,
+      expiry: w.expiry ?? "",
+      callPut: (w.callPut ?? "C") as "C" | "P",
+      premium: w.premium ?? 0,
+      volume: w.volume ?? 0,
+      openInterest: w.openInterest ?? 0,
+      underlyingPrice: w.underlyingPrice ?? undefined,
+      sentiment: (w.sentiment ?? "bullish") as "bullish" | "bearish",
+      source: w.source ?? "unknown",
+      detectedAt: w.detectedAt ?? new Date().toISOString(),
+      qualityScore: w.qualityScore ?? undefined,
+    }));
+
+    const tradesForEngine = trades.map((t) => ({
+      id: t.id,
+      ticker: t.ticker,
+      entryDate: t.entryDate ?? "",
+      exitDate: t.exitDate,
+      entryPrice: Number(t.entryPrice),
+      exitPrice: t.exitPrice ? Number(t.exitPrice) : null,
+      pnl: t.pnl ? Number(t.pnl) : null,
+      pnlPct: t.pnlPct ? Number(t.pnlPct) : null,
+      status: (t.status ?? "closed") as "open" | "closed",
+    }));
+
+    const attribution = runAttribution(whalesForEngine, tradesForEngine);
+
+    return NextResponse.json({
+      attribution: {
+        captureRate: attribution.captureRate,
+        totalCandidates: attribution.totalCandidates,
+        capturedCount: attribution.captured.length,
+        missedCount: attribution.missed.length,
+        captured: attribution.captured.map((c) => ({
+          ticker: c.ticker,
+          sentiment: c.sentiment,
+          premium: c.premium,
+          qualityScore: c.qualityScore,
+          realizedReturnPct: c.realizedReturnPct,
+          detectedAt: c.detectedAt,
+        })),
+        missed: attribution.missed.slice(0, 20).map((m) => ({
+          ticker: m.ticker,
+          sentiment: m.sentiment,
+          premium: m.premium,
+          qualityScore: m.qualityScore,
+          missReason: m.missReason,
+          detectedAt: m.detectedAt,
+        })),
+        summary: attribution.summary,
+      },
+    });
+  }
+
+  // --- Story 30.7: Trade Postmortem Diagnostics ---
+  if (view === "postmortem") {
+    const trades = await db
+      .select()
+      .from(simTrades)
+      .where(eq(simTrades.status, "closed"))
+      .orderBy(desc(simTrades.exitDate))
+      .limit(limit);
+
+    const postmortemInputs = trades.map((t) => ({
+      tradeId: t.id,
+      ticker: t.ticker,
+      direction: "bullish" as const,
+      entryDate: t.entryDate ?? "",
+      exitDate: t.exitDate ?? "",
+      entryPrice: Number(t.entryPrice),
+      exitPrice: Number(t.exitPrice),
+      pnl: Number(t.pnl),
+      pnlPct: Number(t.pnlPct),
+    }));
+
+    const postmortem = runPostmortemEngine(postmortemInputs);
+
+    return NextResponse.json({
+      postmortem: {
+        avoidableCount: postmortem.avoidableCount,
+        unavoidableCount: postmortem.unavoidableCount,
+        results: postmortem.results.map((r) => ({
+          tradeId: r.tradeId,
+          ticker: r.isLosingTrade
+            ? trades.find((t) => t.id === r.tradeId)?.ticker
+            : undefined,
+          isLosingTrade: r.isLosingTrade,
+          isAvoidable: r.isAvoidable,
+          avoidableCategory: r.avoidableCategory,
+          riskScore: r.riskScore,
+          explanation: r.explanation,
+          preTradeWarnings: r.preTradeWarnings,
+        })),
+        summary: postmortem.summary,
+      },
+    });
+  }
+
+  // --- Story 30.8: Benchmark Comparison ---
+  if (view === "benchmark") {
+    const trades = await db.select().from(simTrades);
+
+    const replayInputs = trades.map((t) => ({
+      tradeId: t.id,
+      ticker: t.ticker,
+      entryDate: t.entryDate ?? "",
+      exitDate: t.exitDate ?? "",
+      entryPrice: Number(t.entryPrice),
+      exitPrice: Number(t.exitPrice),
+      direction: "bullish" as const,
+      pnl: Number(t.pnl),
+      pnlPct: Number(t.pnlPct),
+      qualityScore: undefined,
+      ivRegime: undefined as "elevated" | "normal" | "low" | undefined,
+      technicalAlignment: undefined,
+      compositeConfidence: undefined,
+    }));
+
+    const replay = runReplayHarness(replayInputs);
+
+    return NextResponse.json({
+      benchmark: {
+        current: {
+          name: replay.current.config.name,
+          metrics: replay.current.metrics,
+        },
+        baselines: replay.baselines.map((b) => ({
+          name: b.config.name,
+          description: b.config.description,
+          metrics: b.metrics,
+        })),
+        comparison: replay.comparison,
+        report: replay.report,
+      },
     });
   }
 

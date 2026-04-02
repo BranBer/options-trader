@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -26,6 +26,14 @@ import type {
   TradeDecision,
 } from "@/types/portfolio";
 import type { DeepDiveAnalysis } from "@/types/analysis";
+import type {
+  AttributionResponse,
+  AttributionMissedOpportunity,
+  PostmortemResponse,
+  PostmortemResult,
+  BenchmarkResponse,
+  BenchmarkBaseline,
+} from "@/types/analytics";
 import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
 import TechnicalChart from "@/components/shared/TechnicalChart";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
@@ -92,6 +100,9 @@ export default function PortfolioPage() {
           <TabsTrigger value="open">Open Positions</TabsTrigger>
           <TabsTrigger value="closed">Trade History</TabsTrigger>
           <TabsTrigger value="equity">Equity Curve</TabsTrigger>
+          <TabsTrigger value="attribution">Attribution</TabsTrigger>
+          <TabsTrigger value="postmortem">Postmortem</TabsTrigger>
+          <TabsTrigger value="benchmark">Benchmark</TabsTrigger>
         </TabsList>
 
         <TabsContent value="open" className="mt-4">
@@ -102,6 +113,15 @@ export default function PortfolioPage() {
         </TabsContent>
         <TabsContent value="equity" className="mt-4">
           <EquityCurveSection />
+        </TabsContent>
+        <TabsContent value="attribution" className="mt-4">
+          <AttributionSection />
+        </TabsContent>
+        <TabsContent value="postmortem" className="mt-4">
+          <PostmortemSection />
+        </TabsContent>
+        <TabsContent value="benchmark" className="mt-4">
+          <BenchmarkSection />
         </TabsContent>
       </Tabs>
     </div>
@@ -875,6 +895,74 @@ function TradeDetail({
           </Card>
         )}
 
+        {/* Attribution — did this trade capture a whale opportunity? */}
+        {data?.sourceWhale && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                Opportunity Attribution
+                <Tooltip>
+                  <TooltipTrigger>
+                    <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="text-xs">
+                      Whether this trade successfully captured a whale-driven
+                      opportunity. Shows the original whale alert quality and
+                      how the trade performed relative to expectations.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AttributionCard
+                ticker={trade.ticker}
+                sentiment={data.sourceWhale.sentiment ?? "neutral"}
+                qualityScore={data.sourceWhale.qualityScore}
+                premium={data.sourceWhale.premium}
+                pnl={pnl}
+                pnlPct={pnlPct}
+                isOpen={isOpen}
+              />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Postmortem — avoidable loss classification for closed losing trades */}
+        {!isOpen && pnl < 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                Postmortem Analysis
+                <Tooltip>
+                  <TooltipTrigger>
+                    <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="text-xs">
+                      Classification of whether this loss was avoidable based on
+                      pre-trade signals that were available at entry time.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PostmortemCard
+                tradeId={trade.id}
+                ticker={trade.ticker}
+                entryDate={trade.entryDate}
+                exitDate={trade.exitDate ?? ""}
+                entryPrice={Number(trade.entryPrice)}
+                exitPrice={Number(trade.exitPrice)}
+                pnl={pnl}
+                pnlPct={pnlPct}
+              />
+            </CardContent>
+          </Card>
+        )}
+
         {/* Lifecycle Timeline — chronological journey of the trade */}
         <Card>
           <CardHeader>
@@ -907,6 +995,597 @@ function TradeDetail({
         </Card>
       </div>
     </TooltipProvider>
+  );
+}
+
+// ============================================================
+// Attribution Section (Missed Opportunities)
+// ============================================================
+
+function AttributionSection() {
+  const [data, setData] = useState<AttributionResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/portfolio?view=attribution")
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d.attribution);
+        setIsLoading(false);
+      })
+      .catch(() => setIsLoading(false));
+  }, []);
+
+  if (isLoading) {
+    return <div className="h-48 animate-pulse rounded bg-muted" />;
+  }
+
+  if (!data) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <Target className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+          <p className="text-muted-foreground text-sm">
+            Attribution data will appear once there are whale alerts and trades
+            to analyze.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 sm:grid-cols-3">
+        <StatCard
+          title="Capture Rate"
+          value={`${data.captureRate?.toFixed(1) ?? 0}%`}
+          icon={Target}
+          description={`${data.capturedCount ?? 0} of ${data.totalCandidates ?? 0} alerts`}
+          tooltip="Percentage of whale alerts that resulted in a trade. Higher is better — it means the algorithm is capturing opportunities."
+          trend={data.captureRate > 50 ? 1 : data.captureRate > 20 ? 0 : -1}
+        />
+        <StatCard
+          title="Captured"
+          value={data.capturedCount?.toString() ?? "0"}
+          icon={TrendingUp}
+          description="Whale alerts traded"
+          tooltip="Number of whale alerts that the algorithm successfully traded on."
+          trend={1}
+        />
+        <StatCard
+          title="Missed"
+          value={data.missedCount?.toString() ?? "0"}
+          icon={TrendingDown}
+          description="Whale alerts not traded"
+          tooltip="Number of whale alerts that were not traded. Some may have been intentionally skipped due to low quality scores."
+          trend={-1}
+        />
+      </div>
+
+      {data.missed?.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">
+              Missed High-Quality Opportunities
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {data.missed.map((m: AttributionMissedOpportunity, i: number) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between text-sm p-2 rounded bg-muted/50"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold">{m.ticker}</span>
+                    <Badge variant="outline" className="text-xs">
+                      {m.sentiment}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      Quality: {m.qualityScore ?? "?"}/100
+                    </span>
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground">
+                    {m.missReason?.replace(/_/g, " ") ?? "unknown"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Postmortem Section (Bad Trade Analysis)
+// ============================================================
+
+function PostmortemSection() {
+  const [data, setData] = useState<PostmortemResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/portfolio?view=postmortem")
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d.postmortem);
+        setIsLoading(false);
+      })
+      .catch(() => setIsLoading(false));
+  }, []);
+
+  if (isLoading) {
+    return <div className="h-48 animate-pulse rounded bg-muted" />;
+  }
+
+  if (!data) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <ShieldAlert className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+          <p className="text-muted-foreground text-sm">
+            Postmortem data will appear once there are closed losing trades to
+            analyze.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const avoidableResults =
+    data.results?.filter((r: PostmortemResult) => r.isAvoidable) ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <StatCard
+          title="Avoidable Losses"
+          value={data.avoidableCount?.toString() ?? "0"}
+          icon={ShieldAlert}
+          description="Losses that could have been prevented"
+          tooltip="Number of losing trades that were likely avoidable based on pre-trade signals."
+          trend={-1}
+        />
+        <StatCard
+          title="Unavoidable Losses"
+          value={data.unavoidableCount?.toString() ?? "0"}
+          icon={Activity}
+          description="Market noise — no fault"
+          tooltip="Number of losing trades that appear unavoidable given the information available at entry time."
+          trend={0}
+        />
+      </div>
+
+      {avoidableResults.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">
+              Avoidable Losses by Category
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {avoidableResults.map((r: PostmortemResult, i: number) => (
+                <div key={i} className="p-3 rounded bg-muted/50 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold">
+                        {r.ticker ?? `Trade #${r.tradeId}`}
+                      </span>
+                      <Badge variant="destructive" className="text-xs">
+                        {r.avoidableCategory?.replace(/_/g, " ") ?? "unknown"}
+                      </Badge>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      Risk: {r.riskScore}/100
+                    </span>
+                  </div>
+                  {r.preTradeWarnings?.length > 0 && (
+                    <ul className="text-xs text-muted-foreground space-y-0.5">
+                      {r.preTradeWarnings.map((w: string, j: number) => (
+                        <li key={j} className="flex items-start gap-1">
+                          <ShieldAlert className="h-3 w-3 text-yellow-400 mt-0.5 shrink-0" />
+                          {w}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Benchmark Section (Algorithm Comparison)
+// ============================================================
+
+function BenchmarkSection() {
+  const [data, setData] = useState<BenchmarkResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/portfolio?view=benchmark")
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d.benchmark);
+        setIsLoading(false);
+      })
+      .catch(() => setIsLoading(false));
+  }, []);
+
+  const handleExport = () => {
+    if (!data?.report) return;
+    const blob = new Blob([data.report], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `benchmark-report-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (isLoading) {
+    return <div className="h-48 animate-pulse rounded bg-muted" />;
+  }
+
+  if (!data) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <Trophy className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+          <p className="text-muted-foreground text-sm">
+            Benchmark data will appear once there are trades to compare against
+            baseline strategies.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Export button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleExport}
+          className="text-xs text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1"
+        >
+          <BarChart3 className="h-3 w-3" />
+          Export Report
+        </button>
+      </div>
+      {/* Current Algorithm vs Best Baseline */}
+      <div className="grid gap-2 sm:grid-cols-3">
+        <StatCard
+          title="Win Rate vs Best"
+          value={`${data.comparison?.currentVsBestBaseline?.winRateDiff >= 0 ? "+" : ""}${data.comparison?.currentVsBestBaseline?.winRateDiff?.toFixed(1) ?? 0}%`}
+          icon={Target}
+          description="Current algorithm vs best baseline"
+          tooltip="Difference in win rate between the current algorithm and the best-performing baseline strategy."
+          trend={
+            data.comparison?.currentVsBestBaseline?.winRateDiff >= 0 ? 1 : -1
+          }
+        />
+        <StatCard
+          title="P&L vs Best"
+          value={`${data.comparison?.currentVsBestBaseline?.pnlDiff >= 0 ? "+" : ""}${data.comparison?.currentVsBestBaseline?.pnlDiff?.toFixed(2) ?? 0}%`}
+          icon={
+            data.comparison?.currentVsBestBaseline?.pnlDiff >= 0
+              ? TrendingUp
+              : TrendingDown
+          }
+          description="Current algorithm vs best baseline"
+          tooltip="Difference in total P&L between the current algorithm and the best-performing baseline strategy."
+          trend={data.comparison?.currentVsBestBaseline?.pnlDiff >= 0 ? 1 : -1}
+        />
+        <StatCard
+          title="Sharpe vs Best"
+          value={`${data.comparison?.currentVsBestBaseline?.sharpeDiff >= 0 ? "+" : ""}${data.comparison?.currentVsBestBaseline?.sharpeDiff?.toFixed(2) ?? 0}`}
+          icon={BarChart3}
+          description="Current algorithm vs best baseline"
+          tooltip="Difference in Sharpe ratio between the current algorithm and the best-performing baseline strategy."
+          trend={
+            data.comparison?.currentVsBestBaseline?.sharpeDiff >= 0 ? 1 : -1
+          }
+        />
+      </div>
+
+      {/* Baseline Comparison Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">
+            Baseline Strategy Comparison
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {/* Current Algorithm */}
+            <div className="p-3 rounded bg-blue-500/10 border border-blue-500/20">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-blue-400">
+                  {data.current?.name ?? "Current Algorithm"}
+                </span>
+                <Badge
+                  variant="outline"
+                  className="border-blue-500/30 text-blue-400"
+                >
+                  Your Strategy
+                </Badge>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-xs">
+                <div>
+                  <span className="text-muted-foreground">Win Rate</span>
+                  <p className="font-mono">
+                    {data.current?.metrics?.winRate?.toFixed(1) ?? 0}%
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Total P&L</span>
+                  <p className="font-mono">
+                    {data.current?.metrics?.totalPnlPct?.toFixed(2) ?? 0}%
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Sharpe</span>
+                  <p className="font-mono">
+                    {data.current?.metrics?.sharpeRatio?.toFixed(2) ?? 0}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Max DD</span>
+                  <p className="font-mono">
+                    {data.current?.metrics?.maxDrawdownPct?.toFixed(2) ?? 0}%
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Baselines */}
+            {data.baselines?.map((b: BenchmarkBaseline, i: number) => (
+              <div key={i} className="p-3 rounded bg-muted/50">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">{b.name}</span>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      <p className="text-xs">{b.description}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-xs">
+                  <div>
+                    <span className="text-muted-foreground">Win Rate</span>
+                    <p className="font-mono">
+                      {b.metrics?.winRate?.toFixed(1) ?? 0}%
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Total P&L</span>
+                    <p className="font-mono">
+                      {b.metrics?.totalPnlPct?.toFixed(2) ?? 0}%
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Sharpe</span>
+                    <p className="font-mono">
+                      {b.metrics?.sharpeRatio?.toFixed(2) ?? 0}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Max DD</span>
+                    <p className="font-mono">
+                      {b.metrics?.maxDrawdownPct?.toFixed(2) ?? 0}%
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ============================================================
+// PostmortemCard (inline classification for trade detail)
+// ============================================================
+
+function PostmortemCard({
+  tradeId,
+  ticker,
+  entryDate,
+  exitDate,
+  entryPrice,
+  exitPrice,
+  pnl,
+  pnlPct,
+}: {
+  tradeId: number;
+  ticker: string;
+  entryDate: string;
+  exitDate: string;
+  entryPrice: number;
+  exitPrice: number;
+  pnl: number;
+  pnlPct: number;
+}) {
+  const [result, setResult] = useState<PostmortemResult | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/portfolio?view=postmortem")
+      .then((r) => r.json())
+      .then((d) => {
+        const postmortem = d.postmortem;
+        const match = postmortem?.results?.find(
+          (r: PostmortemResult) => r.tradeId === tradeId,
+        );
+        setResult(match ?? null);
+        setIsLoading(false);
+      })
+      .catch(() => setIsLoading(false));
+  }, [tradeId]);
+
+  if (isLoading) {
+    return <div className="h-16 animate-pulse rounded bg-muted" />;
+  }
+
+  if (!result) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Postmortem data not available for this trade.
+      </p>
+    );
+  }
+
+  if (!result.isAvoidable) {
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <Activity className="h-4 w-4 text-blue-400" />
+        <span className="text-blue-400 font-medium">Unavoidable Loss</span>
+        <span className="text-muted-foreground text-xs">
+          — This loss appears to be market noise given the pre-trade signals.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <ShieldAlert className="h-4 w-4 text-red-400" />
+        <span className="text-red-400 font-medium text-sm">Avoidable Loss</span>
+        <Badge variant="destructive" className="text-xs">
+          {result.avoidableCategory?.replace(/_/g, " ") ?? "unknown"}
+        </Badge>
+        <span className="text-xs text-muted-foreground ml-auto">
+          Risk score: {result.riskScore}/100
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">{result.explanation}</p>
+      {result.preTradeWarnings?.length > 0 && (
+        <ul className="text-xs text-muted-foreground space-y-1">
+          {result.preTradeWarnings.map((w: string, i: number) => (
+            <li key={i} className="flex items-start gap-1">
+              <ShieldAlert className="h-3 w-3 text-yellow-400 mt-0.5 shrink-0" />
+              {w}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// AttributionCard (inline attribution for trade detail)
+// ============================================================
+
+function AttributionCard({
+  ticker,
+  sentiment,
+  qualityScore,
+  premium,
+  pnl,
+  pnlPct,
+  isOpen,
+}: {
+  ticker: string;
+  sentiment: string;
+  qualityScore: number | null;
+  premium: number | null;
+  pnl: number;
+  pnlPct: number;
+  isOpen: boolean;
+}) {
+  if (isOpen) {
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <Target className="h-4 w-4 text-blue-400" />
+        <span className="text-blue-400 font-medium">Open Position</span>
+        <span className="text-muted-foreground text-xs">
+          — Attribution will be calculated when this trade closes.
+        </span>
+      </div>
+    );
+  }
+
+  const isCaptured = pnl >= 0;
+  const qualityLabel =
+    qualityScore != null
+      ? qualityScore >= 80
+        ? "High"
+        : qualityScore >= 60
+          ? "Medium"
+          : "Low"
+      : "Unknown";
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        {isCaptured ? (
+          <>
+            <TrendingUp className="h-4 w-4 text-emerald-400" />
+            <span className="text-emerald-400 font-medium text-sm">
+              Captured Opportunity
+            </span>
+          </>
+        ) : (
+          <>
+            <TrendingDown className="h-4 w-4 text-red-400" />
+            <span className="text-red-400 font-medium text-sm">
+              Opportunity Lost
+            </span>
+          </>
+        )}
+        <Badge
+          variant="outline"
+          className={
+            sentiment === "bullish"
+              ? "border-emerald-500/30 text-emerald-400"
+              : "border-red-500/30 text-red-400"
+          }
+        >
+          {sentiment}
+        </Badge>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div>
+          <span className="text-muted-foreground">Whale Quality</span>
+          <p className="font-mono">
+            {qualityScore != null
+              ? `${qualityScore}/100 (${qualityLabel})`
+              : "—"}
+          </p>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Premium</span>
+          <p className="font-mono">
+            {premium != null ? formatCurrency(premium) : "—"}
+          </p>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Result</span>
+          <p
+            className={`font-mono ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
+          >
+            {pnl >= 0 ? "+" : ""}
+            {pnlPct.toFixed(1)}%
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
