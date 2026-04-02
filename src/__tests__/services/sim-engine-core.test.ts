@@ -17,6 +17,7 @@ vi.mock("@/lib/db/schema", () => ({
   simTrades: { status: "status", id: "id" },
   simPortfolio: { id: "id" },
   simPortfolioSnapshots: {},
+  simEvaluations: {},
 }));
 
 const mockFetchMarketData = vi.fn();
@@ -141,23 +142,21 @@ describe("openPosition", () => {
 
   it("rejects trades exceeding 25% of balance", async () => {
     // Mock getOrCreatePortfolio to return balance of 1000
-    const mockLimit = vi
-      .fn()
-      .mockResolvedValue([
-        {
-          id: 1,
-          balance: 1000,
-          startingBalance: 2000,
-          totalPnl: 0,
-          totalTrades: 0,
-          winningTrades: 0,
-          losingTrades: 0,
-          maxDrawdown: 0,
-          bestTradePnl: 0,
-          worstTradePnl: 0,
-          lastUpdated: null,
-        },
-      ]);
+    const mockLimit = vi.fn().mockResolvedValue([
+      {
+        id: 1,
+        balance: 1000,
+        startingBalance: 2000,
+        totalPnl: 0,
+        totalTrades: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        maxDrawdown: 0,
+        bestTradePnl: 0,
+        worstTradePnl: 0,
+        lastUpdated: null,
+      },
+    ]);
     const mockFromPortfolio = vi.fn().mockReturnValue({ limit: mockLimit });
     mockDbSelect.mockReturnValue({ from: mockFromPortfolio });
 

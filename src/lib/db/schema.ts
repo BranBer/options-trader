@@ -106,6 +106,8 @@ export const analyses = sqliteTable(
 // Epic 12 — Simulated Portfolio Tables
 // ============================================================
 
+import { DEFAULT_SIM_PORTFOLIO_BALANCE } from "@/lib/constants/portfolio";
+
 export const simTrades = sqliteTable("sim_trades", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticker: text("ticker").notNull(),
@@ -133,8 +135,10 @@ export const simTrades = sqliteTable("sim_trades", {
 
 export const simPortfolio = sqliteTable("sim_portfolio", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  balance: real("balance").notNull().default(2000),
-  startingBalance: real("starting_balance").notNull().default(2000),
+  balance: real("balance").notNull().default(DEFAULT_SIM_PORTFOLIO_BALANCE),
+  startingBalance: real("starting_balance")
+    .notNull()
+    .default(DEFAULT_SIM_PORTFOLIO_BALANCE),
   totalPnl: real("total_pnl").notNull().default(0),
   totalTrades: integer("total_trades").notNull().default(0),
   winningTrades: integer("winning_trades").notNull().default(0),

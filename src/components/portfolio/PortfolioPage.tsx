@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -43,6 +44,11 @@ import TechnicalChart from "@/components/shared/TechnicalChart";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
 import LineChart from "@/components/shared/LineChart";
 import {
+  createDefaultPortfolioStats,
+  DEFAULT_SIM_PORTFOLIO_BALANCE,
+  MIN_DAY_TRADING_BALANCE,
+} from "@/lib/constants/portfolio";
+import {
   buildDiagnosticsJsonReport,
   buildDiagnosticsMarkdownReport,
   getReasonClusterLabel,
@@ -74,6 +80,7 @@ import {
   Download,
   Pin,
   PinOff,
+  Trash2,
 } from "lucide-react";
 
 // ============================================================
@@ -84,7 +91,11 @@ export default function PortfolioPage() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
+  const [isResettingPortfolio, setIsResettingPortfolio] = useState(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
   const allowedTabs = new Set([
     "open",
     "closed",
@@ -113,6 +124,49 @@ export default function PortfolioPage() {
     );
   };
 
+  const handleResetPortfolio = async () => {
+    if (isResettingPortfolio) return;
+
+    const confirmed = window.confirm(
+      `This will permanently delete all simulated trades, equity snapshots, and evaluation history, then reset the portfolio to ${formatCurrency(DEFAULT_SIM_PORTFOLIO_BALANCE)}. Continue?`,
+    );
+
+    if (!confirmed) return;
+
+    setIsResettingPortfolio(true);
+    setResetError(null);
+    setResetNotice(null);
+
+    try {
+      const response = await fetch("/api/portfolio", {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to reset portfolio");
+      }
+
+      setSelectedTradeId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["portfolio"] }),
+        queryClient.invalidateQueries({ queryKey: ["portfolioTrades"] }),
+        queryClient.invalidateQueries({ queryKey: ["portfolioTrade"] }),
+        queryClient.invalidateQueries({ queryKey: ["equityCurve"] }),
+        queryClient.invalidateQueries({ queryKey: ["portfolioDiagnostics"] }),
+      ]);
+      router.refresh();
+      setResetNotice(
+        `Portfolio reset to ${formatCurrency(DEFAULT_SIM_PORTFOLIO_BALANCE)}.`,
+      );
+    } catch {
+      setResetError(
+        "Portfolio reset failed. The existing simulated data was left in place.",
+      );
+    } finally {
+      setIsResettingPortfolio(false);
+    }
+  };
+
   if (selectedTradeId != null) {
     return (
       <TradeDetail
@@ -124,24 +178,56 @@ export default function PortfolioPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold tracking-tight">
-            Simulated Portfolio
-          </h1>
-          {process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" && (
-            <Badge
-              variant="outline"
-              className="text-xs border-amber-500/50 text-amber-400"
+      <div className="space-y-2">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight">
+                Simulated Portfolio
+              </h1>
+              {process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" && (
+                <Badge
+                  variant="outline"
+                  className="text-xs border-amber-500/50 text-amber-400"
+                >
+                  MOCK DATA
+                </Badge>
+              )}
+            </div>
+            <p className="text-muted-foreground text-sm">
+              AI-managed paper trading account following whale activity and
+              analysis signals. Starting balance:{" "}
+              {formatCurrency(DEFAULT_SIM_PORTFOLIO_BALANCE)} to stay above the{" "}
+              {formatCurrency(MIN_DAY_TRADING_BALANCE)} pattern day trader
+              minimum and reduce avoidable capital-preservation rejects.
+            </p>
+          </div>
+
+          <div className="flex flex-col items-start gap-2 md:items-end">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleResetPortfolio}
+              disabled={isResettingPortfolio}
             >
-              MOCK DATA
-            </Badge>
-          )}
+              <Trash2 className="h-3.5 w-3.5" />
+              {isResettingPortfolio ? "Resetting..." : "Reset Portfolio"}
+            </Button>
+            <p className="max-w-sm text-xs text-muted-foreground md:text-right">
+              Wipes simulated trades, equity snapshots, and evaluation history,
+              then restores the portfolio to its default cash state.
+            </p>
+          </div>
         </div>
-        <p className="text-muted-foreground text-sm">
-          AI-managed paper trading account following whale activity and analysis
-          signals. Starting balance: $2,000.
-        </p>
+
+        {resetNotice ? (
+          <p className="text-sm text-emerald-600 dark:text-emerald-400">
+            {resetNotice}
+          </p>
+        ) : null}
+        {resetError ? (
+          <p className="text-sm text-destructive">{resetError}</p>
+        ) : null}
       </div>
 
       <PortfolioOverview />
@@ -204,23 +290,7 @@ function PortfolioOverview() {
     );
   }
 
-  const p = data?.portfolio ?? {
-    balance: 2000,
-    startingBalance: 2000,
-    totalPnl: 0,
-    totalPnlPct: 0,
-    totalTrades: 0,
-    winningTrades: 0,
-    losingTrades: 0,
-    winRate: 0,
-    avgPnl: 0,
-    maxDrawdown: 0,
-    bestTradePnl: 0,
-    worstTradePnl: 0,
-    sharpeRatio: null,
-    openPositions: 0,
-    lastUpdated: null,
-  };
+  const p = data?.portfolio ?? createDefaultPortfolioStats();
 
   return (
     <TooltipProvider>

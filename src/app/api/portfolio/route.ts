@@ -27,8 +27,45 @@ import { buildAttributionDiagnostics } from "@/lib/analytics/funnel-diagnostics"
 import { runPostmortemEngine } from "@/lib/analytics/postmortem-engine";
 import { runReplayHarness } from "@/lib/analytics/replay-harness";
 import { getLastRefreshAt } from "@/lib/cron/scheduler";
+import {
+  createDefaultPortfolioStats,
+  DEFAULT_SIM_PORTFOLIO_BALANCE,
+} from "@/lib/constants/portfolio";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
+
+export async function DELETE() {
+  if (USE_MOCK) {
+    return NextResponse.json({
+      reset: true,
+      portfolio: createDefaultPortfolioStats(),
+    });
+  }
+
+  await db.delete(simTrades);
+  await db.delete(simPortfolioSnapshots);
+  await db.delete(simEvaluations);
+  await db.delete(simPortfolio);
+
+  await db.insert(simPortfolio).values({
+    balance: DEFAULT_SIM_PORTFOLIO_BALANCE,
+    startingBalance: DEFAULT_SIM_PORTFOLIO_BALANCE,
+  });
+
+  const [portfolio] = await db.select().from(simPortfolio).limit(1);
+
+  return NextResponse.json({
+    reset: true,
+    portfolio: portfolio
+      ? {
+          ...createDefaultPortfolioStats(),
+          balance: portfolio.balance,
+          startingBalance: portfolio.startingBalance,
+          lastUpdated: portfolio.lastUpdated,
+        }
+      : createDefaultPortfolioStats(),
+  });
+}
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
@@ -655,23 +692,7 @@ export async function GET(req: NextRequest) {
 
   if (!portfolio) {
     return NextResponse.json({
-      portfolio: {
-        balance: 2000,
-        startingBalance: 2000,
-        totalPnl: 0,
-        totalPnlPct: 0,
-        totalTrades: 0,
-        winningTrades: 0,
-        losingTrades: 0,
-        winRate: 0,
-        avgPnl: 0,
-        maxDrawdown: 0,
-        bestTradePnl: 0,
-        worstTradePnl: 0,
-        sharpeRatio: null,
-        openPositions: 0,
-        lastUpdated: null,
-      },
+      portfolio: createDefaultPortfolioStats(),
     });
   }
 

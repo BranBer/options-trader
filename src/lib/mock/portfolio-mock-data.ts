@@ -535,10 +535,10 @@ export const MOCK_TRADES: SimTrade[] = [
 // ============================================================
 
 export const MOCK_PORTFOLIO_STATS: PortfolioStats = {
-  balance: 2178,
-  startingBalance: 2000,
+  balance: 30178,
+  startingBalance: 30000,
   totalPnl: 960,
-  totalPnlPct: 48.0,
+  totalPnlPct: 3.2,
   totalTrades: 4,
   winningTrades: 2,
   losingTrades: 1,
@@ -557,14 +557,14 @@ export const MOCK_PORTFOLIO_STATS: PortfolioStats = {
 // ============================================================
 
 export const MOCK_EQUITY_CURVE: EquityCurvePoint[] = [
-  { date: "2025-03-10", balance: 2000, totalPnl: 0, openPositions: 1 },
-  { date: "2025-03-12", balance: 2000, totalPnl: 0, openPositions: 1 },
-  { date: "2025-03-14", balance: 2000, totalPnl: 0, openPositions: 2 },
-  { date: "2025-03-18", balance: 2950, totalPnl: 950, openPositions: 1 },
-  { date: "2025-03-20", balance: 2950, totalPnl: 950, openPositions: 2 },
-  { date: "2025-03-24", balance: 2950, totalPnl: 950, openPositions: 3 },
-  { date: "2025-03-26", balance: 2780, totalPnl: 780, openPositions: 2 },
-  { date: "2025-03-28", balance: 2178, totalPnl: 960, openPositions: 2 },
+  { date: "2025-03-10", balance: 30000, totalPnl: 0, openPositions: 1 },
+  { date: "2025-03-12", balance: 30000, totalPnl: 0, openPositions: 1 },
+  { date: "2025-03-14", balance: 30000, totalPnl: 0, openPositions: 2 },
+  { date: "2025-03-18", balance: 30950, totalPnl: 950, openPositions: 1 },
+  { date: "2025-03-20", balance: 30950, totalPnl: 950, openPositions: 2 },
+  { date: "2025-03-24", balance: 30950, totalPnl: 950, openPositions: 3 },
+  { date: "2025-03-26", balance: 30780, totalPnl: 780, openPositions: 2 },
+  { date: "2025-03-28", balance: 30178, totalPnl: 960, openPositions: 2 },
 ];
 
 // ============================================================

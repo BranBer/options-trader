@@ -20,6 +20,7 @@ vi.mock("@/lib/db/schema", () => ({
   simTrades: { status: "status", id: "id", $inferSelect: {} },
   simPortfolio: { id: "id" },
   simPortfolioSnapshots: {},
+  simEvaluations: {},
 }));
 
 const mockFetchMarketData = vi.fn();

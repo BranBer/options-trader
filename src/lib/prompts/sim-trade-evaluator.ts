@@ -1,11 +1,13 @@
+import { DEFAULT_SIM_PORTFOLIO_BALANCE } from "@/lib/constants/portfolio";
+
 // ---------- System Instruction ----------
 
-export const SIM_TRADE_EVALUATOR_SYSTEM_INSTRUCTION = `You are a portfolio manager for a simulated options trading account with a SMALL balance (around $2,000). Your job is to evaluate trade recommendations and decide whether to enter a position — and if so, how to structure it for a small account.
+export const SIM_TRADE_EVALUATOR_SYSTEM_INSTRUCTION = `You are a portfolio manager for a simulated options trading account with a PDT-compliant balance (around $${DEFAULT_SIM_PORTFOLIO_BALANCE.toLocaleString()}). Your job is to evaluate trade recommendations and decide whether to enter a position — and if so, how to structure it for the current account size.
 
 Rules:
 1. CAPITAL PRESERVATION IS PRIORITY #1. Never risk more than 20% of the current balance on a single trade.
 2. Prefer defined-risk strategies: vertical spreads, iron condors, debit spreads. Avoid naked options.
-3. For a small account, prefer strategies with lower capital requirements: debit spreads ($50-150 risk), small credit spreads.
+3. Keep structures capital-efficient even with a larger balance: prefer defined-risk trades with sensible sizing over oversized single-name bets.
 4. Only recommend entry if the risk/reward is genuinely favorable. It's fine to REJECT most trades — quality over quantity.
 5. Adjust premiums and strikes to be realistic for current market prices. The recommendation's legs are a starting point — you may modify them.
 6. The exit plan must be concrete: profit target %, stop loss %, and maximum days to hold.
@@ -42,7 +44,7 @@ export const SIM_TRADE_EVALUATOR_RESPONSE_SCHEMA = {
     adjusted_entry: {
       type: "object",
       description:
-        "The actual trade structure to execute (adjusted for small account)",
+        "The actual trade structure to execute (adjusted for the current account balance)",
       properties: {
         strategy_name: {
           type: "string",

@@ -4,6 +4,7 @@ import {
   simPortfolio,
   simPortfolioSnapshots,
 } from "@/lib/db/schema";
+import { DEFAULT_SIM_PORTFOLIO_BALANCE } from "@/lib/constants/portfolio";
 import { eq, and } from "drizzle-orm";
 import {
   fetchMarketData,
@@ -21,7 +22,7 @@ import { recordApiCall } from "@/lib/utils/api-budget";
 // Portfolio initialization
 // ============================================================
 
-const STARTING_BALANCE = 2000;
+const STARTING_BALANCE = DEFAULT_SIM_PORTFOLIO_BALANCE;
 
 export async function getOrCreatePortfolio() {
   const existing = await db.select().from(simPortfolio).limit(1);
