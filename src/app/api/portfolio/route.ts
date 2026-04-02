@@ -24,6 +24,13 @@ import {
 } from "@/lib/analytics/alert-diagnostics";
 import { buildAlertCorrelations } from "@/lib/analytics/alert-correlation";
 import { buildAttributionDiagnostics } from "@/lib/analytics/funnel-diagnostics";
+import {
+  buildLearningExportManifest,
+  buildLearningRecords,
+  serializeLearningRecordsToCsv,
+  serializeLearningRecordsToJsonl,
+  summarizeLearningRecords,
+} from "@/lib/analytics/learning-records";
 import { runPostmortemEngine } from "@/lib/analytics/postmortem-engine";
 import { runReplayHarness } from "@/lib/analytics/replay-harness";
 import { getLastRefreshAt } from "@/lib/cron/scheduler";
@@ -33,6 +40,21 @@ import {
 } from "@/lib/constants/portfolio";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
+
+function parseJsonObject(
+  value: string | null | undefined,
+): Record<string, unknown> {
+  if (!value) return {};
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 export async function DELETE() {
   if (USE_MOCK) {
@@ -461,6 +483,217 @@ export async function GET(req: NextRequest) {
           startDate,
           endDate,
         },
+      },
+    });
+  }
+
+  // --- Epic 35.2: Lightweight learning-record inspection API ---
+  if (view === "learning") {
+    const format = params.get("format") ?? "json";
+    const lineageQuality =
+      (params.get("lineageQuality") as
+        | "explicit"
+        | "backfilled"
+        | "inferred"
+        | "incomplete"
+        | null) ?? null;
+
+    const whaleRows = await db
+      .select()
+      .from(whaleAlerts)
+      .orderBy(desc(whaleAlerts.id))
+      .limit(limit);
+
+    const tickers = [...new Set(whaleRows.map((row) => row.ticker))];
+
+    const evaluationRows = tickers.length
+      ? await db
+          .select({
+            id: simEvaluations.id,
+            ticker: simEvaluations.ticker,
+            shouldEnter: simEvaluations.shouldEnter,
+            reasoning: simEvaluations.reasoning,
+            strategyName: simEvaluations.strategyName,
+            legs: simEvaluations.legs,
+            positionSize: simEvaluations.positionSize,
+            netPremium: simEvaluations.netPremium,
+            confidence: simEvaluations.confidence,
+            whaleQualityScore: simEvaluations.whaleQualityScore,
+            portfolioBalance: simEvaluations.portfolioBalance,
+            sourceAnalysisId: simEvaluations.sourceAnalysisId,
+            rejectionGate: simEvaluations.rejectionGate,
+            rejectionReason: simEvaluations.rejectionReason,
+            createdAt: simEvaluations.createdAt,
+          })
+          .from(simEvaluations)
+          .where(inArray(simEvaluations.ticker, tickers))
+          .orderBy(desc(simEvaluations.createdAt))
+          .limit(limit * 6)
+      : [];
+
+    const tradeRows = tickers.length
+      ? await db
+          .select()
+          .from(simTrades)
+          .where(inArray(simTrades.ticker, tickers))
+          .orderBy(desc(simTrades.createdAt))
+          .limit(limit * 4)
+      : [];
+
+    const sourceAnalysisIds = [
+      ...new Set(
+        evaluationRows
+          .map((evaluation) => evaluation.sourceAnalysisId)
+          .filter((id): id is number => id != null)
+          .concat(
+            tradeRows
+              .map((trade) => trade.sourceAnalysisId)
+              .filter((id): id is number => id != null),
+          ),
+      ),
+    ];
+
+    const analysisRows = sourceAnalysisIds.length
+      ? await db
+          .select({
+            id: analyses.id,
+            type: analyses.type,
+            inputRefs: analyses.inputRefs,
+            output: analyses.output,
+            confidence: analyses.confidence,
+            confidenceBreakdown: analyses.confidenceBreakdown,
+            createdAt: analyses.createdAt,
+          })
+          .from(analyses)
+          .where(inArray(analyses.id, sourceAnalysisIds))
+      : [];
+
+    const [portfolio] = await db.select().from(simPortfolio).limit(1);
+
+    const analysisRefMap = new Map<number, Record<string, unknown>>(
+      analysisRows.map((row) => [
+        row.id,
+        parseJsonObject(row.inputRefs ?? undefined),
+      ]),
+    );
+
+    const learningRecords = buildLearningRecords({
+      whales: whaleRows,
+      evaluations: evaluationRows.map((evaluation) => {
+        const refs = evaluation.sourceAnalysisId
+          ? analysisRefMap.get(evaluation.sourceAnalysisId)
+          : undefined;
+
+        return {
+          ...evaluation,
+          primaryWhaleId:
+            typeof refs?.primaryWhaleId === "number"
+              ? refs.primaryWhaleId
+              : null,
+          whaleIds: Array.isArray(refs?.whaleIds)
+            ? refs.whaleIds.filter((id): id is number => typeof id === "number")
+            : [],
+        };
+      }),
+      trades: tradeRows.map((trade) => {
+        let strike: number | undefined;
+        let expiry: string | undefined;
+        try {
+          const legs = trade.legs ? JSON.parse(trade.legs) : [];
+          const firstLeg = Array.isArray(legs) ? legs[0] : null;
+          strike =
+            typeof firstLeg?.strike === "number" ? firstLeg.strike : undefined;
+          expiry =
+            typeof firstLeg?.expiry === "string" ? firstLeg.expiry : undefined;
+        } catch {
+          strike = undefined;
+          expiry = undefined;
+        }
+
+        return {
+          id: trade.id,
+          ticker: trade.ticker,
+          strike,
+          expiry,
+          entryPrice: Number(trade.entryPrice),
+          entryDate: trade.entryDate,
+          exitPrice: trade.exitPrice != null ? Number(trade.exitPrice) : null,
+          exitDate: trade.exitDate,
+          pnl: trade.pnl != null ? Number(trade.pnl) : null,
+          pnlPct: trade.pnlPct != null ? Number(trade.pnlPct) : null,
+          status: (trade.status as "open" | "closed" | "expired") ?? "open",
+          exitReason: trade.exitReason,
+          direction: trade.direction,
+          sourceWhaleId: trade.sourceWhaleId,
+          sourceAnalysisId: trade.sourceAnalysisId,
+        };
+      }),
+      analyses: analysisRows.map((analysis) => ({
+        id: analysis.id,
+        type: analysis.type,
+        inputRefs: parseJsonObject(analysis.inputRefs ?? undefined),
+        output: analysis.output ? parseJsonObject(analysis.output) : null,
+        confidence: analysis.confidence,
+        confidenceBreakdown: analysis.confidenceBreakdown
+          ? parseJsonObject(analysis.confidenceBreakdown)
+          : null,
+        createdAt: analysis.createdAt,
+      })),
+      startingBalance:
+        portfolio?.startingBalance ?? DEFAULT_SIM_PORTFOLIO_BALANCE,
+    }).filter(
+      (record) =>
+        !lineageQuality || record.metadata.lineageQuality === lineageQuality,
+    );
+
+    const summary = summarizeLearningRecords(learningRecords);
+    const filters = {
+      lineageQuality,
+      limit,
+    };
+
+    if (format === "jsonl") {
+      return new Response(
+        serializeLearningRecordsToJsonl({
+          records: learningRecords,
+          summary,
+          filters,
+        }),
+        {
+          headers: {
+            "content-type": "application/x-ndjson; charset=utf-8",
+            "content-disposition": `attachment; filename="learning-records-${new Date().toISOString().slice(0, 10)}.jsonl"`,
+          },
+        },
+      );
+    }
+
+    if (format === "csv") {
+      return new Response(
+        serializeLearningRecordsToCsv({
+          records: learningRecords,
+          summary,
+          filters,
+        }),
+        {
+          headers: {
+            "content-type": "text/csv; charset=utf-8",
+            "content-disposition": `attachment; filename="learning-records-${new Date().toISOString().slice(0, 10)}.csv"`,
+          },
+        },
+      );
+    }
+
+    return NextResponse.json({
+      learning: {
+        records: learningRecords,
+        summary,
+        manifest: buildLearningExportManifest({
+          records: learningRecords,
+          summary,
+          filters,
+        }),
+        filters,
       },
     });
   }

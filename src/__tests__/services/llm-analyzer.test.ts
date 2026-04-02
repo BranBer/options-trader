@@ -362,6 +362,8 @@ afterEach(() => {
   delete process.env.OPEN_ROUTER_API_KEY;
   delete process.env.OPEN_ROUTER_MODEL;
   delete process.env.OPEN_ROUTER_SIM_TRADE_MODEL;
+  delete process.env.OPEN_ROUTER_NEWS_MODEL;
+  delete process.env.OPEN_ROUTER_NEWS_CONCURRENCY;
 });
 
 // ============================================================
@@ -515,13 +517,47 @@ describe("callLLMWithRetry — via classifyNews", () => {
     expect(callArgs.reasoning).toEqual({ effort: "none" });
   });
 
-  it("does not suppress reasoning for non-qwen3.5 models", async () => {
+  it("falls back to the stable qwen3.5 model when the global model is preview-only", async () => {
     process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
     mockLLMResponse(VALID_CLASSIFICATION_RESPONSE, 800);
     await classifyNews(SAMPLE_ARTICLES);
 
     const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.reasoning).toBeUndefined();
+    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
+    expect(callArgs.reasoning).toEqual({ effort: "none" });
+  });
+
+  it("uses a stable non-preview model for classifyNews when the global model is preview-only", async () => {
+    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
+    mockLLMResponse(VALID_CLASSIFICATION_RESPONSE, 800);
+
+    await classifyNews(SAMPLE_ARTICLES);
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
+    expect(callArgs.reasoning).toEqual({ effort: "none" });
+  });
+
+  it("prefers OPEN_ROUTER_NEWS_MODEL when provided", async () => {
+    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
+    process.env.OPEN_ROUTER_NEWS_MODEL = "openai/gpt-4.1-mini";
+    mockLLMResponse(VALID_CLASSIFICATION_RESPONSE, 800);
+
+    await classifyNews(SAMPLE_ARTICLES);
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.model).toBe("openai/gpt-4.1-mini");
+  });
+
+  it("ignores a preview news model override and uses the stable fallback", async () => {
+    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
+    process.env.OPEN_ROUTER_NEWS_MODEL = "qwen/qwen3.6-plus-preview:free";
+    mockLLMResponse(VALID_CLASSIFICATION_RESPONSE, 800);
+
+    await classifyNews(SAMPLE_ARTICLES);
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
   });
 });
 

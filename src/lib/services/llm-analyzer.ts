@@ -55,6 +55,28 @@ function isPreviewModel(model: string): boolean {
   return model.toLowerCase().includes("preview");
 }
 
+function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const maybeError = error as {
+    code?: number | string;
+    status?: number;
+    message?: string;
+    error?: { message?: string; metadata?: { raw?: string } };
+  };
+
+  const raw =
+    `${maybeError.message ?? ""} ${maybeError.error?.message ?? ""} ${maybeError.error?.metadata?.raw ?? ""}`.toLowerCase();
+  return (
+    maybeError.code === 429 ||
+    maybeError.code === "429" ||
+    maybeError.status === 429 ||
+    raw.includes("429") ||
+    raw.includes("rate limit") ||
+    raw.includes("provider returned error")
+  );
+}
+
 function isPreviewRateLimitError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
 
@@ -89,18 +111,40 @@ function getModel(): string {
   return process.env.OPEN_ROUTER_MODEL ?? DEFAULT_OPEN_ROUTER_MODEL;
 }
 
-function getSimTradeEvalModel(): string {
-  const override = process.env.OPEN_ROUTER_SIM_TRADE_MODEL;
-  if (override) {
-    if (!isPreviewModel(override)) {
-      return override;
-    }
-
-    console.warn(
-      `[LLM] Ignoring preview sim trade model override (${override}) and using stable fallback ${DEFAULT_OPEN_ROUTER_MODEL}`,
-    );
-    return DEFAULT_OPEN_ROUTER_MODEL;
+function getStableModelOverride(
+  override: string | undefined,
+  label: string,
+): string | null {
+  if (!override) return null;
+  if (!isPreviewModel(override)) {
+    return override;
   }
+
+  console.warn(
+    `[LLM] Ignoring preview ${label} override (${override}) and using stable fallback ${DEFAULT_OPEN_ROUTER_MODEL}`,
+  );
+  return DEFAULT_OPEN_ROUTER_MODEL;
+}
+
+function getClassifyNewsModel(): string {
+  const override = getStableModelOverride(
+    process.env.OPEN_ROUTER_NEWS_MODEL,
+    "news model",
+  );
+  if (override) return override;
+
+  const defaultModel = getModel();
+  return isPreviewModel(defaultModel)
+    ? DEFAULT_OPEN_ROUTER_MODEL
+    : defaultModel;
+}
+
+function getSimTradeEvalModel(): string {
+  const override = getStableModelOverride(
+    process.env.OPEN_ROUTER_SIM_TRADE_MODEL,
+    "sim trade model",
+  );
+  if (override) return override;
 
   const defaultModel = getModel();
   if (isPreviewModel(defaultModel)) {
@@ -281,7 +325,7 @@ async function callLLMWithRetry<T>(
       return zodSchema.parse(parsed);
     } catch (error) {
       if (
-        callType === "simTradeEval" &&
+        (callType === "simTradeEval" || callType === "classifyNews") &&
         isPreviewModel(activeModel) &&
         isPreviewRateLimitError(error)
       ) {
@@ -297,12 +341,19 @@ async function callLLMWithRetry<T>(
         `[LLM] ${callType} attempt ${attempt + 1}/${maxRetries} failed:`,
         errMsg.slice(0, 500),
       );
+      if (isRateLimitError(error)) {
+        console.warn(
+          `[LLM] ${callType} appears rate-limited on model ${activeModel}; backing off before retry`,
+        );
+      }
       if (rawText) {
         console.error(`[LLM] Raw response preview: ${rawText.slice(0, 400)}`);
       }
       if (attempt === maxRetries - 1) throw error;
-      // Exponential backoff: 2s, 4s, 8s
-      await new Promise((r) => setTimeout(r, 2000 * Math.pow(2, attempt)));
+      const baseDelayMs = isRateLimitError(error) ? 5000 : 2000;
+      await new Promise((r) =>
+        setTimeout(r, baseDelayMs * Math.pow(2, attempt)),
+      );
     }
   }
   throw new Error(`LLM ${callType} call failed after retries`);
@@ -314,7 +365,14 @@ async function callLLMWithRetry<T>(
 
 const MAX_ARTICLES_PER_BATCH = 20;
 
-const CLASSIFY_CONCURRENCY = 3;
+const DEFAULT_CLASSIFY_CONCURRENCY = 1;
+
+function getClassifyConcurrency(): number {
+  const raw = process.env.OPEN_ROUTER_NEWS_CONCURRENCY;
+  const parsed = raw ? Number(raw) : DEFAULT_CLASSIFY_CONCURRENCY;
+  if (!Number.isFinite(parsed)) return DEFAULT_CLASSIFY_CONCURRENCY;
+  return Math.min(Math.max(Math.floor(parsed), 1), 3);
+}
 
 export async function classifyNews(
   articles: RawNewsArticle[],
@@ -338,8 +396,11 @@ export async function classifyNews(
     batches.push(articles.slice(i, i + MAX_ARTICLES_PER_BATCH));
   }
 
+  const concurrency = getClassifyConcurrency();
+  const model = getClassifyNewsModel();
+
   console.log(
-    `[LLM] Classifying ${articles.length} articles in ${batches.length} batch(es), concurrency=${CLASSIFY_CONCURRENCY}`,
+    `[LLM] Classifying ${articles.length} articles in ${batches.length} batch(es), concurrency=${concurrency}, model=${model}`,
   );
 
   const allClassified: NewsClassification["articles"] = [];
@@ -347,8 +408,8 @@ export async function classifyNews(
   let batchesDone = 0;
 
   // Process batches with limited concurrency
-  for (let i = 0; i < batches.length; i += CLASSIFY_CONCURRENCY) {
-    const chunk = batches.slice(i, i + CLASSIFY_CONCURRENCY);
+  for (let i = 0; i < batches.length; i += concurrency) {
+    const chunk = batches.slice(i, i + concurrency);
     const results = await Promise.allSettled(
       chunk.map((batch) => {
         const prompt = buildNewsClassifierPrompt(batch);
@@ -359,6 +420,7 @@ export async function classifyNews(
           newsClassificationSchema,
           {
             callType: "classifyNews",
+            model,
             temperature: 0.1,
             maxOutputTokens: 8192,
           },
