@@ -49,6 +49,24 @@ import type { CandleData, OptionsChainSummary } from "@/types/market";
 
 let client: OpenAI | null = null;
 
+const DEFAULT_OPEN_ROUTER_MODEL = "qwen/qwen3.5-plus-02-15";
+
+function isPreviewModel(model: string): boolean {
+  return model.toLowerCase().includes("preview");
+}
+
+function isPreviewRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const maybeError = error as {
+    code?: number | string;
+    error?: { metadata?: { raw?: string } };
+  };
+
+  const raw = maybeError.error?.metadata?.raw?.toLowerCase() ?? "";
+  return maybeError.code === 429 && raw.includes("preview");
+}
+
 function getClient(): OpenAI {
   if (!client) {
     const apiKey = process.env.OPEN_ROUTER_API_KEY;
@@ -68,7 +86,28 @@ function getClient(): OpenAI {
 }
 
 function getModel(): string {
-  return process.env.OPEN_ROUTER_MODEL ?? "qwen/qwen3.5-9b";
+  return process.env.OPEN_ROUTER_MODEL ?? DEFAULT_OPEN_ROUTER_MODEL;
+}
+
+function getSimTradeEvalModel(): string {
+  const override = process.env.OPEN_ROUTER_SIM_TRADE_MODEL;
+  if (override) {
+    if (!isPreviewModel(override)) {
+      return override;
+    }
+
+    console.warn(
+      `[LLM] Ignoring preview sim trade model override (${override}) and using stable fallback ${DEFAULT_OPEN_ROUTER_MODEL}`,
+    );
+    return DEFAULT_OPEN_ROUTER_MODEL;
+  }
+
+  const defaultModel = getModel();
+  if (isPreviewModel(defaultModel)) {
+    return DEFAULT_OPEN_ROUTER_MODEL;
+  }
+
+  return defaultModel;
 }
 
 /** @internal Reset client singleton — for tests only */
@@ -153,6 +192,7 @@ async function callLLMWithRetry<T>(
   zodSchema: { parse: (data: unknown) => T },
   options: {
     callType?: string;
+    model?: string;
     temperature?: number;
     maxOutputTokens?: number;
     maxRetries?: number;
@@ -160,13 +200,14 @@ async function callLLMWithRetry<T>(
 ): Promise<T> {
   const {
     callType = "unknown",
+    model: requestedModel,
     temperature = 0.1,
     maxOutputTokens = 8192,
     maxRetries = 3,
   } = options;
 
   const openai = getClient();
-  const model = getModel();
+  let activeModel = requestedModel ?? getModel();
 
   // Inject the JSON schema into the system prompt so the model knows
   // the exact field names, types, and structure to produce.
@@ -178,7 +219,7 @@ async function callLLMWithRetry<T>(
     try {
       // Build request params — only suppress reasoning for models that support it
       const params: Record<string, unknown> = {
-        model,
+        model: activeModel,
         messages: [
           { role: "system", content: fullSystemPrompt },
           { role: "user", content: userPrompt },
@@ -190,7 +231,7 @@ async function callLLMWithRetry<T>(
 
       // Qwen 3.5 needs reasoning suppressed to avoid wasting output tokens.
       // Newer models (3.6+) require reasoning and reject effort: "none".
-      const modelLower = model.toLowerCase();
+      const modelLower = activeModel.toLowerCase();
       if (
         modelLower.includes("qwen3.5") ||
         modelLower.includes("qwen/qwen3.5")
@@ -216,7 +257,7 @@ async function callLLMWithRetry<T>(
       const usagePct = Math.round((outputTokens / maxOutputTokens) * 100);
 
       console.log(
-        `[LLM] ${callType} response: ${outputTokens} tokens out, ${totalTokens} total (model: ${model})`,
+        `[LLM] ${callType} response: ${outputTokens} tokens out, ${totalTokens} total (model: ${activeModel})`,
       );
       if (usagePct > 80) {
         console.warn(
@@ -239,6 +280,18 @@ async function callLLMWithRetry<T>(
       const parsed = JSON.parse(jsonText);
       return zodSchema.parse(parsed);
     } catch (error) {
+      if (
+        callType === "simTradeEval" &&
+        isPreviewModel(activeModel) &&
+        isPreviewRateLimitError(error)
+      ) {
+        console.warn(
+          `[LLM] ${callType} preview model ${activeModel} was rate-limited; retrying with stable fallback ${DEFAULT_OPEN_ROUTER_MODEL}`,
+        );
+        activeModel = DEFAULT_OPEN_ROUTER_MODEL;
+        continue;
+      }
+
       const errMsg = error instanceof Error ? error.message : String(error);
       console.error(
         `[LLM] ${callType} attempt ${attempt + 1}/${maxRetries} failed:`,
@@ -704,8 +757,9 @@ export async function evaluateTradeForSim(
     tradeDecisionSchema,
     {
       callType: "simTradeEval",
+      model: getSimTradeEvalModel(),
       temperature: 0.2,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 12288,
     },
   );
 

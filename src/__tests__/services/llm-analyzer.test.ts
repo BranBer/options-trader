@@ -361,6 +361,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPEN_ROUTER_API_KEY;
   delete process.env.OPEN_ROUTER_MODEL;
+  delete process.env.OPEN_ROUTER_SIM_TRADE_MODEL;
 });
 
 // ============================================================
@@ -917,6 +918,38 @@ describe("evaluateTradeForSim", () => {
     const result = await evaluateTradeForSim(mockSimInput);
     expect(result.should_enter).toBe(false);
     expect(result.reasoning).toContain("Risk too high");
+  });
+
+  it("uses a non-preview model when the global model is preview-only", async () => {
+    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
+    mockLLMResponse(VALID_TRADE_DECISION_RESPONSE, 500);
+
+    await evaluateTradeForSim(mockSimInput);
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
+  });
+
+  it("prefers OPEN_ROUTER_SIM_TRADE_MODEL when provided", async () => {
+    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
+    process.env.OPEN_ROUTER_SIM_TRADE_MODEL = "openai/gpt-4.1-mini";
+    mockLLMResponse(VALID_TRADE_DECISION_RESPONSE, 500);
+
+    await evaluateTradeForSim(mockSimInput);
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.model).toBe("openai/gpt-4.1-mini");
+  });
+
+  it("ignores a preview sim trade model override and uses the stable fallback", async () => {
+    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
+    process.env.OPEN_ROUTER_SIM_TRADE_MODEL = "qwen/qwen3.6-plus-preview:free";
+    mockLLMResponse(VALID_TRADE_DECISION_RESPONSE, 500);
+
+    await evaluateTradeForSim(mockSimInput);
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
   });
 });
 
