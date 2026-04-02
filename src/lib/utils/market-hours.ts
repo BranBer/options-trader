@@ -37,6 +37,12 @@ export interface MarketHoursInfo {
   reason: string;
 }
 
+export interface SameDayEntryPolicy {
+  allowed: boolean;
+  reason: string;
+  cutoffTimeEt: string;
+}
+
 /**
  * Get current time in US Eastern timezone.
  */
@@ -73,6 +79,33 @@ function getETNow(now: Date = new Date()): {
   const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
 
   return { hour, minute, dayOfWeek, dateStr };
+}
+
+function getSameDayCutoff(): { hour: number; minute: number; label: string } {
+  const rawCutoff = process.env.SIM_0DTE_ENTRY_CUTOFF_ET ?? "15:30";
+  const match = rawCutoff.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return { hour: 15, minute: 30, label: "15:30" };
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (
+    Number.isNaN(hour) ||
+    Number.isNaN(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return { hour: 15, minute: 30, label: "15:30" };
+  }
+
+  return {
+    hour,
+    minute,
+    label: `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`,
+  };
 }
 
 /**
@@ -120,4 +153,36 @@ export function isMarketOpen(now?: Date): MarketHoursInfo {
 export function isWithinTradingWindow(now?: Date): boolean {
   const info = isMarketOpen(now);
   return info.isOpen || info.isExtendedHours;
+}
+
+export function getSameDayEntryPolicy(now?: Date): SameDayEntryPolicy {
+  const market = isMarketOpen(now);
+  const { hour, minute } = getETNow(now);
+  const cutoff = getSameDayCutoff();
+  const currentMinutes = hour * 60 + minute;
+  const cutoffMinutes = cutoff.hour * 60 + cutoff.minute;
+
+  if (!market.isOpen) {
+    return {
+      allowed: false,
+      reason: market.isExtendedHours
+        ? "Same-day expiry entries are blocked outside regular market hours"
+        : "Same-day expiry entries are blocked when the market is closed",
+      cutoffTimeEt: cutoff.label,
+    };
+  }
+
+  if (currentMinutes >= cutoffMinutes) {
+    return {
+      allowed: false,
+      reason: `Same-day expiry entries are blocked after ${cutoff.label} ET`,
+      cutoffTimeEt: cutoff.label,
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: `Same-day expiry entries allowed before ${cutoff.label} ET during regular hours`,
+    cutoffTimeEt: cutoff.label,
+  };
 }

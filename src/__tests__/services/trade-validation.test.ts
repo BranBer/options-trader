@@ -49,10 +49,26 @@ describe("validateTradeLegs — Expiry validation (Story 19.1)", () => {
       NOW,
     );
     expect(result.valid).toBe(false);
-    expect(result.reason).toMatch(/past or today/i);
+    expect(result.reason).toMatch(/expires in the past/i);
   });
 
-  it("rejects a leg expiring today", () => {
+  it("rejects a same-day leg outside regular hours", () => {
+    const today = NOW.toLocaleDateString("en-CA", {
+      timeZone: "America/New_York",
+    });
+    const premarket = new Date("2026-03-30T07:00:00-04:00");
+    const result = validateTradeLegs(
+      [leg({ expiry: today })],
+      CURRENT_PRICE,
+      BALANCE,
+      undefined,
+      premarket,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/outside regular market hours/i);
+  });
+
+  it("allows a same-day leg before the cutoff with a warning", () => {
     const today = NOW.toLocaleDateString("en-CA", {
       timeZone: "America/New_York",
     });
@@ -63,8 +79,24 @@ describe("validateTradeLegs — Expiry validation (Story 19.1)", () => {
       undefined,
       NOW,
     );
+    expect(result.valid).toBe(true);
+    expect(result.warnings.join(" ")).toMatch(/0DTE entry/i);
+  });
+
+  it("rejects a same-day leg after the cutoff", () => {
+    const today = NOW.toLocaleDateString("en-CA", {
+      timeZone: "America/New_York",
+    });
+    const nearClose = new Date("2026-03-30T15:45:00-04:00");
+    const result = validateTradeLegs(
+      [leg({ expiry: today })],
+      CURRENT_PRICE,
+      BALANCE,
+      undefined,
+      nearClose,
+    );
     expect(result.valid).toBe(false);
-    expect(result.reason).toMatch(/past or today/i);
+    expect(result.reason).toMatch(/after 15:30 ET/i);
   });
 
   it("accepts a leg expiring tomorrow", () => {
@@ -637,7 +669,7 @@ describe("validateTradeLegs — edge cases", () => {
       NOW,
     );
     expect(result.valid).toBe(false);
-    expect(result.reason).toMatch(/past or today/);
+    expect(result.reason).toMatch(/expires in the past/);
   });
 
   it("returns warnings array even on valid trades", () => {

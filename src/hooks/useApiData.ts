@@ -311,3 +311,47 @@ export function useEquityCurve() {
     },
   });
 }
+
+import type {
+  AlertDiagnosticsOutcome,
+  AlertDiagnosticsReasonCluster,
+  PortfolioDiagnosticsResponse,
+} from "@/types/analytics";
+
+export function useInfinitePortfolioDiagnostics(
+  params?: {
+    ticker?: string;
+    outcome?: AlertDiagnosticsOutcome | null;
+    reasonCluster?: AlertDiagnosticsReasonCluster | null;
+    minQuality?: number | null;
+    startDate?: string;
+    endDate?: string;
+  },
+  limit = 12,
+) {
+  return useInfiniteQuery<PortfolioDiagnosticsResponse>({
+    queryKey: ["portfolioDiagnostics", params, limit],
+    queryFn: async ({ pageParam }) => {
+      const sp = new URLSearchParams();
+      sp.set("view", "diagnostics");
+      sp.set("limit", String(limit));
+      if (params?.ticker) sp.set("ticker", params.ticker);
+      if (params?.outcome) sp.set("outcome", params.outcome);
+      if (params?.reasonCluster) sp.set("reasonCluster", params.reasonCluster);
+      if (params?.minQuality != null) {
+        sp.set("minQuality", String(params.minQuality));
+      }
+      if (params?.startDate) sp.set("startDate", params.startDate);
+      if (params?.endDate) sp.set("endDate", params.endDate);
+      if (pageParam != null) sp.set("cursor", String(pageParam));
+
+      const res = await fetch(`/api/portfolio?${sp.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch portfolio diagnostics");
+      return res.json();
+    },
+    initialPageParam: null as number | null,
+    getNextPageParam: (lastPage) => lastPage.diagnostics.pageInfo.nextCursor,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}

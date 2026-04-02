@@ -42,6 +42,23 @@ const MIN_CORRELATION_CONFIDENCE = 0.5;
 const RECOMMEND_CONCURRENCY = 2;
 const DEEP_DIVE_CONCURRENCY = 2;
 
+function getWhaleRefMetadata(
+  whales: Array<{ id: number; ticker: string; createdAt: string | null }>,
+  ticker: string,
+): { primaryWhaleId: number | null; whaleIds: number[] } {
+  const matches = whales
+    .filter((whale) => whale.ticker === ticker)
+    .sort(
+      (left, right) =>
+        Date.parse(right.createdAt ?? "") - Date.parse(left.createdAt ?? ""),
+    );
+
+  return {
+    primaryWhaleId: matches[0]?.id ?? null,
+    whaleIds: matches.slice(0, 5).map((whale) => whale.id),
+  };
+}
+
 // Progress step indices (must match scheduler.ts init order)
 const STEP_CROSS_REF = 2;
 const STEP_RECOMMENDATIONS = 3;
@@ -413,11 +430,14 @@ export async function runAnalysisPipeline(): Promise<number> {
           }
 
           // Store recommendation
+          const whaleRefMetadata = getWhaleRefMetadata(recentWhales, ticker);
           await db.insert(analyses).values({
             type: "trade_recommendation",
             inputRefs: JSON.stringify({
               correlationTicker: ticker,
               correlationConfidence: correlation.correlation_confidence,
+              primaryWhaleId: whaleRefMetadata.primaryWhaleId,
+              whaleIds: whaleRefMetadata.whaleIds,
             }),
             output: JSON.stringify(recommendation),
             confidence: recommendation.confidence,
@@ -596,6 +616,8 @@ export async function runAnalysisPipeline(): Promise<number> {
               inputRefs: JSON.stringify({
                 whaleSignalTicker: ticker,
                 whaleSignalOnly: true,
+                primaryWhaleId: whaleRow?.id ?? null,
+                whaleIds: whaleRow?.id != null ? [whaleRow.id] : [],
               }),
               output: JSON.stringify(recommendation),
               confidence: recommendation.confidence,

@@ -1,8 +1,9 @@
 # Epic 30: Benchmarking, Missed Opportunity Exploration, and Bad-Trade Root Cause Analysis
 
-> **Status:** 🔍 RESEARCH REQUIRED  
+> **Status:** ✅ COMPLETE  
 > **Priority:** P1 — Important (strategy quality and trust)  
 > **Created:** 2026-04-01  
+> **Completed:** 2026-04-02  
 > **Depends on:** Epic 12 (Sim Portfolio), Epic 26 (Portfolio Visibility), Epic 27 (Technical Indicators), Epic 28 (Model Agnosticism & Validation), Epic 29 (Trade Capture & Postmortems)
 
 ## Overview
@@ -16,7 +17,7 @@ This epic turns the questions raised by users into measurable analyses:
 - What missing data would improve decisions the most?
 - Can an LLM consolidator safely synthesize this data into a cleaner decision bundle?
 
-This is a research and measurement epic that should feed future implementation epics rather than attempting to solve everything at once.
+This research and measurement epic is now complete. Its outputs now feed directly into Epic 31 (execution gap diagnosis), Epic 32 (alert diagnostics console), Epic 33 (signal lineage hardening), and Epic 34 (capture-rate calibration).
 
 ---
 

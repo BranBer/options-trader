@@ -8,7 +8,7 @@ import {
   analyses,
   whaleAlerts,
 } from "@/lib/db/schema";
-import { desc, eq, asc, gte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte } from "drizzle-orm";
 import {
   getMockPortfolioOverview,
   getMockPortfolioTrades,
@@ -16,14 +16,23 @@ import {
   getMockPortfolioTrade,
 } from "@/lib/mock/portfolio-mock-data";
 import { runAttribution } from "@/lib/analytics/attribution-engine";
+import { buildAlertDiagnostics } from "@/lib/analytics/alert-diagnostics";
+import {
+  matchesAlertReasonCluster,
+  summarizeAlertDecisionTraces,
+  type AlertDiagnosticsReasonCluster,
+} from "@/lib/analytics/alert-diagnostics";
+import { buildAlertCorrelations } from "@/lib/analytics/alert-correlation";
+import { buildAttributionDiagnostics } from "@/lib/analytics/funnel-diagnostics";
 import { runPostmortemEngine } from "@/lib/analytics/postmortem-engine";
 import { runReplayHarness } from "@/lib/analytics/replay-harness";
+import { getLastRefreshAt } from "@/lib/cron/scheduler";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
-  const view = params.get("view") ?? "overview"; // 'overview' | 'trades' | 'equity' | 'trade' | 'attribution' | 'postmortem' | 'benchmark'
+  const view = params.get("view") ?? "overview"; // 'overview' | 'trades' | 'equity' | 'trade' | 'attribution' | 'diagnostics' | 'postmortem' | 'benchmark'
   const tradeId = params.get("id");
   const status = params.get("status"); // 'open' | 'closed' | 'all'
   const limit = Math.min(Number(params.get("limit")) || 50, 200);
@@ -205,6 +214,220 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // --- Epic 32.1 / 32.2: Dedicated recent alert diagnostics ---
+  if (view === "diagnostics") {
+    const ticker = params.get("ticker")?.trim().toUpperCase() ?? null;
+    const outcome = params.get("outcome") as
+      | "entered"
+      | "rejected"
+      | "not_evaluated"
+      | null;
+    const reasonCluster = params.get(
+      "reasonCluster",
+    ) as AlertDiagnosticsReasonCluster | null;
+    const startDate = params.get("startDate");
+    const endDate = params.get("endDate");
+    const minQualityRaw = params.get("minQuality");
+    const minQuality =
+      minQualityRaw != null && minQualityRaw !== ""
+        ? Number(minQualityRaw)
+        : null;
+    const cursorRaw = params.get("cursor");
+    const cursor = cursorRaw != null ? Number(cursorRaw) : null;
+
+    const scanLimit = Math.min(
+      outcome ? Math.max(limit * 5, limit + 1) : limit + 1,
+      500,
+    );
+    const conditions = [];
+
+    if (cursor != null && !Number.isNaN(cursor)) {
+      conditions.push(lt(whaleAlerts.id, cursor));
+    }
+    if (ticker) {
+      conditions.push(eq(whaleAlerts.ticker, ticker));
+    }
+    if (minQuality != null && !Number.isNaN(minQuality)) {
+      conditions.push(gte(whaleAlerts.qualityScore, minQuality));
+    }
+    if (startDate) {
+      conditions.push(gte(whaleAlerts.detectedAt, startDate));
+    }
+    if (endDate) {
+      conditions.push(lte(whaleAlerts.detectedAt, endDate));
+    }
+
+    let whalesQuery = db.select().from(whaleAlerts);
+    if (conditions.length > 0) {
+      whalesQuery = whalesQuery.where(and(...conditions)) as typeof whalesQuery;
+    }
+
+    const whaleRows = await whalesQuery
+      .orderBy(desc(whaleAlerts.id))
+      .limit(scanLimit + 1);
+
+    const hasMoreRaw = whaleRows.length > scanLimit;
+    const whaleWindow = whaleRows.slice(0, scanLimit);
+    const tickers = [...new Set(whaleWindow.map((row) => row.ticker))];
+
+    const evaluationRows = tickers.length
+      ? await db
+          .select({
+            ticker: simEvaluations.ticker,
+            shouldEnter: simEvaluations.shouldEnter,
+            confidence: simEvaluations.confidence,
+            rejectionGate: simEvaluations.rejectionGate,
+            rejectionReason: simEvaluations.rejectionReason,
+            createdAt: simEvaluations.createdAt,
+            sourceAnalysisId: simEvaluations.sourceAnalysisId,
+          })
+          .from(simEvaluations)
+          .where(inArray(simEvaluations.ticker, tickers))
+          .orderBy(desc(simEvaluations.createdAt))
+          .limit(scanLimit * 6)
+      : [];
+
+    const tradeRows = tickers.length
+      ? await db
+          .select()
+          .from(simTrades)
+          .where(inArray(simTrades.ticker, tickers))
+          .orderBy(desc(simTrades.createdAt))
+          .limit(scanLimit * 4)
+      : [];
+
+    const sourceAnalysisIds = evaluationRows
+      .map((evaluation) => evaluation.sourceAnalysisId)
+      .filter((id): id is number => id != null);
+    const analysisRows = sourceAnalysisIds.length
+      ? await db
+          .select({ id: analyses.id, inputRefs: analyses.inputRefs })
+          .from(analyses)
+          .where(inArray(analyses.id, sourceAnalysisIds))
+      : [];
+    const analysisRefMap = new Map<number, Record<string, unknown>>(
+      analysisRows.map((row) => {
+        try {
+          return [row.id, JSON.parse(row.inputRefs ?? "{}")] as const;
+        } catch {
+          return [row.id, {}] as const;
+        }
+      }),
+    );
+
+    const whalesForTrace = whaleWindow.map((row) => ({
+      id: row.id,
+      ticker: row.ticker,
+      strike: row.strike ?? 0,
+      expiry: row.expiry ?? "",
+      callPut: (row.callPut ?? "C") as "C" | "P",
+      premium: row.premium ?? 0,
+      volume: row.volume ?? 0,
+      openInterest: row.openInterest ?? 0,
+      underlyingPrice: row.underlyingPrice ?? undefined,
+      sentiment: ((row.sentiment ?? "bullish") === "bearish"
+        ? "bearish"
+        : "bullish") as "bullish" | "bearish",
+      source: row.source ?? "unknown",
+      detectedAt: row.detectedAt ?? row.createdAt ?? new Date().toISOString(),
+      qualityScore: row.qualityScore ?? undefined,
+    }));
+
+    const evaluationsForTrace = evaluationRows.map((evaluation) => {
+      const refs = evaluation.sourceAnalysisId
+        ? analysisRefMap.get(evaluation.sourceAnalysisId)
+        : undefined;
+
+      return {
+        ...evaluation,
+        primaryWhaleId:
+          typeof refs?.primaryWhaleId === "number" ? refs.primaryWhaleId : null,
+        whaleIds: Array.isArray(refs?.whaleIds)
+          ? refs.whaleIds.filter((id): id is number => typeof id === "number")
+          : [],
+      };
+    });
+
+    const tradesForTrace = tradeRows.map((trade) => {
+      let strike: number | undefined;
+      let expiry: string | undefined;
+
+      try {
+        const legs = trade.legs ? JSON.parse(trade.legs) : [];
+        const firstLeg = Array.isArray(legs) ? legs[0] : null;
+        strike =
+          typeof firstLeg?.strike === "number" ? firstLeg.strike : undefined;
+        expiry =
+          typeof firstLeg?.expiry === "string" ? firstLeg.expiry : undefined;
+      } catch {
+        strike = undefined;
+        expiry = undefined;
+      }
+
+      return {
+        id: trade.id,
+        ticker: trade.ticker,
+        entryDate: trade.entryDate,
+        exitDate: trade.exitDate,
+        strike,
+        expiry,
+        entryPrice: Number(trade.entryPrice),
+        exitPrice: trade.exitPrice ? Number(trade.exitPrice) : null,
+        pnl: trade.pnl ? Number(trade.pnl) : null,
+        pnlPct: trade.pnlPct ? Number(trade.pnlPct) : null,
+        status: (trade.status === "open" ? "open" : "closed") as
+          | "open"
+          | "closed",
+        sourceWhaleId: trade.sourceWhaleId,
+        sourceAnalysisId: trade.sourceAnalysisId,
+      };
+    });
+
+    const diagnostics = buildAlertDiagnostics({
+      whales: whalesForTrace,
+      evaluations: evaluationsForTrace,
+      trades: tradesForTrace,
+      lastRefreshAt: getLastRefreshAt(),
+    });
+
+    const filteredTraces = diagnostics.traces.filter((trace) => {
+      if (outcome && trace.finalOutcome !== outcome) return false;
+      if (!matchesAlertReasonCluster(trace, reasonCluster)) return false;
+      return true;
+    });
+    const traces = filteredTraces.slice(0, limit);
+    const lastTrace = traces.length > 0 ? traces[traces.length - 1] : null;
+    const lastWhale =
+      whaleWindow.length > 0 ? whaleWindow[whaleWindow.length - 1] : null;
+    const nextCursor =
+      filteredTraces.length > limit
+        ? (lastTrace?.alertId ?? null)
+        : hasMoreRaw
+          ? (lastWhale?.id ?? null)
+          : null;
+
+    return NextResponse.json({
+      diagnostics: {
+        traces,
+        summary: summarizeAlertDecisionTraces(filteredTraces),
+        pipelineHealth: diagnostics.pipelineHealth,
+        pageInfo: {
+          limit,
+          nextCursor,
+          hasMore: nextCursor != null,
+        },
+        filters: {
+          ticker,
+          outcome,
+          reasonCluster,
+          minQuality,
+          startDate,
+          endDate,
+        },
+      },
+    });
+  }
+
   // --- Story 30.6: Opportunity Attribution Diagnostics ---
   if (view === "attribution") {
     // Fetch all whale alerts
@@ -217,7 +440,23 @@ export async function GET(req: NextRequest) {
     // Fetch all trades
     const trades = await db.select().from(simTrades);
 
+    // Fetch recent evaluations to classify missed alerts from actual pipeline decisions
+    const evaluations = await db
+      .select({
+        ticker: simEvaluations.ticker,
+        shouldEnter: simEvaluations.shouldEnter,
+        confidence: simEvaluations.confidence,
+        rejectionGate: simEvaluations.rejectionGate,
+        rejectionReason: simEvaluations.rejectionReason,
+        createdAt: simEvaluations.createdAt,
+        sourceAnalysisId: simEvaluations.sourceAnalysisId,
+      })
+      .from(simEvaluations)
+      .orderBy(desc(simEvaluations.createdAt))
+      .limit(limit * 4);
+
     const whalesForEngine = whales.map((w) => ({
+      id: w.id,
       ticker: w.ticker,
       strike: w.strike ?? 0,
       expiry: w.expiry ?? "",
@@ -242,9 +481,60 @@ export async function GET(req: NextRequest) {
       pnl: t.pnl ? Number(t.pnl) : null,
       pnlPct: t.pnlPct ? Number(t.pnlPct) : null,
       status: (t.status ?? "closed") as "open" | "closed",
+      sourceWhaleId: t.sourceWhaleId,
+      sourceAnalysisId: t.sourceAnalysisId,
     }));
 
-    const attribution = runAttribution(whalesForEngine, tradesForEngine);
+    const sourceAnalysisIds = evaluations
+      .map((evaluation) => evaluation.sourceAnalysisId)
+      .filter((id): id is number => id != null);
+    const analysisRows = sourceAnalysisIds.length
+      ? await db
+          .select({ id: analyses.id, inputRefs: analyses.inputRefs })
+          .from(analyses)
+          .where(inArray(analyses.id, sourceAnalysisIds))
+      : [];
+    const analysisRefMap = new Map<number, Record<string, unknown>>(
+      analysisRows.map((row) => {
+        try {
+          return [row.id, JSON.parse(row.inputRefs ?? "{}")] as const;
+        } catch {
+          return [row.id, {}] as const;
+        }
+      }),
+    );
+    const evaluationsWithRefs = evaluations.map((evaluation) => {
+      const refs = evaluation.sourceAnalysisId
+        ? analysisRefMap.get(evaluation.sourceAnalysisId)
+        : undefined;
+      return {
+        ...evaluation,
+        primaryWhaleId:
+          typeof refs?.primaryWhaleId === "number" ? refs.primaryWhaleId : null,
+        whaleIds: Array.isArray(refs?.whaleIds)
+          ? refs.whaleIds.filter((id): id is number => typeof id === "number")
+          : [],
+      };
+    });
+
+    const attribution = runAttribution(
+      whalesForEngine,
+      tradesForEngine,
+      evaluationsWithRefs,
+    );
+    const diagnostics = buildAttributionDiagnostics({
+      whales: whalesForEngine,
+      evaluations: evaluationsWithRefs,
+      missed: attribution.missed.map((missed) => ({
+        ticker: missed.ticker,
+        missReason: missed.missReason,
+      })),
+    });
+    const correlations = buildAlertCorrelations({
+      whales: whalesForEngine,
+      evaluations: evaluationsWithRefs,
+      trades: tradesForEngine,
+    });
 
     return NextResponse.json({
       attribution: {
@@ -268,6 +558,10 @@ export async function GET(req: NextRequest) {
           missReason: m.missReason,
           detectedAt: m.detectedAt,
         })),
+        diagnostics: {
+          ...diagnostics,
+          correlations,
+        },
         summary: attribution.summary,
       },
     });

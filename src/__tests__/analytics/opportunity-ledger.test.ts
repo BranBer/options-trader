@@ -53,10 +53,10 @@ describe("opportunity-ledger", () => {
       realizedReturnPct: -8,
       maxFavorableExcursionPct: 6,
       maxAdverseExcursionPct: -12,
-      missReason: "technical_misalignment",
+      missReason: "entry_filter_rejected",
     });
 
     expect(label.outcome).toBe("missed");
-    expect(label.missReason).toBe("technical_misalignment");
+    expect(label.missReason).toBe("entry_filter_rejected");
   });
 });

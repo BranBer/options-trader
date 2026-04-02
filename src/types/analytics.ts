@@ -26,6 +26,42 @@ export interface AttributionCapturedOpportunity {
   detectedAt: string;
 }
 
+export interface AttributionFunnel {
+  detected: number;
+  qualityPassed: number;
+  evaluated: number;
+  llmAccepted: number;
+  entered: number;
+  droppedByStage: {
+    scoring: number;
+    validation: number;
+    riskCheck: number;
+    entryDecision: number;
+    tradeOpen: number;
+    pipeline: number;
+  };
+}
+
+export interface AttributionDecisionTrace {
+  ticker: string;
+  outcome: "entered" | "rejected";
+  stage: string;
+  reason: string | null;
+  timestamp: string | null;
+}
+
+export interface AttributionAlertCorrelation {
+  ticker: string;
+  detectedAt: string;
+  qualityScore: number | null | undefined;
+  evaluatedAt: string | null;
+  shouldEnter: boolean | null;
+  rejectionGate: string | null;
+  rejectionReason: string | null;
+  tradeId: number | null;
+  tradeStatus: "open" | "closed" | null;
+}
+
 export interface AttributionResponse {
   captureRate: number;
   totalCandidates: number;
@@ -33,7 +69,105 @@ export interface AttributionResponse {
   missedCount: number;
   captured: AttributionCapturedOpportunity[];
   missed: AttributionMissedOpportunity[];
+  diagnostics: {
+    funnel: AttributionFunnel;
+    recentDecisions: AttributionDecisionTrace[];
+    correlations: AttributionAlertCorrelation[];
+  };
   summary: string;
+}
+
+// ============================================================
+// Alert Diagnostics (Epic 32)
+// ============================================================
+
+export type AlertDiagnosticsOutcome = "entered" | "rejected" | "not_evaluated";
+
+export type AlertDiagnosticsReasonCluster =
+  | "same_day_blocked"
+  | "missing_market_data"
+  | "pipeline_gap"
+  | "confidence_threshold"
+  | "portfolio_concentration";
+
+export type AlertDiagnosticsStage =
+  | "detection"
+  | "analysis"
+  | "evaluation"
+  | "validation"
+  | "entry"
+  | "trade_execution";
+
+export type AlertDiagnosticsStageStatus =
+  | "completed"
+  | "passed"
+  | "blocked"
+  | "missing"
+  | "not_applicable";
+
+export interface AlertDiagnosticsStageEvent {
+  stage: AlertDiagnosticsStage;
+  status: AlertDiagnosticsStageStatus;
+  timestamp: string | null;
+  reason: string | null;
+}
+
+export interface AlertDecisionTrace {
+  alertId: number | null;
+  ticker: string;
+  detectedAt: string;
+  qualityScore: number | null | undefined;
+  finalOutcome: AlertDiagnosticsOutcome;
+  reasonCluster: AlertDiagnosticsReasonCluster | null;
+  primaryReason: string | null;
+  sourceRefs: {
+    primaryWhaleId: number | null;
+    whaleIds: number[];
+    sourceAnalysisId: number | null;
+    tradeId: number | null;
+  };
+  stageEvents: AlertDiagnosticsStageEvent[];
+}
+
+export interface AlertDiagnosticsSummary {
+  total: number;
+  byOutcome: Record<AlertDiagnosticsOutcome, number>;
+  topReasons: Array<{ reason: string; count: number }>;
+  dropOffByStage: Record<AlertDiagnosticsStage, number>;
+}
+
+export interface DiagnosticsPipelineHealth {
+  lastRefreshAt: string | null;
+  minutesSinceRefresh: number | null;
+  isStale: boolean;
+  status: "healthy" | "stale" | "running" | "never_run";
+}
+
+export interface PortfolioDiagnosticsFilters {
+  ticker: string | null;
+  outcome: AlertDiagnosticsOutcome | null;
+  reasonCluster: AlertDiagnosticsReasonCluster | null;
+  minQuality: number | null;
+  startDate: string | null;
+  endDate: string | null;
+}
+
+export interface PortfolioDiagnosticsPageInfo {
+  limit: number;
+  nextCursor: number | null;
+  hasMore: boolean;
+}
+
+export interface PortfolioDiagnosticsPayload {
+  traces: AlertDecisionTrace[];
+  summary: AlertDiagnosticsSummary;
+  pipelineHealth: DiagnosticsPipelineHealth;
+  pageInfo: PortfolioDiagnosticsPageInfo;
+  filters: PortfolioDiagnosticsFilters;
+}
+
+export interface PortfolioDiagnosticsResponse {
+  diagnostics: PortfolioDiagnosticsPayload;
 }
 
 // ============================================================

@@ -1,6 +1,6 @@
 # Epic 26: Portfolio Data Visibility & Accuracy
 
-> **Status:** 🔍 IN PROGRESS  
+> **Status:** ✅ COMPLETE  
 > **Priority:** P0 — Critical (user-reported accuracy issues)  
 > **Created:** 2026-04-01  
 > **Depends on:** Epic 12 (Sim Portfolio), Epic 9-11 (Signal Enhancements)

@@ -4,13 +4,15 @@ export type OpportunityOutcome = "captured" | "missed" | "rejected";
 
 export type OpportunityMissReason =
   | "confidence_too_low"
-  | "liquidity_too_poor"
-  | "iv_unfavorable"
-  | "technical_misalignment"
-  | "event_risk"
+  | "quality_too_low"
   | "position_size_limit"
-  | "missing_data"
-  | "unknown";
+  | "entry_filter_rejected"
+  | "outside_trade_window"
+  | "0dte_rejected"
+  | "portfolio_concentration"
+  | "pipeline_not_run"
+  | "missing_market_data"
+  | "analysis_not_completed";
 
 export interface OpportunityCandidate {
   id: string;

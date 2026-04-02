@@ -298,6 +298,38 @@ async function recordEvaluation(params: {
   }
 }
 
+async function recordPipelineRejection(params: {
+  ticker: string;
+  confidence: number | null;
+  whaleQualityScore: number | null;
+  currentPrice: number;
+  portfolioBalance: number;
+  sourceAnalysisId: number | null;
+  rejectionGate: string;
+  rejectionReason: string;
+}) {
+  try {
+    await db.insert(simEvaluations).values({
+      ticker: params.ticker,
+      shouldEnter: false,
+      reasoning: params.rejectionReason,
+      strategyName: null,
+      legs: null,
+      positionSize: null,
+      netPremium: null,
+      confidence: params.confidence,
+      whaleQualityScore: params.whaleQualityScore,
+      currentPrice: params.currentPrice,
+      portfolioBalance: params.portfolioBalance,
+      sourceAnalysisId: params.sourceAnalysisId,
+      rejectionGate: params.rejectionGate,
+      rejectionReason: params.rejectionReason,
+    });
+  } catch (err) {
+    console.error("[SimPipeline] Failed to record pipeline rejection:", err);
+  }
+}
+
 /**
  * Sim Portfolio Pipeline:
  * 1. Evaluate open positions for exit (profit target / stop loss / time)
@@ -459,21 +491,54 @@ export async function runSimPipeline(): Promise<number> {
 
       const quality = whaleAlert[0]?.qualityScore ?? 0;
       if (quality < MIN_WHALE_QUALITY) {
+        const rejectionReason = `Whale quality ${quality} < ${MIN_WHALE_QUALITY}`;
         console.log(
-          `[SimPipeline] Skipping ${recData.ticker}: whale quality ${quality} < ${MIN_WHALE_QUALITY}`,
+          `[SimPipeline] Skipping ${recData.ticker}: ${rejectionReason}`,
         );
         _lastRunRejections.push({
           ticker: recData.ticker,
-          reason: `Whale quality ${quality} < ${MIN_WHALE_QUALITY}`,
+          reason: rejectionReason,
           stage: "whale_quality",
           timestamp: new Date().toISOString(),
+        });
+        await recordPipelineRejection({
+          ticker: recData.ticker,
+          confidence: rec.confidence,
+          whaleQualityScore: quality,
+          currentPrice: 0,
+          portfolioBalance: portfolio.balance,
+          sourceAnalysisId: rec.id,
+          rejectionGate: "whale_quality",
+          rejectionReason,
         });
         continue;
       }
 
       // Fetch current price
       const [marketData] = await fetchMarketData([recData.ticker]);
-      if (!marketData || marketData.price === 0) continue;
+      if (!marketData || marketData.price === 0) {
+        const rejectionReason = "Market data unavailable at decision time";
+        console.warn(
+          `[SimPipeline] MARKET DATA REJECT: ${recData.ticker} — ${rejectionReason}`,
+        );
+        _lastRunRejections.push({
+          ticker: recData.ticker,
+          reason: rejectionReason,
+          stage: "market_data",
+          timestamp: new Date().toISOString(),
+        });
+        await recordPipelineRejection({
+          ticker: recData.ticker,
+          confidence: rec.confidence,
+          whaleQualityScore: quality,
+          currentPrice: 0,
+          portfolioBalance: portfolio.balance,
+          sourceAnalysisId: rec.id,
+          rejectionGate: "market_data",
+          rejectionReason,
+        });
+        continue;
+      }
 
       // Get deep dive context if available
       const deepDive = deepDiveMap.get(recData.ticker);
@@ -678,6 +743,25 @@ export async function runSimPipeline(): Promise<number> {
             currentPrice: marketData.price,
             portfolioBalance: portfolio.balance,
             sourceAnalysisId: rec.id,
+          });
+        } else {
+          const rejectionReason =
+            "Trade could not be opened due to portfolio sizing or balance constraints";
+          _lastRunRejections.push({
+            ticker: recData.ticker,
+            reason: rejectionReason,
+            stage: "position_open",
+            timestamp: new Date().toISOString(),
+          });
+          await recordPipelineRejection({
+            ticker: recData.ticker,
+            confidence: rec.confidence,
+            whaleQualityScore: quality,
+            currentPrice: marketData.price,
+            portfolioBalance: portfolio.balance,
+            sourceAnalysisId: rec.id,
+            rejectionGate: "position_open",
+            rejectionReason,
           });
         }
       } else {

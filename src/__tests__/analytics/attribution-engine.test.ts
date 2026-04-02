@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runAttribution } from "@/lib/analytics/attribution-engine";
 import type { TradeRecord } from "@/lib/analytics/attribution-engine";
+import type { EvaluationRecord } from "@/lib/analytics/attribution-engine";
 import type { WhaleAlert } from "@/types/whale";
 
 function createWhale(overrides?: Partial<WhaleAlert>): WhaleAlert {
@@ -37,6 +38,20 @@ function createTrade(overrides?: Partial<TradeRecord>): TradeRecord {
   };
 }
 
+function createEvaluation(
+  overrides?: Partial<EvaluationRecord>,
+): EvaluationRecord {
+  return {
+    ticker: "AAPL",
+    shouldEnter: false,
+    confidence: 0.62,
+    rejectionGate: "concentration",
+    rejectionReason: "Sector concentration",
+    createdAt: "2026-04-01T12:05:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("runAttribution", () => {
   it("identifies captured opportunities when trade matches whale", () => {
     const whales = [createWhale()];
@@ -58,6 +73,55 @@ describe("runAttribution", () => {
     expect(result.captured.length).toBe(1);
     expect(result.missed.length).toBe(1);
     expect(result.captureRate).toBe(50);
+    expect(result.missed[0]?.missReason).toBe("pipeline_not_run");
+  });
+
+  it("uses analysis_not_completed when other evaluations exist but this ticker was never evaluated", () => {
+    const result = runAttribution(
+      [createWhale({ ticker: "SPY", strike: 500 })],
+      [],
+      [createEvaluation({ ticker: "AAPL" })],
+    );
+
+    expect(result.missed[0]?.missReason).toBe("analysis_not_completed");
+  });
+
+  it("maps low-quality whales to quality_too_low", () => {
+    const result = runAttribution(
+      [createWhale({ qualityScore: 35 })],
+      [],
+      [createEvaluation()],
+    );
+
+    expect(result.missed[0]?.missReason).toBe("quality_too_low");
+  });
+
+  it("maps concentration rejections from sim evaluations", () => {
+    const result = runAttribution([createWhale()], [], [createEvaluation()]);
+
+    expect(result.missed[0]?.missReason).toBe("portfolio_concentration");
+  });
+
+  it("maps same-day validation failures to 0dte_rejected", () => {
+    const result = runAttribution(
+      [createWhale()],
+      [],
+      [
+        createEvaluation({
+          rejectionGate: "validation",
+          rejectionReason:
+            "Leg expires in the past or today: BUY CALL $200 exp 2026-04-01",
+        }),
+      ],
+    );
+
+    expect(result.missed[0]?.missReason).toBe("0dte_rejected");
+  });
+
+  it("uses pipeline_not_run when no evaluations exist", () => {
+    const result = runAttribution([createWhale()], [], []);
+
+    expect(result.missed[0]?.missReason).toBe("pipeline_not_run");
   });
 
   it("skips open trades", () => {

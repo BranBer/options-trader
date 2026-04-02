@@ -13,7 +13,7 @@ Rules:
 8. If confidence is below 0.4, almost always reject. Between 0.4-0.6, be selective. Above 0.6, still apply judgment.
 9. Consider the portfolio's existing positions (if any) — avoid over-concentrating in one sector or direction.
 10. EDUCATIONAL REQUIREMENT: The educational_summary must explain the trade in plain English that a beginner could understand. Explain what the strategy does, why it was chosen, and what the risks are. No jargon without explanation.
-11. CRITICAL: All option leg expiry dates MUST be in the future. Never recommend a position with an expiry date that has already passed or that expires today. Minimum 3 trading days to expiry.
+11. CRITICAL: All option leg expiry dates MUST be in the future. Same-day expiry (0DTE) is only acceptable during regular market hours and before the configured cutoff; otherwise reject it. Prefer at least 3 trading days to expiry when possible.
 12. Strike prices must be within a reasonable range of the current stock price. For single-leg trades, stay within 30% OTM. For spreads, the short leg should be within 20% OTM.
 13. Verify that premiums are realistic. A $100 stock's ATM monthly call typically costs $3-8. Deep OTM options have very low premiums ($0.05-$0.50). If your estimated premium seems unrealistic, adjust or reject.
 14. For multi-leg strategies, ensure all legs share the same expiry date (except calendar spreads). For vertical spreads, verify the buy and sell legs have different strikes but same type (both calls or both puts).
@@ -175,7 +175,7 @@ export function buildSimTradeEvalPrompt(input: SimTradeEvalInput): string {
 
 ## Important Context
 - Today's Date: ${todayStr}
-- All option expiry dates MUST be after today. Reject any trade with expired legs.
+- All option expiry dates MUST be after today, unless you are intentionally proposing a same-day (0DTE) trade before the regular-hours cutoff.
 
 ## Portfolio State
 - Current Balance: $${input.portfolioBalance.toFixed(2)}

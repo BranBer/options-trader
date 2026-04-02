@@ -1,10 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Tooltip,
@@ -18,13 +22,10 @@ import {
   useEquityCurve,
   usePortfolioTrade,
   useDeepDive,
+  useInfinitePortfolioDiagnostics,
 } from "@/hooks/useApiData";
 import { formatCurrency, timeAgo } from "@/lib/utils/formatters";
-import type {
-  SimTrade,
-  PortfolioStats,
-  TradeDecision,
-} from "@/types/portfolio";
+import type { SimTrade, TradeDecision } from "@/types/portfolio";
 import type { DeepDiveAnalysis } from "@/types/analysis";
 import type {
   AttributionResponse,
@@ -33,11 +34,26 @@ import type {
   PostmortemResult,
   BenchmarkResponse,
   BenchmarkBaseline,
+  AlertDecisionTrace,
+  AlertDiagnosticsOutcome,
+  PortfolioDiagnosticsPayload,
 } from "@/types/analytics";
 import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
 import TechnicalChart from "@/components/shared/TechnicalChart";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
 import LineChart from "@/components/shared/LineChart";
+import {
+  buildDiagnosticsJsonReport,
+  buildDiagnosticsMarkdownReport,
+  getReasonClusterLabel,
+  summarizeReasonClusters,
+} from "@/lib/analytics/alert-diagnostics-export";
+import {
+  getDiagnosticsHrefForCorrelation,
+  getDiagnosticsHrefForDecisionTrace,
+  getDiagnosticsHrefForMissedOpportunity,
+  getDiagnosticsHrefForPipelineGaps,
+} from "@/lib/analytics/diagnostics-links";
 import {
   TrendingUp,
   TrendingDown,
@@ -51,8 +67,13 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowLeft,
-  Percent,
   Activity,
+  Filter,
+  Search,
+  X,
+  Download,
+  Pin,
+  PinOff,
 } from "lucide-react";
 
 // ============================================================
@@ -60,7 +81,37 @@ import {
 // ============================================================
 
 export default function PortfolioPage() {
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
+  const allowedTabs = new Set([
+    "open",
+    "closed",
+    "equity",
+    "diagnostics",
+    "attribution",
+    "postmortem",
+    "benchmark",
+  ]);
+  const requestedTab = searchParams.get("tab");
+  const activeTab =
+    requestedTab && allowedTabs.has(requestedTab) ? requestedTab : "open";
+
+  const handleTabChange = (nextTab: string) => {
+    const next = new URLSearchParams(searchParams.toString());
+    if (nextTab === "open") {
+      next.delete("tab");
+    } else {
+      next.set("tab", nextTab);
+    }
+    router.replace(
+      `${pathname}${next.toString() ? `?${next.toString()}` : ""}`,
+      {
+        scroll: false,
+      },
+    );
+  };
 
   if (selectedTradeId != null) {
     return (
@@ -95,11 +146,12 @@ export default function PortfolioPage() {
 
       <PortfolioOverview />
 
-      <Tabs defaultValue="open">
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="open">Open Positions</TabsTrigger>
           <TabsTrigger value="closed">Trade History</TabsTrigger>
           <TabsTrigger value="equity">Equity Curve</TabsTrigger>
+          <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
           <TabsTrigger value="attribution">Attribution</TabsTrigger>
           <TabsTrigger value="postmortem">Postmortem</TabsTrigger>
           <TabsTrigger value="benchmark">Benchmark</TabsTrigger>
@@ -113,6 +165,9 @@ export default function PortfolioPage() {
         </TabsContent>
         <TabsContent value="equity" className="mt-4">
           <EquityCurveSection />
+        </TabsContent>
+        <TabsContent value="diagnostics" className="mt-4">
+          <DiagnosticsSection key={searchParams.toString()} />
         </TabsContent>
         <TabsContent value="attribution" className="mt-4">
           <AttributionSection />
@@ -432,6 +487,1187 @@ function EquityCurveSection() {
 }
 
 // ============================================================
+// Diagnostics Section (Epic 32)
+// ============================================================
+
+export function DiagnosticsSection() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const startDate = searchParams.get("startDate");
+  const endDate = searchParams.get("endDate");
+  const [draftTicker, setDraftTicker] = useState(
+    searchParams.get("ticker") ?? "",
+  );
+  const [draftMinQuality, setDraftMinQuality] = useState(
+    searchParams.get("minQuality") ?? "",
+  );
+  const [expandedTraceKey, setExpandedTraceKey] = useState<string | null>(null);
+  const [pinnedTraceKeys, setPinnedTraceKeys] = useState<string[]>([]);
+  const [compareDensity, setCompareDensity] = useState<"detailed" | "compact">(
+    "detailed",
+  );
+
+  const outcomeParam = searchParams.get("outcome");
+  const outcome =
+    outcomeParam === "entered" ||
+    outcomeParam === "rejected" ||
+    outcomeParam === "not_evaluated"
+      ? outcomeParam
+      : null;
+  const reasonClusterParam = searchParams.get("reasonCluster");
+  const reasonCluster =
+    reasonClusterParam === "same_day_blocked" ||
+    reasonClusterParam === "missing_market_data" ||
+    reasonClusterParam === "pipeline_gap" ||
+    reasonClusterParam === "confidence_threshold" ||
+    reasonClusterParam === "portfolio_concentration"
+      ? reasonClusterParam
+      : null;
+  const appliedTicker =
+    searchParams.get("ticker")?.trim().toUpperCase() || undefined;
+  const appliedMinQualityRaw = searchParams.get("minQuality");
+  const appliedMinQuality =
+    appliedMinQualityRaw != null && appliedMinQualityRaw !== ""
+      ? Number(appliedMinQualityRaw)
+      : null;
+  const hasActiveFilters =
+    appliedTicker != null ||
+    outcome != null ||
+    reasonCluster != null ||
+    appliedMinQuality != null ||
+    startDate != null ||
+    endDate != null;
+
+  const updateDiagnosticsSearch = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("tab", "diagnostics");
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (value == null || value === "") {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+    }
+
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  };
+
+  const diagnosticsQuery = useInfinitePortfolioDiagnostics(
+    {
+      ticker: appliedTicker,
+      outcome,
+      reasonCluster,
+      minQuality: appliedMinQuality,
+    },
+    8,
+  );
+
+  const pages = diagnosticsQuery.data?.pages ?? [];
+  const traces = pages.flatMap((page) => page.diagnostics.traces);
+  const overview = pages[0]?.diagnostics ?? null;
+  const exportPayload: PortfolioDiagnosticsPayload | null = overview
+    ? {
+        ...overview,
+        traces,
+      }
+    : null;
+  const failureClusters = summarizeReasonClusters(traces);
+  const pinnedTraces = pinnedTraceKeys
+    .map((traceKey) => traces.find((trace) => getTraceKey(trace) === traceKey))
+    .filter((trace): trace is AlertDecisionTrace => trace != null);
+
+  const downloadReport = (
+    fileName: string,
+    contents: string,
+    contentType: string,
+  ) => {
+    const blob = new Blob([contents], { type: contentType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExport = (format: "json" | "markdown") => {
+    if (!exportPayload) return;
+
+    const date = new Date().toISOString().slice(0, 10);
+    if (format === "json") {
+      downloadReport(
+        `alert-diagnostics-${date}.json`,
+        buildDiagnosticsJsonReport(exportPayload),
+        "application/json",
+      );
+      return;
+    }
+
+    downloadReport(
+      `alert-diagnostics-${date}.md`,
+      buildDiagnosticsMarkdownReport(exportPayload),
+      "text/markdown",
+    );
+  };
+
+  const togglePinnedTrace = (traceKey: string) => {
+    setPinnedTraceKeys((current) => {
+      if (current.includes(traceKey)) {
+        return current.filter((key) => key !== traceKey);
+      }
+      if (current.length >= 3) {
+        return current;
+      }
+      return [...current, traceKey];
+    });
+  };
+
+  const applyReasonClusterFilter = (
+    cluster: AlertDiagnosticsReasonCluster,
+    nextOutcome?: AlertDiagnosticsOutcome,
+  ) => {
+    updateDiagnosticsSearch({
+      reasonCluster: cluster,
+      outcome:
+        nextOutcome ??
+        (cluster === "pipeline_gap" ? "not_evaluated" : "rejected"),
+    });
+  };
+
+  const applyTopReasonFilter = (reason: string) => {
+    const cluster = inferReasonClusterFromReasonText(reason);
+    updateDiagnosticsSearch({
+      reasonCluster: cluster,
+      outcome: cluster === "pipeline_gap" ? "not_evaluated" : "rejected",
+    });
+  };
+
+  const applyFilters = () => {
+    const nextTicker = draftTicker.trim().toUpperCase();
+    const nextMinQuality = draftMinQuality.trim();
+
+    updateDiagnosticsSearch({
+      ticker: nextTicker || null,
+      minQuality:
+        nextMinQuality === "" || Number.isNaN(Number(nextMinQuality))
+          ? null
+          : nextMinQuality,
+    });
+  };
+
+  const clearFilters = () => {
+    setDraftTicker("");
+    setDraftMinQuality("");
+    updateDiagnosticsSearch({
+      ticker: null,
+      outcome: null,
+      reasonCluster: null,
+      minQuality: null,
+      startDate: null,
+      endDate: null,
+    });
+  };
+
+  const focusPipelineGaps = () => {
+    setDraftTicker("");
+    setDraftMinQuality("");
+    updateDiagnosticsSearch({
+      ticker: null,
+      minQuality: null,
+      outcome: "not_evaluated",
+      reasonCluster: "pipeline_gap",
+      startDate: null,
+      endDate: null,
+    });
+  };
+
+  const applyPreset = (
+    preset:
+      | "all"
+      | "high_quality_missed"
+      | "pipeline_gaps"
+      | "same_day_blocked"
+      | "missing_market_data"
+      | "entered",
+  ) => {
+    if (preset === "all") {
+      clearFilters();
+      return;
+    }
+
+    if (preset === "high_quality_missed") {
+      setDraftMinQuality("70");
+      updateDiagnosticsSearch({
+        ticker: null,
+        minQuality: "70",
+        outcome: "rejected",
+        reasonCluster: null,
+      });
+      return;
+    }
+
+    if (preset === "pipeline_gaps") {
+      setDraftTicker("");
+      setDraftMinQuality("");
+      updateDiagnosticsSearch({
+        ticker: null,
+        minQuality: null,
+        outcome: "not_evaluated",
+        reasonCluster: "pipeline_gap",
+      });
+      return;
+    }
+
+    if (preset === "same_day_blocked") {
+      updateDiagnosticsSearch({
+        outcome: "rejected",
+        reasonCluster: "same_day_blocked",
+      });
+      return;
+    }
+
+    if (preset === "missing_market_data") {
+      updateDiagnosticsSearch({
+        outcome: "rejected",
+        reasonCluster: "missing_market_data",
+      });
+      return;
+    }
+
+    updateDiagnosticsSearch({
+      outcome: "entered",
+      reasonCluster: null,
+      ticker: null,
+      minQuality: null,
+    });
+  };
+
+  if (diagnosticsQuery.isLoading) {
+    return <div className="h-48 animate-pulse rounded bg-muted" />;
+  }
+
+  if (diagnosticsQuery.isError) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <ShieldAlert className="mx-auto mb-2 h-8 w-8 text-amber-500" />
+          <p className="text-sm font-medium">
+            Diagnostics are temporarily unavailable.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The recent alert trace window could not be loaded. Retry the request
+            or clear filters if this was triggered by a narrow query.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => diagnosticsQuery.refetch()}
+            >
+              Retry
+            </Button>
+            {hasActiveFilters ? (
+              <Button variant="ghost" onClick={clearFilters}>
+                Clear Filters
+              </Button>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!overview) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <Activity className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+          <p className="text-muted-foreground text-sm">
+            Diagnostics payload is not available yet. This usually means there
+            are no recent whale alerts stored for tracing.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const pipelineHealth = overview.pipelineHealth;
+  const noTraces = traces.length === 0;
+  const noDiagnosticsYet = noTraces && !hasActiveFilters;
+  const filteredEmpty = noTraces && hasActiveFilters;
+  const showPipelineGapCta =
+    pipelineHealth.status === "stale" || pipelineHealth.status === "never_run";
+  const activeDiagnosticsFilters = [
+    appliedTicker
+      ? {
+          key: "ticker",
+          label: `Ticker: ${appliedTicker}`,
+          onRemove: () => {
+            setDraftTicker("");
+            updateDiagnosticsSearch({ ticker: null });
+          },
+        }
+      : null,
+    outcome
+      ? {
+          key: "outcome",
+          label: `Outcome: ${formatDiagnosticsOutcomeLabel(outcome)}`,
+          onRemove: () => updateDiagnosticsSearch({ outcome: null }),
+        }
+      : null,
+    reasonCluster
+      ? {
+          key: "reasonCluster",
+          label: `Cluster: ${getReasonClusterLabel(reasonCluster)}`,
+          onRemove: () => updateDiagnosticsSearch({ reasonCluster: null }),
+        }
+      : null,
+    appliedMinQuality != null
+      ? {
+          key: "minQuality",
+          label: `Min quality: ${appliedMinQuality}`,
+          onRemove: () => {
+            setDraftMinQuality("");
+            updateDiagnosticsSearch({ minQuality: null });
+          },
+        }
+      : null,
+    startDate
+      ? {
+          key: "startDate",
+          label: `Start: ${startDate}`,
+          onRemove: () => updateDiagnosticsSearch({ startDate: null }),
+        }
+      : null,
+    endDate
+      ? {
+          key: "endDate",
+          label: `End: ${endDate}`,
+          onRemove: () => updateDiagnosticsSearch({ endDate: null }),
+        }
+      : null,
+  ].filter(
+    (
+      filter,
+    ): filter is {
+      key: string;
+      label: string;
+      onRemove: () => void;
+    } => filter != null,
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          title="Recent Alerts"
+          value={String(overview.summary.total)}
+          icon={Activity}
+          description="Current diagnostics window"
+          tooltip="Number of recent whale alerts in the currently filtered diagnostics view."
+          trend={0}
+        />
+        <StatCard
+          title="Entered"
+          value={String(overview.summary.byOutcome.entered)}
+          icon={TrendingUp}
+          description="Alerts that became trades"
+          tooltip="Recent alerts that successfully reached trade entry."
+          trend={overview.summary.byOutcome.entered > 0 ? 1 : 0}
+        />
+        <StatCard
+          title="Rejected"
+          value={String(overview.summary.byOutcome.rejected)}
+          icon={TrendingDown}
+          description="Alerts blocked by a gate"
+          tooltip="Recent alerts that were evaluated but stopped before a trade was opened."
+          trend={overview.summary.byOutcome.rejected > 0 ? -1 : 0}
+        />
+        <StatCard
+          title="Pipeline Health"
+          value={overview.pipelineHealth.status}
+          icon={overview.pipelineHealth.isStale ? ShieldAlert : Target}
+          description={
+            overview.pipelineHealth.minutesSinceRefresh != null
+              ? `${overview.pipelineHealth.minutesSinceRefresh} minute(s) since refresh`
+              : "No successful refresh yet"
+          }
+          tooltip="Derived pipeline freshness for the diagnostics window. Stale or never-run states explain why alerts may not have been evaluated."
+          trend={overview.pipelineHealth.status === "healthy" ? 1 : -1}
+        />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            Diagnostics Filters
+            <Filter className="h-4 w-4 text-muted-foreground" />
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_auto_auto]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={draftTicker}
+                onChange={(event) => setDraftTicker(event.target.value)}
+                placeholder="Filter by ticker"
+                className="pl-8"
+              />
+            </div>
+            <Input
+              value={draftMinQuality}
+              onChange={(event) => setDraftMinQuality(event.target.value)}
+              inputMode="numeric"
+              placeholder="Min quality"
+            />
+            <Button variant="outline" onClick={applyFilters}>
+              Apply
+            </Button>
+            <Button variant="ghost" onClick={clearFilters}>
+              <X className="h-4 w-4" />
+              Clear
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={outcome === null ? "secondary" : "outline"}
+              size="sm"
+              onClick={() =>
+                updateDiagnosticsSearch({ outcome: null, reasonCluster: null })
+              }
+            >
+              All outcomes
+            </Button>
+            <Button
+              variant={outcome === "entered" ? "secondary" : "outline"}
+              size="sm"
+              onClick={() =>
+                updateDiagnosticsSearch({
+                  outcome: "entered",
+                  reasonCluster: null,
+                })
+              }
+            >
+              Entered
+            </Button>
+            <Button
+              variant={outcome === "rejected" ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => updateDiagnosticsSearch({ outcome: "rejected" })}
+            >
+              Rejected
+            </Button>
+            <Button
+              variant={outcome === "not_evaluated" ? "secondary" : "outline"}
+              size="sm"
+              onClick={() =>
+                updateDiagnosticsSearch({
+                  outcome: "not_evaluated",
+                  reasonCluster: "pipeline_gap",
+                })
+              }
+            >
+              Not evaluated
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => applyPreset("all")}
+            >
+              All recent
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => applyPreset("high_quality_missed")}
+            >
+              High-quality missed
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => applyPreset("pipeline_gaps")}
+            >
+              Pipeline gaps
+            </Button>
+            <Button
+              variant={
+                reasonCluster === "same_day_blocked" ? "secondary" : "outline"
+              }
+              size="sm"
+              onClick={() => applyPreset("same_day_blocked")}
+            >
+              Same-day blocked
+            </Button>
+            <Button
+              variant={
+                reasonCluster === "missing_market_data"
+                  ? "secondary"
+                  : "outline"
+              }
+              size="sm"
+              onClick={() => applyPreset("missing_market_data")}
+            >
+              Missing market data
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => applyPreset("entered")}
+            >
+              Captured alerts
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/20 p-2">
+            <div className="text-xs text-muted-foreground">
+              {noTraces
+                ? "Exports unlock once the current diagnostics window contains traces."
+                : "Export the current filtered window or pin up to three traces for sprint review."}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport("json")}
+                disabled={!exportPayload || traces.length === 0}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export JSON
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport("markdown")}
+                disabled={!exportPayload || traces.length === 0}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export Markdown
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {hasActiveFilters ? (
+        <Card className="border-border/70 bg-muted/15">
+          <CardContent className="flex flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <div className="text-sm font-medium">
+                Active diagnostics window
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Showing {overview.summary.total} alert(s) for the current filter
+                set.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {activeDiagnosticsFilters.map((filter) => (
+                <Button
+                  key={filter.key}
+                  variant="secondary"
+                  size="sm"
+                  onClick={filter.onRemove}
+                >
+                  {filter.label}
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              ))}
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Reset all
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {pipelineHealth.status === "never_run" ? (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="py-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-foreground">
+                  The pipeline has not produced a diagnostics window yet.
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Recent whale alerts cannot be traced until a successful
+                  pipeline run stores evaluations. Once the pipeline runs, this
+                  tab will show the full alert lifecycle automatically.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {hasActiveFilters ? (
+                  <Button variant="outline" size="sm" onClick={clearFilters}>
+                    Clear Filters
+                  </Button>
+                ) : null}
+                <Button variant="outline" size="sm" onClick={focusPipelineGaps}>
+                  Focus Pipeline Gaps
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {pipelineHealth.status === "stale" &&
+      overview.summary.byOutcome.not_evaluated > 0 ? (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="py-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-foreground">
+                  Pipeline freshness may be masking unevaluated alerts.
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  The last successful refresh was{" "}
+                  {pipelineHealth.minutesSinceRefresh} minute(s) ago. Use the
+                  pipeline-gap view to isolate alerts that were never evaluated
+                  before the pipeline went stale.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={focusPipelineGaps}>
+                  Investigate Pipeline Gaps
+                </Button>
+                {hasActiveFilters ? (
+                  <Button variant="ghost" size="sm" onClick={clearFilters}>
+                    Reset Filters
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {filteredEmpty ? (
+        <Card className="border-dashed">
+          <CardContent className="py-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-foreground">
+                  No alert traces match the current filters.
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Broaden the ticker, outcome, cluster, or minimum-quality
+                  filters to reopen the diagnostics window.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={clearFilters}>
+                  Show All Recent
+                </Button>
+                {showPipelineGapCta ? (
+                  <Button variant="ghost" size="sm" onClick={focusPipelineGaps}>
+                    Check Pipeline Gaps
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {noDiagnosticsYet ? (
+        <Card className="border-dashed">
+          <CardContent className="py-4">
+            <div className="space-y-1">
+              <div className="text-sm font-medium text-foreground">
+                No recent whale alerts are available in the diagnostics window.
+              </div>
+              <p className="text-sm text-muted-foreground">
+                This is different from a fetch error: the diagnostics API is
+                healthy, but there are no recent alerts stored to trace right
+                now.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-sm font-medium">
+              Pinned Trace Comparison
+            </CardTitle>
+            {pinnedTraces.length >= 2 ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={
+                    compareDensity === "compact" ? "secondary" : "outline"
+                  }
+                  size="sm"
+                  onClick={() => setCompareDensity("compact")}
+                >
+                  Compact compare
+                </Button>
+                <Button
+                  variant={
+                    compareDensity === "detailed" ? "secondary" : "outline"
+                  }
+                  size="sm"
+                  onClick={() => setCompareDensity("detailed")}
+                >
+                  Detailed compare
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>
+              {pinnedTraces.length === 0
+                ? "Pin alerts from the trace list below to compare decisions side by side."
+                : `${pinnedTraces.length} of 3 traces pinned for comparison.`}
+            </span>
+            {pinnedTraceKeys.length >= 3 ? (
+              <Badge variant="outline" className="text-[10px]">
+                Pin limit reached
+              </Badge>
+            ) : null}
+          </div>
+
+          {pinnedTraces.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              {noTraces
+                ? "No traces are currently available to pin for comparison."
+                : "Use the pin action on any alert trace to keep it in this comparison view."}
+            </div>
+          ) : (
+            <div className="grid gap-3 lg:grid-cols-3">
+              {pinnedTraces.map((trace) => {
+                const traceKey = getTraceKey(trace);
+
+                return (
+                  <div
+                    key={`compare-${traceKey}`}
+                    className="rounded-lg border bg-muted/20 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold">
+                            {trace.ticker}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={getOutcomeBadgeClass(trace.finalOutcome)}
+                          >
+                            {trace.finalOutcome.replace(/_/g, " ")}
+                          </Badge>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {trace.primaryReason ??
+                            "No blocking reason recorded."}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => togglePinnedTrace(traceKey)}
+                      >
+                        <PinOff className="h-3.5 w-3.5" />
+                        Unpin
+                      </Button>
+                    </div>
+
+                    {compareDensity === "compact" ? (
+                      <div className="mt-3 space-y-2 text-xs">
+                        <div className="rounded bg-background/70 p-2 text-muted-foreground">
+                          <div>Detected {timeAgo(trace.detectedAt)}</div>
+                          <div>Quality {trace.qualityScore ?? "n/a"}</div>
+                          <div>
+                            Cluster {getReasonClusterLabel(trace.reasonCluster)}
+                          </div>
+                        </div>
+                        <div className="rounded border bg-background/70 p-2">
+                          <div className="font-medium text-foreground">
+                            Stage overview
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {trace.stageEvents.map((event) => (
+                              <Badge
+                                key={`compact-${traceKey}-${event.stage}`}
+                                variant="outline"
+                                className={`${getStageStatusClass(event.status)} text-[10px]`}
+                              >
+                                {formatStageLabel(event.stage)}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-2 text-xs">
+                        <div className="rounded bg-background/70 p-2 text-muted-foreground">
+                          <div>Detected {timeAgo(trace.detectedAt)}</div>
+                          <div>Quality {trace.qualityScore ?? "n/a"}</div>
+                          <div>
+                            Cluster {getReasonClusterLabel(trace.reasonCluster)}
+                          </div>
+                        </div>
+                        {trace.stageEvents.map((event) => (
+                          <div
+                            key={`compare-${traceKey}-${event.stage}`}
+                            className="rounded border bg-background/70 p-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium">
+                                {formatStageLabel(event.stage)}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className={getStageStatusClass(event.status)}
+                              >
+                                {event.status.replace(/_/g, " ")}
+                              </Badge>
+                            </div>
+                            <div className="mt-1 text-muted-foreground">
+                              {event.reason ?? "No reason recorded."}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)]">
+        <Card className="overflow-visible">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">
+              Recent Alert Traces
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {traces.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                {filteredEmpty
+                  ? "The current filters returned an empty diagnostics window. Reset the filters or switch to pipeline gaps."
+                  : pipelineHealth.status === "never_run"
+                    ? "The pipeline has not run yet, so there are no traces to inspect."
+                    : "No recent alert traces are available in the current diagnostics window."}
+              </div>
+            ) : (
+              <ScrollArea className="h-180 pr-3">
+                <div className="space-y-3">
+                  {traces.map((trace) => {
+                    const traceKey = getTraceKey(trace);
+                    const isExpanded = expandedTraceKey === traceKey;
+                    const isPinned = pinnedTraceKeys.includes(traceKey);
+
+                    return (
+                      <div
+                        key={traceKey}
+                        className="rounded-lg border bg-muted/30 p-3"
+                      >
+                        <div className="flex items-start gap-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedTraceKey((current) =>
+                                current === traceKey ? null : traceKey,
+                              )
+                            }
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-mono font-bold">
+                                    {trace.ticker}
+                                  </span>
+                                  <Badge
+                                    variant="outline"
+                                    className={getOutcomeBadgeClass(
+                                      trace.finalOutcome,
+                                    )}
+                                  >
+                                    {trace.finalOutcome.replace(/_/g, " ")}
+                                  </Badge>
+                                  {trace.qualityScore != null && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px]"
+                                    >
+                                      Q {trace.qualityScore}
+                                    </Badge>
+                                  )}
+                                  {trace.reasonCluster ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px]"
+                                    >
+                                      {getReasonClusterLabel(
+                                        trace.reasonCluster,
+                                      )}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  Detected {timeAgo(trace.detectedAt)}
+                                  {trace.primaryReason
+                                    ? ` • ${trace.primaryReason}`
+                                    : ""}
+                                </div>
+                                <div className="flex flex-wrap gap-1 pt-1">
+                                  {trace.stageEvents.map((event) => (
+                                    <span
+                                      key={`${traceKey}-${event.stage}`}
+                                      className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${getStageStatusClass(event.status)}`}
+                                    >
+                                      {formatStageLabel(event.stage)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="shrink-0 text-muted-foreground">
+                                {isExpanded ? (
+                                  <ChevronUp className="h-4 w-4" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4" />
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                          <Button
+                            variant={isPinned ? "secondary" : "outline"}
+                            size="sm"
+                            onClick={() => togglePinnedTrace(traceKey)}
+                            disabled={!isPinned && pinnedTraceKeys.length >= 3}
+                          >
+                            {isPinned ? (
+                              <PinOff className="h-3.5 w-3.5" />
+                            ) : (
+                              <Pin className="h-3.5 w-3.5" />
+                            )}
+                            {isPinned ? "Unpin" : "Pin"}
+                          </Button>
+                        </div>
+
+                        {isExpanded ? (
+                          <div className="mt-3 space-y-3">
+                            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                              {trace.stageEvents.map((event) => (
+                                <div
+                                  key={`${traceKey}-${event.stage}-detail`}
+                                  className="rounded border bg-background/70 p-2"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-medium">
+                                      {formatStageLabel(event.stage)}
+                                    </span>
+                                    <Badge
+                                      variant="outline"
+                                      className={getStageStatusClass(
+                                        event.status,
+                                      )}
+                                    >
+                                      {event.status.replace(/_/g, " ")}
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-1 text-[11px] text-muted-foreground">
+                                    {event.timestamp
+                                      ? new Date(
+                                          event.timestamp,
+                                        ).toLocaleString()
+                                      : "No timestamp"}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {event.reason ??
+                                      "No blocking reason recorded."}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
+                              <div className="rounded bg-background/70 p-2">
+                                <div className="font-medium text-foreground">
+                                  Whale Ref
+                                </div>
+                                <div>
+                                  {trace.sourceRefs.primaryWhaleId != null
+                                    ? `#${trace.sourceRefs.primaryWhaleId}`
+                                    : "No explicit whale id"}
+                                </div>
+                              </div>
+                              <div className="rounded bg-background/70 p-2">
+                                <div className="font-medium text-foreground">
+                                  Analysis Ref
+                                </div>
+                                <div>
+                                  {trace.sourceRefs.sourceAnalysisId != null
+                                    ? `#${trace.sourceRefs.sourceAnalysisId}`
+                                    : "No analysis row"}
+                                </div>
+                              </div>
+                              <div className="rounded bg-background/70 p-2">
+                                <div className="font-medium text-foreground">
+                                  Trade Ref
+                                </div>
+                                <div>
+                                  {trace.sourceRefs.tradeId != null
+                                    ? `#${trace.sourceRefs.tradeId}`
+                                    : "No trade opened"}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+                {diagnosticsQuery.hasNextPage ? (
+                  <div className="mt-4 border-t pt-4">
+                    <div className="flex justify-center">
+                      <Button
+                        variant="outline"
+                        onClick={() => diagnosticsQuery.fetchNextPage()}
+                        disabled={diagnosticsQuery.isFetchingNextPage}
+                      >
+                        {diagnosticsQuery.isFetchingNextPage
+                          ? "Loading..."
+                          : "Load More Alerts"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </ScrollArea>
+            )}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">
+                Failure Clusters
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {failureClusters.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No missed-alert clusters in the current diagnostics window.
+                </p>
+              ) : (
+                failureClusters.slice(0, 4).map((cluster) => (
+                  <button
+                    key={cluster.cluster}
+                    type="button"
+                    onClick={() =>
+                      cluster.cluster !== "unclassified"
+                        ? applyReasonClusterFilter(cluster.cluster)
+                        : updateDiagnosticsSearch({
+                            outcome: "rejected",
+                            reasonCluster: null,
+                          })
+                    }
+                    className="w-full rounded bg-muted/50 p-2 text-left transition-colors hover:bg-muted"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm">{cluster.label}</span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[10px]">
+                          {cluster.count}
+                        </Badge>
+                        <span className="text-[11px] text-primary">Apply</span>
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">
+                Drop-Off Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {Object.entries(overview.summary.dropOffByStage).map(
+                ([stage, count]) => (
+                  <div
+                    key={stage}
+                    className="flex items-center justify-between rounded bg-muted/50 p-2"
+                  >
+                    <span className="text-muted-foreground">
+                      {formatStageLabel(
+                        stage as AlertDecisionTrace["stageEvents"][number]["stage"],
+                      )}
+                    </span>
+                    <span className="font-semibold">{count}</span>
+                  </div>
+                ),
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Top Reasons</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {overview.summary.topReasons.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No rejection or pipeline-gap reasons in the current window.
+                  </p>
+                ) : (
+                  overview.summary.topReasons.map((item) => (
+                    <button
+                      key={item.reason}
+                      type="button"
+                      onClick={() => applyTopReasonFilter(item.reason)}
+                      className="w-full rounded bg-muted/50 p-2 text-left transition-colors hover:bg-muted"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm">{item.reason}</span>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[10px]">
+                            {item.count}
+                          </Badge>
+                          <span className="text-[11px] text-primary">
+                            Filter
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {diagnosticsQuery.isFetching ? (
+            <div className="text-xs text-muted-foreground">
+              Refreshing diagnostics window...
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Trade Detail (Educational Breakdown)
 // ============================================================
 
@@ -443,7 +1679,6 @@ function TradeDetail({
   onBack: () => void;
 }) {
   const { data, isLoading } = usePortfolioTrade(tradeId);
-  const [showFullReasoning, setShowFullReasoning] = useState(false);
 
   // Fetch deep-dive analysis for chart overlays (S/R levels, patterns)
   const ticker = data?.trade?.ticker;
@@ -917,7 +2152,6 @@ function TradeDetail({
             </CardHeader>
             <CardContent>
               <AttributionCard
-                ticker={trade.ticker}
                 sentiment={data.sourceWhale.sentiment ?? "neutral"}
                 qualityScore={data.sourceWhale.qualityScore}
                 premium={data.sourceWhale.premium}
@@ -949,16 +2183,7 @@ function TradeDetail({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <PostmortemCard
-                tradeId={trade.id}
-                ticker={trade.ticker}
-                entryDate={trade.entryDate}
-                exitDate={trade.exitDate ?? ""}
-                entryPrice={Number(trade.entryPrice)}
-                exitPrice={Number(trade.exitPrice)}
-                pnl={pnl}
-                pnlPct={pnlPct}
-              />
+              <PostmortemCard tradeId={trade.id} />
             </CardContent>
           </Card>
         )}
@@ -998,6 +2223,115 @@ function TradeDetail({
   );
 }
 
+function getTraceKey(trace: AlertDecisionTrace): string {
+  return trace.alertId != null
+    ? `alert-${trace.alertId}`
+    : `${trace.ticker}-${trace.detectedAt}`;
+}
+
+function formatStageLabel(
+  stage: AlertDecisionTrace["stageEvents"][number]["stage"],
+): string {
+  const labels: Record<string, string> = {
+    detection: "Detection",
+    analysis: "Analysis",
+    evaluation: "Evaluation",
+    validation: "Validation",
+    entry: "Entry",
+    trade_execution: "Trade Execution",
+  };
+
+  return labels[stage] ?? stage;
+}
+
+function getOutcomeBadgeClass(outcome: AlertDiagnosticsOutcome): string {
+  if (outcome === "entered") {
+    return "border-emerald-500/30 text-emerald-400";
+  }
+  if (outcome === "rejected") {
+    return "border-red-500/30 text-red-400";
+  }
+  return "border-amber-500/30 text-amber-400";
+}
+
+function getStageStatusClass(
+  status: AlertDecisionTrace["stageEvents"][number]["status"],
+): string {
+  const classes: Record<string, string> = {
+    completed: "border-blue-500/30 text-blue-400",
+    passed: "border-emerald-500/30 text-emerald-400",
+    blocked: "border-red-500/30 text-red-400",
+    missing: "border-amber-500/30 text-amber-400",
+    not_applicable: "border-muted text-muted-foreground",
+  };
+
+  return classes[status] ?? "border-muted text-muted-foreground";
+}
+
+function formatDiagnosticsOutcomeLabel(
+  outcome: AlertDiagnosticsOutcome,
+): string {
+  if (outcome === "not_evaluated") {
+    return "Not evaluated";
+  }
+
+  return outcome.charAt(0).toUpperCase() + outcome.slice(1);
+}
+
+function formatMissReasonLabel(reason: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    confidence_too_low: "Entry confidence below threshold",
+    quality_too_low: "Whale quality below minimum",
+    position_size_limit: "Position sizing or balance limit",
+    entry_filter_rejected: "Entry filter rejected",
+    outside_trade_window: "Outside trade window",
+    "0dte_rejected": "0DTE or near-expiry rejected",
+    portfolio_concentration: "Portfolio concentration limit",
+    pipeline_not_run: "Pipeline did not run",
+    missing_market_data: "Missing market data",
+    analysis_not_completed: "Analysis not completed",
+  };
+
+  return labels[reason ?? ""] ?? "Not classified";
+}
+
+function inferReasonClusterFromReasonText(
+  reason: string | null | undefined,
+): AlertDiagnosticsReasonCluster | null {
+  const normalized = reason?.toLowerCase() ?? "";
+
+  if (
+    normalized.includes("pipeline") ||
+    normalized.includes("analysis not completed") ||
+    normalized.includes("did not run")
+  ) {
+    return "pipeline_gap";
+  }
+
+  if (normalized.includes("market data")) {
+    return "missing_market_data";
+  }
+
+  if (
+    normalized.includes("0dte") ||
+    normalized.includes("same-day") ||
+    normalized.includes("theta risk") ||
+    normalized.includes("outside trade window")
+  ) {
+    return "same_day_blocked";
+  }
+
+  if (normalized.includes("concentration")) {
+    return "portfolio_concentration";
+  }
+
+  if (normalized.includes("confidence")) {
+    return "confidence_threshold";
+  }
+
+  return null;
+}
+
 // ============================================================
 // Attribution Section (Missed Opportunities)
 // ============================================================
@@ -1034,6 +2368,45 @@ function AttributionSection() {
     );
   }
 
+  const funnelDetected = Math.max(data.diagnostics.funnel.detected, 1);
+  const funnelStages = [
+    { label: "Detected", count: data.diagnostics.funnel.detected },
+    { label: "Quality Passed", count: data.diagnostics.funnel.qualityPassed },
+    { label: "Evaluated", count: data.diagnostics.funnel.evaluated },
+    { label: "LLM Accepted", count: data.diagnostics.funnel.llmAccepted },
+    { label: "Entered", count: data.diagnostics.funnel.entered },
+  ];
+  const dropOffEntries = [
+    { label: "Scoring", count: data.diagnostics.funnel.droppedByStage.scoring },
+    {
+      label: "Validation",
+      count: data.diagnostics.funnel.droppedByStage.validation,
+    },
+    {
+      label: "Risk Check",
+      count: data.diagnostics.funnel.droppedByStage.riskCheck,
+    },
+    {
+      label: "Entry Decision",
+      count: data.diagnostics.funnel.droppedByStage.entryDecision,
+    },
+    {
+      label: "Trade Open",
+      count: data.diagnostics.funnel.droppedByStage.tradeOpen,
+    },
+    {
+      label: "Pipeline / Analysis",
+      count: data.diagnostics.funnel.droppedByStage.pipeline,
+    },
+  ];
+  const maxDropCount = Math.max(
+    1,
+    ...dropOffEntries.map((entry) => entry.count),
+  );
+  const dominantDrop = [...dropOffEntries].sort(
+    (left, right) => right.count - left.count,
+  )[0];
+
   return (
     <div className="space-y-4">
       <div className="grid gap-2 sm:grid-cols-3">
@@ -1063,31 +2436,329 @@ function AttributionSection() {
         />
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-sm font-medium">
+                Decision Funnel
+              </CardTitle>
+              <Link
+                href={getDiagnosticsHrefForPipelineGaps()}
+                className="text-xs text-primary hover:underline"
+              >
+                Open pipeline gaps →
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs text-muted-foreground">
+                    Dominant drop-off
+                  </div>
+                  <div className="text-sm font-medium">
+                    {dominantDrop.count > 0
+                      ? `${dominantDrop.label} (${dominantDrop.count})`
+                      : "No dominant drop-off in current window"}
+                  </div>
+                </div>
+                <div className="text-right text-xs text-muted-foreground">
+                  <div>
+                    {data.captureRate?.toFixed(1) ?? "0.0"}% capture rate
+                  </div>
+                  <div>
+                    {data.diagnostics.funnel.entered} alerts reached entry
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {funnelStages.map((stage, index) => {
+                const previousCount =
+                  index === 0 ? stage.count : funnelStages[index - 1].count;
+                const percentOfDetected = Math.round(
+                  (stage.count / funnelDetected) * 100,
+                );
+                const retainedFromPrevious =
+                  index === 0
+                    ? 100
+                    : previousCount > 0
+                      ? Math.round((stage.count / previousCount) * 100)
+                      : 0;
+                const barWidth =
+                  stage.count > 0 ? Math.max(percentOfDetected, 6) : 0;
+
+                return (
+                  <div
+                    key={stage.label}
+                    className="rounded-lg border bg-background/60 p-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium">{stage.label}</span>
+                      <span className="font-semibold">{stage.count}</span>
+                    </div>
+                    <div className="mt-2 h-2 rounded-full bg-muted">
+                      <div
+                        className="h-2 rounded-full bg-primary"
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>{percentOfDetected}% of detected</span>
+                      <span>
+                        {retainedFromPrevious}% retained from prior stage
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {dropOffEntries.map((entry) => {
+                const barWidth =
+                  entry.count > 0
+                    ? Math.max(
+                        Math.round((entry.count / maxDropCount) * 100),
+                        8,
+                      )
+                    : 0;
+
+                return (
+                  <div key={entry.label} className="rounded bg-muted/40 p-2">
+                    <div className="flex items-center justify-between gap-3 text-xs">
+                      <span className="text-muted-foreground">
+                        {entry.label}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span>{entry.count}</span>
+                        {entry.label === "Pipeline / Analysis" &&
+                        entry.count > 0 ? (
+                          <Link
+                            href={getDiagnosticsHrefForPipelineGaps()}
+                            className="text-primary hover:underline"
+                          >
+                            Inspect
+                          </Link>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="mt-2 h-1.5 rounded-full bg-background">
+                      <div
+                        className="h-1.5 rounded-full bg-amber-400"
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-sm font-medium">
+                Recent Decision Traces
+              </CardTitle>
+              <Link
+                href="/portfolio?tab=diagnostics"
+                className="text-xs text-primary hover:underline"
+              >
+                Open all traces →
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {data.diagnostics.recentDecisions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No recent evaluation traces yet.
+                </p>
+              ) : (
+                data.diagnostics.recentDecisions.map((trace, index) => (
+                  <div
+                    key={`${trace.ticker}-${trace.timestamp ?? index}`}
+                    className="rounded bg-muted/50 p-2 text-sm"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold">
+                            {trace.ticker}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] uppercase tracking-wide"
+                          >
+                            {trace.outcome}
+                          </Badge>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {trace.stage}
+                          {trace.timestamp
+                            ? ` • ${timeAgo(trace.timestamp)}`
+                            : ""}
+                        </div>
+                        {trace.reason ? (
+                          <div className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                            {trace.reason}
+                          </div>
+                        ) : null}
+                      </div>
+                      <Link
+                        href={getDiagnosticsHrefForDecisionTrace(trace)}
+                        className="shrink-0 text-xs text-primary hover:underline"
+                      >
+                        Open trace →
+                      </Link>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-sm font-medium">
+              Alert to Decision Correlation
+            </CardTitle>
+            <Link
+              href="/portfolio?tab=diagnostics"
+              className="text-xs text-primary hover:underline"
+            >
+              Open diagnostics →
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {data.diagnostics.correlations.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No high-priority whale alerts available for correlation yet.
+              </p>
+            ) : (
+              data.diagnostics.correlations.map((correlation, index) => (
+                <div
+                  key={`${correlation.ticker}-${correlation.detectedAt}-${index}`}
+                  className="rounded bg-muted/50 p-3 text-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold">
+                        {correlation.ticker}
+                      </span>
+                      <Badge variant="outline" className="text-[10px]">
+                        Q {correlation.qualityScore ?? "?"}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-xs text-muted-foreground">
+                        {timeAgo(correlation.detectedAt)}
+                      </span>
+                      <Link
+                        href={getDiagnosticsHrefForCorrelation(correlation)}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Open trace →
+                      </Link>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                    <div>
+                      <div className="font-medium text-foreground">
+                        Evaluation
+                      </div>
+                      <div>
+                        {correlation.evaluatedAt
+                          ? `${correlation.shouldEnter ? "enter" : "reject"} • ${timeAgo(correlation.evaluatedAt)}`
+                          : "not evaluated"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-medium text-foreground">Gate</div>
+                      <div>
+                        {correlation.rejectionGate?.replace(/_/g, " ") ??
+                          "none"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-medium text-foreground">Trade</div>
+                      <div>
+                        {correlation.tradeId != null
+                          ? `#${correlation.tradeId} • ${correlation.tradeStatus}`
+                          : "no trade opened"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {correlation.rejectionReason ? (
+                    <div className="mt-2 text-xs text-muted-foreground line-clamp-2">
+                      {correlation.rejectionReason}
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {data.missed?.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium">
-              Missed High-Quality Opportunities
-            </CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-sm font-medium">
+                Missed High-Quality Opportunities
+              </CardTitle>
+              <Link
+                href="/portfolio?tab=diagnostics&outcome=rejected"
+                className="text-xs text-primary hover:underline"
+              >
+                Open missed alerts →
+              </Link>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
               {data.missed.map((m: AttributionMissedOpportunity, i: number) => (
                 <div
                   key={i}
-                  className="flex items-center justify-between text-sm p-2 rounded bg-muted/50"
+                  className="flex items-start justify-between gap-3 text-sm p-2 rounded bg-muted/50"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold">{m.ticker}</span>
-                    <Badge variant="outline" className="text-xs">
-                      {m.sentiment}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      Quality: {m.qualityScore ?? "?"}/100
-                    </span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-bold">{m.ticker}</span>
+                      <Badge variant="outline" className="text-xs">
+                        {m.sentiment}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        Quality: {m.qualityScore ?? "?"}/100
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {formatMissReasonLabel(m.missReason)}
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                      {timeAgo(m.detectedAt)}
+                    </div>
                   </div>
-                  <div className="text-right text-xs text-muted-foreground">
-                    {m.missReason?.replace(/_/g, " ") ?? "unknown"}
+                  <div className="shrink-0 pt-0.5">
+                    <Link
+                      href={getDiagnosticsHrefForMissedOpportunity(m)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Open trace →
+                    </Link>
                   </div>
                 </div>
               ))}
@@ -1401,25 +3072,7 @@ function BenchmarkSection() {
 // PostmortemCard (inline classification for trade detail)
 // ============================================================
 
-function PostmortemCard({
-  tradeId,
-  ticker,
-  entryDate,
-  exitDate,
-  entryPrice,
-  exitPrice,
-  pnl,
-  pnlPct,
-}: {
-  tradeId: number;
-  ticker: string;
-  entryDate: string;
-  exitDate: string;
-  entryPrice: number;
-  exitPrice: number;
-  pnl: number;
-  pnlPct: number;
-}) {
+function PostmortemCard({ tradeId }: { tradeId: number }) {
   const [result, setResult] = useState<PostmortemResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -1493,7 +3146,6 @@ function PostmortemCard({
 // ============================================================
 
 function AttributionCard({
-  ticker,
   sentiment,
   qualityScore,
   premium,
@@ -1501,7 +3153,6 @@ function AttributionCard({
   pnlPct,
   isOpen,
 }: {
-  ticker: string;
   sentiment: string;
   qualityScore: number | null;
   premium: number | null;

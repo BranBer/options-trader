@@ -88,4 +88,14 @@ describe("GET /api/pipeline-status", () => {
     expect(data.apiBudget).toHaveProperty("yahoo");
     expect(data.apiBudget.yahoo).toEqual({ used: 150, budget: 1800, pct: 8 });
   });
+
+  it("includes derived pipelineHealth summary", async () => {
+    const response = await GET();
+    const data = (response as any).data;
+
+    expect(data).toHaveProperty("pipelineHealth");
+    expect(data.pipelineHealth).toHaveProperty("isStale");
+    expect(data.pipelineHealth).toHaveProperty("minutesSinceRefresh");
+    expect(data.pipelineHealth).toHaveProperty("status");
+  });
 });

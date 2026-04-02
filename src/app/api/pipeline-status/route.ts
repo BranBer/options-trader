@@ -13,14 +13,31 @@ import { getTokenUsageStats } from "@/lib/services/llm-analyzer";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const lastRefreshAt = getLastRefreshAt();
+  const minutesSinceRefresh = lastRefreshAt
+    ? Math.round((Date.now() - Date.parse(lastRefreshAt)) / 60000)
+    : null;
+  const isStale = minutesSinceRefresh != null ? minutesSinceRefresh > 30 : true;
+
   return NextResponse.json({
     ...getProgress(),
-    lastRefreshAt: getLastRefreshAt(),
+    lastRefreshAt,
     lastError: getLastError(),
     stageResults: getStageResults(),
     exitMonitor: getExitMonitorStatus(),
     apiBudget: getBudgetSummary(),
     simRejections: getLastRunRejections(),
     tokenUsage: getTokenUsageStats(),
+    pipelineHealth: {
+      isStale,
+      minutesSinceRefresh,
+      status: !lastRefreshAt
+        ? "never_run"
+        : getProgress().active
+          ? "running"
+          : isStale
+            ? "stale"
+            : "healthy",
+    },
   });
 }

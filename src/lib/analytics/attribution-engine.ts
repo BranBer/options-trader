@@ -9,7 +9,6 @@ import type { WhaleAlert } from "@/types/whale";
 import {
   buildOpportunityId,
   labelOpportunityOutcome,
-  scoreOpportunityCandidate,
 } from "./opportunity-ledger";
 import type {
   OpportunityCandidate,
@@ -30,6 +29,19 @@ export interface TradeRecord {
   pnlPct: number | null;
   status: "open" | "closed";
   sourceWhaleId?: number | null;
+  sourceAnalysisId?: number | null;
+}
+
+export interface EvaluationRecord {
+  ticker: string;
+  shouldEnter: boolean;
+  confidence: number | null;
+  rejectionGate: string | null;
+  rejectionReason: string | null;
+  createdAt: string | null;
+  sourceAnalysisId?: number | null;
+  primaryWhaleId?: number | null;
+  whaleIds?: number[];
 }
 
 export interface AttributionResult {
@@ -55,9 +67,108 @@ function matchWhaleToTrade(
   );
 }
 
+function mapEvaluationToMissReason(
+  evaluation: EvaluationRecord,
+): OpportunityMissReason {
+  const gate = evaluation.rejectionGate ?? "";
+  const reason = evaluation.rejectionReason?.toLowerCase() ?? "";
+
+  if (gate === "whale_quality") return "quality_too_low";
+  if (gate === "market_data") return "missing_market_data";
+  if (gate === "position_open") return "position_size_limit";
+  if (gate === "concentration") return "portfolio_concentration";
+  if (gate === "iv_environment" || gate === "earnings_proximity") {
+    return "entry_filter_rejected";
+  }
+  if (gate === "validation") {
+    if (
+      reason.includes("today") ||
+      reason.includes("trading day") ||
+      reason.includes("theta risk")
+    ) {
+      return "0dte_rejected";
+    }
+    if (
+      reason.includes("premium") ||
+      reason.includes("balance") ||
+      reason.includes("cost")
+    ) {
+      return "position_size_limit";
+    }
+    return "entry_filter_rejected";
+  }
+  if (gate === "llm_eval") return "confidence_too_low";
+
+  return "analysis_not_completed";
+}
+
+function findRelevantEvaluation(
+  whale: WhaleAlert,
+  evaluations: EvaluationRecord[],
+): EvaluationRecord | null {
+  const tickerMatches = evaluations.filter((evaluation) => {
+    if (evaluation.ticker !== whale.ticker || !evaluation.createdAt) {
+      return false;
+    }
+
+    const evaluationTs = Date.parse(evaluation.createdAt);
+    const whaleTs = Date.parse(whale.detectedAt);
+
+    if (Number.isNaN(evaluationTs) || Number.isNaN(whaleTs)) {
+      return true;
+    }
+
+    const earliestRelevantTs = whaleTs - 5 * 60 * 1000;
+    const latestRelevantTs = whaleTs + 24 * 60 * 60 * 1000;
+    return (
+      evaluationTs >= earliestRelevantTs && evaluationTs <= latestRelevantTs
+    );
+  });
+
+  if (tickerMatches.length === 0) return null;
+
+  return tickerMatches.sort((left, right) => {
+    const leftTs = Date.parse(left.createdAt ?? "");
+    const rightTs = Date.parse(right.createdAt ?? "");
+    const whaleTs = Date.parse(whale.detectedAt);
+
+    if (
+      Number.isNaN(leftTs) ||
+      Number.isNaN(rightTs) ||
+      Number.isNaN(whaleTs)
+    ) {
+      return 0;
+    }
+
+    return Math.abs(leftTs - whaleTs) - Math.abs(rightTs - whaleTs);
+  })[0];
+}
+
+function classifyMissReason(
+  whale: WhaleAlert,
+  evaluations: EvaluationRecord[],
+): OpportunityMissReason {
+  const qualityScore = whale.qualityScore ?? 0;
+  if (qualityScore < 50) {
+    return "quality_too_low";
+  }
+
+  const evaluation = findRelevantEvaluation(whale, evaluations);
+  if (evaluation) {
+    return mapEvaluationToMissReason(evaluation);
+  }
+
+  if (evaluations.length === 0) {
+    return "pipeline_not_run";
+  }
+
+  return "analysis_not_completed";
+}
+
 export function runAttribution(
   whales: WhaleAlert[],
   trades: TradeRecord[],
+  evaluations: EvaluationRecord[] = [],
 ): AttributionResult {
   const captured: OpportunityLabel[] = [];
   const missed: OpportunityLabel[] = [];
@@ -105,14 +216,7 @@ export function runAttribution(
       continue;
     } else {
       // Alert was not traded — classify as missed
-      const qualityScore = whale.qualityScore ?? 0;
-      let missReason: OpportunityMissReason = "unknown";
-
-      if (qualityScore < 50) {
-        missReason = "confidence_too_low";
-      } else if (whale.premium < 100_000) {
-        missReason = "position_size_limit";
-      }
+      const missReason = classifyMissReason(whale, evaluations);
 
       missed.push(
         labelOpportunityOutcome({
@@ -148,7 +252,8 @@ export function runAttribution(
     ...missed
       .filter((m) => (m.qualityScore ?? 0) >= 60)
       .map(
-        (m) => `- ${m.ticker} ${m.sentiment} (${m.missReason ?? "unknown"})`,
+        (m) =>
+          `- ${m.ticker} ${m.sentiment} (${m.missReason ?? "not_classified"})`,
       ),
   ]
     .filter(Boolean)

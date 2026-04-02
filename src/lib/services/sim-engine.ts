@@ -9,6 +9,7 @@ import {
   fetchMarketData,
   fetchOptionsChain,
 } from "@/lib/services/market-fetcher";
+import { getSameDayEntryPolicy } from "@/lib/utils/market-hours";
 import type {
   TradeDecision,
   SimLeg,
@@ -252,6 +253,8 @@ export function validateTradeLegs(
 ): TradeValidationResult {
   const warnings: string[] = [];
   const todayStr = getTodayET(now);
+  const sameDayPolicy = getSameDayEntryPolicy(now);
+  const sameDayLegs: SimLeg[] = [];
 
   // --- Expiry validation ---
   for (const leg of legs) {
@@ -265,13 +268,30 @@ export function validateTradeLegs(
     }
     // Normalize to date-only string for comparison (YYYY-MM-DD)
     const legDateStr = expDate.toISOString().split("T")[0];
-    if (legDateStr <= todayStr) {
+    if (legDateStr < todayStr) {
       return {
         valid: false,
-        reason: `Leg expires in the past or today: ${leg.action.toUpperCase()} ${leg.type.toUpperCase()} $${leg.strike} exp ${leg.expiry}`,
+        reason: `Leg expires in the past: ${leg.action.toUpperCase()} ${leg.type.toUpperCase()} $${leg.strike} exp ${leg.expiry}`,
         warnings,
       };
     }
+
+    if (legDateStr === todayStr) {
+      if (!sameDayPolicy.allowed) {
+        return {
+          valid: false,
+          reason: `${sameDayPolicy.reason}: ${leg.action.toUpperCase()} ${leg.type.toUpperCase()} $${leg.strike} exp ${leg.expiry}`,
+          warnings,
+        };
+      }
+      sameDayLegs.push(leg);
+    }
+  }
+
+  if (sameDayLegs.length > 0) {
+    warnings.push(
+      `0DTE entry: ${sameDayPolicy.reason}. Manage closely due to elevated intraday theta risk.`,
+    );
   }
 
   // --- Minimum DTE validation ---
@@ -281,7 +301,9 @@ export function validateTradeLegs(
     return { leg, dte: tradingDaysBetween(today, expDate) };
   });
 
-  const allBelowMinDTE = dtePerLeg.every((l) => l.dte < MIN_DTE);
+  const nonSameDayDte = dtePerLeg.filter((l) => l.leg.expiry !== todayStr);
+  const allBelowMinDTE =
+    nonSameDayDte.length > 0 && nonSameDayDte.every((l) => l.dte < MIN_DTE);
   if (allBelowMinDTE) {
     return {
       valid: false,
@@ -289,7 +311,7 @@ export function validateTradeLegs(
       warnings,
     };
   }
-  const lowDTELegs = dtePerLeg.filter((l) => l.dte < MIN_DTE);
+  const lowDTELegs = nonSameDayDte.filter((l) => l.dte < MIN_DTE);
   if (lowDTELegs.length > 0) {
     for (const { leg, dte } of lowDTELegs) {
       warnings.push(

@@ -46,6 +46,11 @@ interface PipelineStatus {
     analysis: string;
     sim: string;
   } | null;
+  pipelineHealth?: {
+    isStale: boolean;
+    minutesSinceRefresh: number | null;
+    status: "healthy" | "stale" | "running" | "never_run";
+  };
 }
 
 const navLinks = [
@@ -129,6 +134,12 @@ export default function Navbar() {
   const pipelineActive = pipeline?.active ?? false;
   const activeStep = pipeline?.steps.find((s) => s.status === "active");
   const progressPct = pipeline?.active ? calcProgressPct(pipeline.steps) : 0;
+  const pipelineHealth = pipeline?.pipelineHealth;
+  const pipelineHealthHref = pipelineHealth
+    ? pipelineHealth.status === "stale" || pipelineHealth.status === "never_run"
+      ? "/portfolio?tab=diagnostics&reasonCluster=pipeline_gap&outcome=not_evaluated"
+      : "/portfolio?tab=diagnostics"
+    : "/portfolio?tab=diagnostics";
 
   // Poll pipeline status
   useEffect(() => {
@@ -254,6 +265,50 @@ export default function Navbar() {
                   </p>
                   <p className="text-[10px] text-muted-foreground/60 mt-1">
                     Sim portfolio ran on prior-cycle data
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+
+          {!pipelineActive && pipelineHealth && !pipeline?.lastError && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Link href={pipelineHealthHref} className="inline-flex">
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] uppercase tracking-wide ${
+                          pipelineHealth.status === "healthy"
+                            ? "text-emerald-500 border-emerald-500/40"
+                            : pipelineHealth.status === "stale"
+                              ? "text-amber-500 border-amber-500/40"
+                              : "text-muted-foreground"
+                        }`}
+                      />
+                    </Link>
+                  }
+                >
+                  {pipelineHealth.status}
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="end" className="w-64 p-3">
+                  <p className="text-xs font-semibold mb-1">Pipeline Health</p>
+                  <p className="text-xs text-muted-foreground">
+                    {pipelineHealth.status === "healthy"
+                      ? `Last successful refresh ${pipelineHealth.minutesSinceRefresh ?? 0} minute(s) ago.`
+                      : pipelineHealth.status === "stale"
+                        ? `No recent refresh for ${pipelineHealth.minutesSinceRefresh ?? "?"} minute(s).`
+                        : pipelineHealth.status === "never_run"
+                          ? "The pipeline has not completed a run yet."
+                          : "The pipeline is currently running."}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    Open diagnostics
+                    {pipelineHealth.status === "stale" ||
+                    pipelineHealth.status === "never_run"
+                      ? " with pipeline-gap filters"
+                      : " for recent alert traces"}
                   </p>
                 </TooltipContent>
               </Tooltip>

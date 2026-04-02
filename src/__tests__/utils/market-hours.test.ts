@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { isMarketOpen, isWithinTradingWindow } from "@/lib/utils/market-hours";
+import {
+  getSameDayEntryPolicy,
+  isMarketOpen,
+  isWithinTradingWindow,
+} from "@/lib/utils/market-hours";
 
 // Helper: create a Date at a specific ET time on a given date.
 // We use known offsets — EDT (UTC-4) for summer, EST (UTC-5) for winter.
@@ -132,5 +136,25 @@ describe("isWithinTradingWindow", () => {
   it("returns false outside all windows", () => {
     const midnight = etDate(2026, 3, 30, 2, 0);
     expect(isWithinTradingWindow(midnight)).toBe(false);
+  });
+});
+
+describe("getSameDayEntryPolicy", () => {
+  it("allows same-day entries before the cutoff during regular hours", () => {
+    const result = getSameDayEntryPolicy(etDate(2026, 3, 30, 10, 0));
+    expect(result.allowed).toBe(true);
+    expect(result.cutoffTimeEt).toBe("15:30");
+  });
+
+  it("blocks same-day entries after the cutoff", () => {
+    const result = getSameDayEntryPolicy(etDate(2026, 3, 30, 15, 45));
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/after 15:30 ET/);
+  });
+
+  it("blocks same-day entries during extended hours", () => {
+    const result = getSameDayEntryPolicy(etDate(2026, 3, 30, 7, 0));
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/outside regular market hours/i);
   });
 });
