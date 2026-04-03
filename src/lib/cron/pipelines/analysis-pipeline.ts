@@ -808,7 +808,15 @@ export async function runAnalysisPipeline(): Promise<number> {
       const results = await Promise.allSettled(
         chunk.map(async (item) => {
           // Fetch historical data + options chain + current price
-          const [historicalData1W, historicalData1M, historicalData3M, historicalData6M, historicalData1Y, chain, [marketSnap]] = await Promise.all([
+          const [
+            historicalData1W,
+            historicalData1M,
+            historicalData3M,
+            historicalData6M,
+            historicalData1Y,
+            chain,
+            [marketSnap],
+          ] = await Promise.all([
             fetchHistoricalData(item.ticker, "1wk"),
             fetchHistoricalData(item.ticker, "1mo"),
             fetchHistoricalData(item.ticker, "3mo"),

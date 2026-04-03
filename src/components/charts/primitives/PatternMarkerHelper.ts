@@ -45,7 +45,8 @@ function findClosestCandleTime(
   const targetMs = parseTimeValue(trimmedTarget);
   if (targetMs == null) return null;
   const isIntradayTarget =
-    /T\d{2}:\d{2}|:\d{2}/.test(trimmedTarget) || /^\d{10,}$/.test(trimmedTarget);
+    /T\d{2}:\d{2}|:\d{2}/.test(trimmedTarget) ||
+    /^\d{10,}$/.test(trimmedTarget);
 
   let best: string | null = null;
   let bestDist = Infinity;

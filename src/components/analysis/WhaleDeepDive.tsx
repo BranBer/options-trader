@@ -5,7 +5,10 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useDeepDive } from "@/hooks/useApiData";
 import type { DeepDiveAnalysis } from "@/types/analysis";
-import { CHART_HISTORY_LABELS, type ChartHistoryPeriod } from "@/lib/utils/chart-timeframes";
+import {
+  CHART_HISTORY_LABELS,
+  type ChartHistoryPeriod,
+} from "@/lib/utils/chart-timeframes";
 import { getTechnicalPatternsForTimeframe } from "@/lib/utils/deep-dive-patterns";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
 import TechnicalChart from "@/components/shared/TechnicalChart";
@@ -121,10 +124,14 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
       <Separator />
 
       {/* Technical Patterns */}
-      {(deepDive.technical_patterns.length > 0 || activePatterns.length > 0) && (
+      {(deepDive.technical_patterns.length > 0 ||
+        activePatterns.length > 0) && (
         <div className="space-y-2">
           <p className="text-sm font-medium">
-            Technical Patterns <span className="text-muted-foreground">({CHART_HISTORY_LABELS[timeframe]})</span>
+            Technical Patterns{" "}
+            <span className="text-muted-foreground">
+              ({CHART_HISTORY_LABELS[timeframe]})
+            </span>
           </p>
           {activePatterns.length === 0 ? (
             <p className="text-xs text-muted-foreground">
@@ -133,46 +140,46 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
           ) : (
             <div className="space-y-2">
               {activePatterns.map((p, i) => (
-              <div
-                key={`${p.timeframe ?? timeframe}-${p.name}-${p.start_time ?? i}`}
-                className={`flex items-start gap-2 text-sm rounded-md px-2 py-1 transition-colors cursor-default ${
-                  hoveredPatternIndex === i
-                    ? "bg-accent/50 ring-1 ring-accent"
-                    : ""
-                }`}
-                onMouseEnter={() => setHoveredPatternIndex(i)}
-                onMouseLeave={() => setHoveredPatternIndex(null)}
-              >
-                <PatternIcon type={p.type} />
-                <div>
-                  <span className="font-medium">{p.name}</span>
-                  <Badge
-                    variant={
-                      p.type === "bullish"
-                        ? "default"
-                        : p.type === "bearish"
-                          ? "destructive"
-                          : "secondary"
-                    }
-                    className="text-xs ml-2"
-                  >
-                    {p.type}
-                  </Badge>
-                  {p.confidence != null && (
-                    <span className="text-xs text-muted-foreground ml-2">
-                      {Math.round(p.confidence * 100)}% confidence
-                    </span>
-                  )}
-                  {p.price_target && (
-                    <span className="text-xs text-muted-foreground ml-2">
-                      Target: ${p.price_target.toFixed(2)}
-                    </span>
-                  )}
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {p.description}
-                  </p>
+                <div
+                  key={`${p.timeframe ?? timeframe}-${p.name}-${p.start_time ?? i}`}
+                  className={`flex items-start gap-2 text-sm rounded-md px-2 py-1 transition-colors cursor-default ${
+                    hoveredPatternIndex === i
+                      ? "bg-accent/50 ring-1 ring-accent"
+                      : ""
+                  }`}
+                  onMouseEnter={() => setHoveredPatternIndex(i)}
+                  onMouseLeave={() => setHoveredPatternIndex(null)}
+                >
+                  <PatternIcon type={p.type} />
+                  <div>
+                    <span className="font-medium">{p.name}</span>
+                    <Badge
+                      variant={
+                        p.type === "bullish"
+                          ? "default"
+                          : p.type === "bearish"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                      className="text-xs ml-2"
+                    >
+                      {p.type}
+                    </Badge>
+                    {p.confidence != null && (
+                      <span className="text-xs text-muted-foreground ml-2">
+                        {Math.round(p.confidence * 100)}% confidence
+                      </span>
+                    )}
+                    {p.price_target && (
+                      <span className="text-xs text-muted-foreground ml-2">
+                        Target: ${p.price_target.toFixed(2)}
+                      </span>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {p.description}
+                    </p>
+                  </div>
                 </div>
-              </div>
               ))}
             </div>
           )}

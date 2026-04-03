@@ -69,7 +69,8 @@ export default function TechnicalChart({
   timeframe,
   onTimeframeChange,
 }: TechnicalChartProps) {
-  const [internalTimeframe, setInternalTimeframe] = useState<ChartHistoryPeriod>("3mo");
+  const [internalTimeframe, setInternalTimeframe] =
+    useState<ChartHistoryPeriod>("3mo");
   const [showPatterns, setShowPatterns] = useState(true);
   const [showIndicators, setShowIndicators] = useState(false);
   const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig>({
@@ -116,7 +117,10 @@ export default function TechnicalChart({
     setActiveIndicators((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
-  const { data: histData, isLoading } = useHistoricalData(ticker, activeTimeframe);
+  const { data: histData, isLoading } = useHistoricalData(
+    ticker,
+    activeTimeframe,
+  );
   const candles = histData?.candles ?? [];
 
   const handleHover = useCallback(

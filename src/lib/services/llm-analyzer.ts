@@ -687,7 +687,10 @@ function formatCandleTimeForPrompt(value: CandleData["time"]): string {
   return value;
 }
 
-function summarizeCandlesForPrompt(candles: CandleData[], maxRows: number): string {
+function summarizeCandlesForPrompt(
+  candles: CandleData[],
+  maxRows: number,
+): string {
   if (candles.length === 0) {
     return "No historical data available.";
   }
@@ -696,7 +699,9 @@ function summarizeCandlesForPrompt(candles: CandleData[], maxRows: number): stri
     candles.length <= maxRows
       ? candles
       : Array.from({ length: maxRows }, (_, idx) => {
-          const position = Math.round((idx * (candles.length - 1)) / (maxRows - 1));
+          const position = Math.round(
+            (idx * (candles.length - 1)) / (maxRows - 1),
+          );
           return candles[position];
         });
 
@@ -725,8 +730,14 @@ function createFallbackTimeframePattern(args: {
   const startClose = first.close;
   const endClose = last.close;
   const changePct = startClose !== 0 ? (endClose - startClose) / startClose : 0;
-  const minLow = candles.reduce((acc, candle) => Math.min(acc, candle.low), Number.POSITIVE_INFINITY);
-  const maxHigh = candles.reduce((acc, candle) => Math.max(acc, candle.high), Number.NEGATIVE_INFINITY);
+  const minLow = candles.reduce(
+    (acc, candle) => Math.min(acc, candle.low),
+    Number.POSITIVE_INFINITY,
+  );
+  const maxHigh = candles.reduce(
+    (acc, candle) => Math.max(acc, candle.high),
+    Number.NEGATIVE_INFINITY,
+  );
 
   if (!Number.isFinite(minLow) || !Number.isFinite(maxHigh)) {
     return null;
@@ -734,7 +745,10 @@ function createFallbackTimeframePattern(args: {
 
   if (Math.abs(changePct) < 0.05) {
     return {
-      name: timeframe === "1Y" ? "Primary Yearly Range" : "Primary Medium-Term Range",
+      name:
+        timeframe === "1Y"
+          ? "Primary Yearly Range"
+          : "Primary Medium-Term Range",
       type: "neutral",
       description:
         timeframe === "1Y"

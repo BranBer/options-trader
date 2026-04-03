@@ -8,9 +8,7 @@ const mockRunAnalysisPipeline = vi.fn();
 const mockRunSimPipeline = vi.fn();
 const mockRunExitMonitor = vi.fn();
 const mockRecordPipelineRunStart = vi.fn(() => 101);
-const mockRecordPipelineRunCompletion = vi.fn(
-  () => "2026-04-02T12:30:00.000Z",
-);
+const mockRecordPipelineRunCompletion = vi.fn(() => "2026-04-02T12:30:00.000Z");
 const mockGetLastCompletedPipelineRefreshAt = vi.fn(() => null);
 
 vi.mock("@/lib/services/news-fetcher", () => ({
@@ -66,9 +64,7 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
     mockRunAnalysisPipeline.mockResolvedValue(0);
     mockRunSimPipeline.mockResolvedValue(0);
     mockRecordPipelineRunStart.mockReturnValue(101);
-    mockRecordPipelineRunCompletion.mockReturnValue(
-      "2026-04-02T12:30:00.000Z",
-    );
+    mockRecordPipelineRunCompletion.mockReturnValue("2026-04-02T12:30:00.000Z");
     mockGetLastCompletedPipelineRefreshAt.mockReturnValue(null);
   });
 

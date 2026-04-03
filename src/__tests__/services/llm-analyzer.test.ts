@@ -974,12 +974,54 @@ describe("generateDeepDive", () => {
     );
 
     const longRangeCandles = [
-      { time: "2025-05-01", open: 160, high: 164, low: 156, close: 162, volume: 1000000 },
-      { time: "2025-07-01", open: 168, high: 173, low: 166, close: 171, volume: 1100000 },
-      { time: "2025-09-01", open: 176, high: 181, low: 174, close: 179, volume: 1050000 },
-      { time: "2025-11-03", open: 182, high: 188, low: 180, close: 186, volume: 1200000 },
-      { time: "2026-01-05", open: 188, high: 193, low: 184, close: 191, volume: 1150000 },
-      { time: "2026-03-31", open: 194, high: 198, low: 191, close: 196, volume: 1300000 },
+      {
+        time: "2025-05-01",
+        open: 160,
+        high: 164,
+        low: 156,
+        close: 162,
+        volume: 1000000,
+      },
+      {
+        time: "2025-07-01",
+        open: 168,
+        high: 173,
+        low: 166,
+        close: 171,
+        volume: 1100000,
+      },
+      {
+        time: "2025-09-01",
+        open: 176,
+        high: 181,
+        low: 174,
+        close: 179,
+        volume: 1050000,
+      },
+      {
+        time: "2025-11-03",
+        open: 182,
+        high: 188,
+        low: 180,
+        close: 186,
+        volume: 1200000,
+      },
+      {
+        time: "2026-01-05",
+        open: 188,
+        high: 193,
+        low: 184,
+        close: 191,
+        volume: 1150000,
+      },
+      {
+        time: "2026-03-31",
+        open: 194,
+        high: 198,
+        low: 191,
+        close: 196,
+        volume: 1300000,
+      },
     ];
 
     const result = await generateDeepDive({
@@ -997,9 +1039,9 @@ describe("generateDeepDive", () => {
     expect(result.timeframe_patterns?.["1Y"]).toHaveLength(1);
     expect(result.timeframe_patterns?.["6M"]?.[0].timeframe).toBe("6M");
     expect(result.timeframe_patterns?.["1Y"]?.[0].timeframe).toBe("1Y");
-    expect(result.technical_patterns.map((pattern) => pattern.timeframe)).toEqual(
-      expect.arrayContaining(["6M", "1Y"]),
-    );
+    expect(
+      result.technical_patterns.map((pattern) => pattern.timeframe),
+    ).toEqual(expect.arrayContaining(["6M", "1Y"]));
   });
 });
 

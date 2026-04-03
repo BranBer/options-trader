@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { getTechnicalPatternsForTimeframe } from "@/lib/utils/deep-dive-patterns";
 import type { DeepDiveAnalysis, TechnicalPattern } from "@/types/analysis";
 
-function createPattern(overrides?: Partial<TechnicalPattern>): TechnicalPattern {
+function createPattern(
+  overrides?: Partial<TechnicalPattern>,
+): TechnicalPattern {
   return {
     name: "Descending Trendline Break",
     type: "bullish",
@@ -23,7 +25,9 @@ function createPattern(overrides?: Partial<TechnicalPattern>): TechnicalPattern 
 
 describe("getTechnicalPatternsForTimeframe", () => {
   it("returns the explicit timeframe-specific patterns when available", () => {
-    const timeframePatterns: NonNullable<DeepDiveAnalysis["timeframe_patterns"]> = {
+    const timeframePatterns: NonNullable<
+      DeepDiveAnalysis["timeframe_patterns"]
+    > = {
       "1W": [createPattern({ name: "V-Shape Recovery", timeframe: "1W" })],
       "1M": [createPattern({ name: "Descending Channel", timeframe: "1M" })],
       "3M": [createPattern({ timeframe: "3M" })],

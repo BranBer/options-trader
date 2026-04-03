@@ -44,7 +44,9 @@ interface DeepDivePromptInput {
   ticker: string;
   whaleTradeJson: string;
   historicalDataSummary: string;
-  historicalDataSummariesByTimeframe?: Partial<Record<"1W" | "1M" | "3M" | "6M" | "1Y", string>>;
+  historicalDataSummariesByTimeframe?: Partial<
+    Record<"1W" | "1M" | "3M" | "6M" | "1Y", string>
+  >;
   optionsChainSummary: string;
   currentPrice: number;
   correlatedEventJson?: string;
@@ -84,15 +86,19 @@ ${input.whaleTradeJson}
 $${input.currentPrice}
 
 ## Historical Price Data
-${input.historicalDataSummariesByTimeframe
-  ? (["1W", "1M", "3M", "6M", "1Y"] as const)
-      .filter((timeframe) => input.historicalDataSummariesByTimeframe?.[timeframe])
-      .map(
-        (timeframe) =>
-          `### ${timeframe}\n${input.historicalDataSummariesByTimeframe?.[timeframe]}`,
-      )
-      .join("\n\n")
-  : input.historicalDataSummary}
+${
+  input.historicalDataSummariesByTimeframe
+    ? (["1W", "1M", "3M", "6M", "1Y"] as const)
+        .filter(
+          (timeframe) => input.historicalDataSummariesByTimeframe?.[timeframe],
+        )
+        .map(
+          (timeframe) =>
+            `### ${timeframe}\n${input.historicalDataSummariesByTimeframe?.[timeframe]}`,
+        )
+        .join("\n\n")
+    : input.historicalDataSummary
+}
 
 ## Options Chain Context
 ${input.optionsChainSummary}`;
@@ -247,23 +253,23 @@ export const DEEP_DIVE_RESPONSE_SCHEMA = {
       properties: {
         "1W": {
           type: "array",
-          items: { "$ref": "#/properties/technical_patterns/items" },
+          items: { $ref: "#/properties/technical_patterns/items" },
         },
         "1M": {
           type: "array",
-          items: { "$ref": "#/properties/technical_patterns/items" },
+          items: { $ref: "#/properties/technical_patterns/items" },
         },
         "3M": {
           type: "array",
-          items: { "$ref": "#/properties/technical_patterns/items" },
+          items: { $ref: "#/properties/technical_patterns/items" },
         },
         "6M": {
           type: "array",
-          items: { "$ref": "#/properties/technical_patterns/items" },
+          items: { $ref: "#/properties/technical_patterns/items" },
         },
         "1Y": {
           type: "array",
-          items: { "$ref": "#/properties/technical_patterns/items" },
+          items: { $ref: "#/properties/technical_patterns/items" },
         },
       },
     },

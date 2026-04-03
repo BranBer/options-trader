@@ -11,7 +11,9 @@ function hasTaggedTechnicalPatterns(patterns: unknown): boolean {
   });
 }
 
-export function isTimeframeAwareDeepDiveOutput(output: string | null | undefined): boolean {
+export function isTimeframeAwareDeepDiveOutput(
+  output: string | null | undefined,
+): boolean {
   if (!output) {
     return false;
   }
