@@ -313,9 +313,14 @@ export function useEquityCurve() {
 }
 
 import type {
+  LearningPolicyEvaluationResponse,
   AlertDiagnosticsOutcome,
   AlertDiagnosticsReasonCluster,
+  LearningPolicyBaselineResponse,
+  LearningReadinessResponse,
   PortfolioDiagnosticsResponse,
+  PromotionGatesResponse,
+  ShadowPolicyReviewResponse,
 } from "@/types/analytics";
 
 export function useInfinitePortfolioDiagnostics(
@@ -351,6 +356,73 @@ export function useInfinitePortfolioDiagnostics(
     },
     initialPageParam: null as number | null,
     getNextPageParam: (lastPage) => lastPage.diagnostics.pageInfo.nextCursor,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useLearningReadiness() {
+  return useQuery<LearningReadinessResponse>({
+    queryKey: ["learningReadiness"],
+    queryFn: async () => {
+      const res = await fetch("/api/portfolio?view=learning-readiness");
+      if (!res.ok) throw new Error("Failed to fetch learning readiness");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function usePolicyBaseline() {
+  return useQuery<LearningPolicyBaselineResponse>({
+    queryKey: ["learningPolicyBaseline"],
+    queryFn: async () => {
+      const res = await fetch("/api/portfolio?view=policy-baseline");
+      if (!res.ok) throw new Error("Failed to fetch policy baseline");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function usePolicyEvaluation() {
+  return useQuery<LearningPolicyEvaluationResponse>({
+    queryKey: ["learningPolicyEvaluation"],
+    queryFn: async () => {
+      const res = await fetch("/api/portfolio?view=policy-evaluation");
+      if (!res.ok) throw new Error("Failed to fetch policy evaluation");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useShadowPolicyReview(limit = 12) {
+  return useQuery<ShadowPolicyReviewResponse>({
+    queryKey: ["shadowPolicyReview", limit],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/portfolio?view=shadow-policy&limit=${limit}`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch shadow policy review");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function usePromotionGates() {
+  return useQuery<PromotionGatesResponse>({
+    queryKey: ["promotionGates"],
+    queryFn: async () => {
+      const res = await fetch("/api/portfolio?view=promotion-gates");
+      if (!res.ok) throw new Error("Failed to fetch promotion gates");
+      return res.json();
+    },
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
   });

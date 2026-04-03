@@ -24,6 +24,11 @@ import {
   usePortfolioTrade,
   useDeepDive,
   useInfinitePortfolioDiagnostics,
+  useLearningReadiness,
+  usePolicyEvaluation,
+  usePolicyBaseline,
+  usePromotionGates,
+  useShadowPolicyReview,
 } from "@/hooks/useApiData";
 import { formatCurrency, timeAgo } from "@/lib/utils/formatters";
 import type { SimTrade, TradeDecision } from "@/types/portfolio";
@@ -38,6 +43,13 @@ import type {
   AlertDecisionTrace,
   AlertDiagnosticsOutcome,
   PortfolioDiagnosticsPayload,
+  LearningPolicyBaselineResult,
+  LearningPolicyEvaluationHarness,
+  PromotionChecklistItem,
+  PromotionGatesReport,
+  LearningReadinessScorecard,
+  ShadowPolicyDecisionRecord,
+  ShadowPolicyFeedbackVerdict,
 } from "@/types/analytics";
 import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
 import TechnicalChart from "@/components/shared/TechnicalChart";
@@ -101,6 +113,7 @@ export default function PortfolioPage() {
     "closed",
     "equity",
     "diagnostics",
+    "learning",
     "attribution",
     "postmortem",
     "benchmark",
@@ -238,6 +251,7 @@ export default function PortfolioPage() {
           <TabsTrigger value="closed">Trade History</TabsTrigger>
           <TabsTrigger value="equity">Equity Curve</TabsTrigger>
           <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
+          <TabsTrigger value="learning">Learning</TabsTrigger>
           <TabsTrigger value="attribution">Attribution</TabsTrigger>
           <TabsTrigger value="postmortem">Postmortem</TabsTrigger>
           <TabsTrigger value="benchmark">Benchmark</TabsTrigger>
@@ -255,6 +269,9 @@ export default function PortfolioPage() {
         <TabsContent value="diagnostics" className="mt-4">
           <DiagnosticsSection key={searchParams.toString()} />
         </TabsContent>
+        <TabsContent value="learning" className="mt-4">
+          <LearningSection />
+        </TabsContent>
         <TabsContent value="attribution" className="mt-4">
           <AttributionSection />
         </TabsContent>
@@ -267,6 +284,978 @@ export default function PortfolioPage() {
       </Tabs>
     </div>
   );
+}
+
+function LearningSection() {
+  const queryClient = useQueryClient();
+  const readinessQuery = useLearningReadiness();
+  const baselineQuery = usePolicyBaseline();
+  const evaluationQuery = usePolicyEvaluation();
+  const shadowQuery = useShadowPolicyReview();
+  const promotionQuery = usePromotionGates();
+  const [feedbackPendingId, setFeedbackPendingId] = useState<number | null>(
+    null,
+  );
+
+  if (
+    readinessQuery.isLoading ||
+    baselineQuery.isLoading ||
+    evaluationQuery.isLoading ||
+    shadowQuery.isLoading ||
+    promotionQuery.isLoading
+  ) {
+    return <div className="h-48 animate-pulse rounded bg-muted" />;
+  }
+
+  if (
+    !readinessQuery.data?.readiness ||
+    !baselineQuery.data?.policyBaseline ||
+    !evaluationQuery.data?.policyEvaluation ||
+    !shadowQuery.data?.shadowPolicy ||
+    !promotionQuery.data?.promotionGates
+  ) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <Activity className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            Learning insights will appear once the portfolio has enough joined
+            evaluation and trade history to score readiness offline.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const readiness = readinessQuery.data.readiness;
+  const learningSummary = readinessQuery.data.summary;
+  const baseline = baselineQuery.data.policyBaseline;
+  const policyEvaluation = evaluationQuery.data.policyEvaluation;
+  const shadowPolicy = shadowQuery.data.shadowPolicy;
+  const promotionGates = promotionQuery.data.promotionGates;
+  const currentVsBest = baseline.comparison.currentVsBestBaseline;
+
+  const handleShadowFeedback = async (
+    shadowDecisionId: number,
+    verdict: ShadowPolicyFeedbackVerdict,
+  ) => {
+    setFeedbackPendingId(shadowDecisionId);
+
+    try {
+      const response = await fetch("/api/portfolio?view=shadow-feedback", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ shadowDecisionId, verdict }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save shadow feedback");
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["shadowPolicyReview"] }),
+        queryClient.invalidateQueries({ queryKey: ["promotionGates"] }),
+      ]);
+    } finally {
+      setFeedbackPendingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title="Readiness Score"
+          value={`${readiness.score.toFixed(1)}/100`}
+          icon={BarChart3}
+          description={readiness.summary}
+          tooltip="Composite readiness score built from sample size, reward coverage, lineage quality, and decision balance."
+          trend={getLearningStatusTrend(readiness.status)}
+        />
+        <StatCard
+          title="Reward Coverage"
+          value={`${readiness.metrics.computedRewardCoveragePct.toFixed(1)}%`}
+          icon={DollarSign}
+          description={`${readiness.metrics.computedRewardCount} of ${readiness.metrics.totalRecords} records have computed rewards`}
+          tooltip="Share of learning rows that already have reproducible reward labels."
+          trend={readiness.metrics.computedRewardCoveragePct >= 75 ? 1 : -1}
+        />
+        <StatCard
+          title="Lineage Coverage"
+          value={`${readiness.metrics.lineageCoveragePct.toFixed(1)}%`}
+          icon={Target}
+          description={`${readiness.metrics.explicitLineageCount + readiness.metrics.backfilledLineageCount} rows are explicit or backfilled`}
+          tooltip="Share of records whose provenance is strong enough for dependable offline analysis."
+          trend={readiness.metrics.lineageCoveragePct >= 70 ? 1 : -1}
+        />
+        <StatCard
+          title="Current vs Best"
+          value={
+            currentVsBest
+              ? `${currentVsBest.avgPrimaryRewardDiff >= 0 ? "+" : ""}${currentVsBest.avgPrimaryRewardDiff.toFixed(2)}`
+              : "n/a"
+          }
+          icon={Trophy}
+          description="Average primary reward delta versus the strongest baseline selector"
+          tooltip="Positive values mean the current policy beats the best deterministic offline baseline on average reward."
+          trend={
+            currentVsBest
+              ? currentVsBest.avgPrimaryRewardDiff >= 0
+                ? 1
+                : -1
+              : 0
+          }
+        />
+      </div>
+
+      <Card className={getLearningStatusCardClass(readiness.status)}>
+        <CardHeader>
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle className="text-sm font-medium">
+                Learning Readiness Status
+              </CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {readiness.summary}
+              </p>
+            </div>
+            <Badge
+              variant="outline"
+              className={getLearningStatusBadgeClass(readiness.status)}
+            >
+              {formatLearningStatus(readiness.status)}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)]">
+            <div className="space-y-3">
+              <div className="rounded-lg border bg-background/70 p-3">
+                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Current blockers
+                </div>
+                {readiness.blockers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No critical blockers are currently flagged for the active
+                    learning window.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {readiness.blockers.map((blocker) => (
+                      <div
+                        key={blocker}
+                        className="rounded bg-muted/40 p-2 text-sm text-muted-foreground"
+                      >
+                        {blocker}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                <LearningMetricTile
+                  label="Decision mix"
+                  value={`${readiness.metrics.enterCount} / ${readiness.metrics.rejectCount}`}
+                  detail={`${readiness.metrics.notEvaluatedCount} unevaluated`}
+                />
+                <LearningMetricTile
+                  label="Decision balance"
+                  value={readiness.metrics.decisionBalanceRatio.toFixed(2)}
+                  detail="1.00 means enter and reject examples are evenly represented"
+                />
+                <LearningMetricTile
+                  label="Terminal trades"
+                  value={String(readiness.metrics.terminalTradeCount)}
+                  detail="Closed or expired entered positions with realized outcomes"
+                />
+                <LearningMetricTile
+                  label="Explicit lineage"
+                  value={String(readiness.metrics.explicitLineageCount)}
+                  detail={`${readiness.metrics.backfilledLineageCount} backfilled`}
+                />
+                <LearningMetricTile
+                  label="Incomplete lineage"
+                  value={`${readiness.metrics.incompleteLineagePct.toFixed(1)}%`}
+                  detail={`${readiness.metrics.incompleteLineageCount} records are still incomplete`}
+                />
+                <LearningMetricTile
+                  label="Reward backlog"
+                  value={String(readiness.metrics.pendingRewardCount)}
+                  detail="Open or not-yet-realized records still awaiting reward completion"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="rounded-lg border bg-background/70 p-3">
+                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Readiness thresholds
+                </div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <div className="flex items-center justify-between rounded bg-muted/40 px-2 py-1.5">
+                    <span>Limited offline tuning</span>
+                    <span className="font-mono">
+                      {readiness.thresholds.minRecordsForLimited} rows /{" "}
+                      {
+                        readiness.thresholds
+                          .minComputedRewardCoveragePctForLimited
+                      }
+                      % rewards
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between rounded bg-muted/40 px-2 py-1.5">
+                    <span>Shadow-learning threshold</span>
+                    <span className="font-mono">
+                      {readiness.thresholds.minRecordsForShadow} rows /{" "}
+                      {
+                        readiness.thresholds
+                          .minComputedRewardCoveragePctForShadow
+                      }
+                      % rewards
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between rounded bg-muted/40 px-2 py-1.5">
+                    <span>Required lineage coverage</span>
+                    <span className="font-mono">
+                      {readiness.thresholds.minLineageCoveragePctForShadow}% for
+                      shadow readiness
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-background/70 p-3">
+                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Corpus summary
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <LearningSummaryPill
+                    label="Total"
+                    value={String(learningSummary.total)}
+                  />
+                  <LearningSummaryPill
+                    label="Enter"
+                    value={String(learningSummary.byDecision.enter)}
+                  />
+                  <LearningSummaryPill
+                    label="Reject"
+                    value={String(learningSummary.byDecision.reject)}
+                  />
+                  <LearningSummaryPill
+                    label="Computed"
+                    value={String(learningSummary.byRewardStatus.computed)}
+                  />
+                  <LearningSummaryPill
+                    label="Explicit"
+                    value={String(learningSummary.byLineageQuality.explicit)}
+                  />
+                  <LearningSummaryPill
+                    label="Backfilled"
+                    value={String(learningSummary.byLineageQuality.backfilled)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">
+            Offline Policy Baselines
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <StatCard
+              title="Evaluated Corpus"
+              value={String(baseline.evaluatedRecordCount)}
+              icon={Activity}
+              description={`${baseline.corpusSize} total materialized records`}
+              tooltip="Rows with computed rewards that can support like-for-like offline policy comparison."
+              trend={baseline.evaluatedRecordCount > 0 ? 1 : 0}
+            />
+            <StatCard
+              title="Win Rate Delta"
+              value={
+                currentVsBest
+                  ? `${currentVsBest.winRateDiffPct >= 0 ? "+" : ""}${currentVsBest.winRateDiffPct.toFixed(1)}%`
+                  : "n/a"
+              }
+              icon={Target}
+              description="Current policy versus best deterministic baseline"
+              tooltip="Difference in realized win rate between the current policy and the strongest offline baseline selector."
+              trend={
+                currentVsBest ? (currentVsBest.winRateDiffPct >= 0 ? 1 : -1) : 0
+              }
+            />
+            <StatCard
+              title="Total Reward Delta"
+              value={
+                currentVsBest
+                  ? `${currentVsBest.totalPrimaryRewardDiff >= 0 ? "+" : ""}${currentVsBest.totalPrimaryRewardDiff.toFixed(2)}`
+                  : "n/a"
+              }
+              icon={TrendingUp}
+              description={
+                baseline.bestBaseline
+                  ? `Current policy vs ${baseline.bestBaseline.name}`
+                  : "No baseline comparison yet"
+              }
+              tooltip="Total primary reward difference between the current policy and the strongest deterministic baseline."
+              trend={
+                currentVsBest
+                  ? currentVsBest.totalPrimaryRewardDiff >= 0
+                    ? 1
+                    : -1
+                  : 0
+              }
+            />
+          </div>
+
+          <div className="space-y-3">
+            <PolicyBaselineCard
+              result={baseline.current}
+              badgeLabel="Current policy"
+              accentClass="border-blue-500/20 bg-blue-500/5"
+              badgeClass="border-blue-500/30 text-blue-400"
+              titleClass="text-blue-400"
+            />
+            {baseline.baselines.map((result) => (
+              <PolicyBaselineCard
+                key={result.name}
+                result={result}
+                badgeLabel={
+                  baseline.bestBaseline?.name === result.name
+                    ? "Best baseline"
+                    : "Baseline"
+                }
+                accentClass={
+                  baseline.bestBaseline?.name === result.name
+                    ? "border-emerald-500/20 bg-emerald-500/5"
+                    : "bg-muted/50"
+                }
+                badgeClass={
+                  baseline.bestBaseline?.name === result.name
+                    ? "border-emerald-500/30 text-emerald-400"
+                    : ""
+                }
+                titleClass={
+                  baseline.bestBaseline?.name === result.name
+                    ? "text-emerald-400"
+                    : ""
+                }
+              />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">
+            Counterfactual Replay Windows
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+            Replays compare the current policy and candidate alternatives on the
+            same computed-reward rows. Unsupported windows stay visible, but are
+            explicitly marked so they do not get mistaken for promotion-ready
+            evidence.
+          </div>
+          <div className="space-y-3">
+            {policyEvaluation.windows.map((window) => (
+              <PolicyEvaluationWindowCard key={window.id} window={window} />
+            ))}
+          </div>
+          <div className="rounded-lg border bg-background/70 p-3">
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Global caveats
+            </div>
+            <div className="space-y-1 text-sm text-muted-foreground">
+              {policyEvaluation.globalCaveats.map((item) => (
+                <div key={item}>{item}</div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">
+            Shadow Policy Review
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-4">
+            <StatCard
+              title="Shadow Logs"
+              value={String(shadowPolicy.summary.totalLoggedDecisions)}
+              icon={Activity}
+              description={
+                shadowPolicy.summary.lastLoggedAt
+                  ? `Last logged ${timeAgo(shadowPolicy.summary.lastLoggedAt)}`
+                  : "No shadow decisions logged yet"
+              }
+              tooltip="Number of recent shadow-policy recommendations captured alongside the live decision path."
+              trend={shadowPolicy.summary.totalLoggedDecisions > 0 ? 1 : 0}
+            />
+            <StatCard
+              title="Agreement"
+              value={`${shadowPolicy.summary.agreementRatePct.toFixed(1)}%`}
+              icon={Target}
+              description={`${shadowPolicy.summary.disagreeCount} disagreements in recent logs`}
+              tooltip="How often the shadow policy agrees with the current execution decision on recent recommendations."
+              trend={shadowPolicy.summary.agreementRatePct >= 50 ? 1 : 0}
+            />
+            <StatCard
+              title="Feedback"
+              value={String(shadowPolicy.summary.feedbackCount)}
+              icon={HelpCircle}
+              description={`${shadowPolicy.summary.usefulCount} useful / ${shadowPolicy.summary.misleadingCount} misleading`}
+              tooltip="Operator review count captured on logged shadow recommendations."
+              trend={shadowPolicy.summary.feedbackCount > 0 ? 1 : 0}
+            />
+            <StatCard
+              title="Holdout Accuracy"
+              value={`${shadowPolicy.model.calibration.accuracyPct.toFixed(1)}%`}
+              icon={BarChart3}
+              description={`${shadowPolicy.model.calibration.holdoutSize} holdout rows`}
+              tooltip="Holdout accuracy for the empirical shadow-policy model trained from the current learning corpus."
+              trend={shadowPolicy.model.calibration.accuracyPct >= 55 ? 1 : 0}
+            />
+          </div>
+
+          <div className="rounded-lg border bg-background/70 p-3">
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Model snapshot
+            </div>
+            <div className="grid gap-2 text-xs md:grid-cols-4">
+              <PolicyMetric
+                label="Policy"
+                value={shadowPolicy.model.policyName}
+              />
+              <PolicyMetric
+                label="Threshold"
+                value={shadowPolicy.model.threshold.toFixed(2)}
+              />
+              <PolicyMetric
+                label="Precision"
+                value={`${shadowPolicy.model.calibration.precisionPct.toFixed(1)}%`}
+              />
+              <PolicyMetric
+                label="Recall"
+                value={`${shadowPolicy.model.calibration.recallPct.toFixed(1)}%`}
+              />
+            </div>
+          </div>
+
+          {shadowPolicy.decisions.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              Shadow recommendations will appear here after the next simulation
+              pipeline cycle records them.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {shadowPolicy.decisions.map((decision) => (
+                <ShadowDecisionCard
+                  key={decision.id}
+                  decision={decision}
+                  pending={feedbackPendingId === decision.id}
+                  onFeedback={handleShadowFeedback}
+                />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <CardTitle className="text-sm font-medium">
+              Promotion Gates
+            </CardTitle>
+            <Badge
+              variant="outline"
+              className={getPromotionModeBadgeClass(promotionGates.currentMode)}
+            >
+              {promotionGates.currentMode.replace(/_/g, " ")}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="rounded-lg border bg-background/70 p-3 text-sm text-muted-foreground">
+            {promotionGates.summary}
+          </div>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+            <div className="space-y-2">
+              {promotionGates.checklist.map((item) => (
+                <PromotionChecklistCard key={item.id} item={item} />
+              ))}
+            </div>
+            <div className="space-y-3">
+              <div className="rounded-lg border bg-background/70 p-3">
+                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Deployment modes
+                </div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  {promotionGates.modeDefinitions.map((definition) => (
+                    <div
+                      key={definition.mode}
+                      className="rounded bg-muted/40 p-2"
+                    >
+                      <div className="font-medium text-foreground">
+                        {definition.mode.replace(/_/g, " ")}
+                      </div>
+                      <div>{definition.meaning}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border bg-background/70 p-3">
+                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Rollback triggers
+                </div>
+                <div className="space-y-1 text-sm text-muted-foreground">
+                  {promotionGates.rollbackTriggers.map((trigger) => (
+                    <div key={trigger}>{trigger}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function LearningMetricTile({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-lg border bg-background/70 p-3">
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 font-mono text-lg font-semibold">{value}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
+function LearningSummaryPill({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded bg-muted/40 px-2 py-1.5">
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="font-mono text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function PolicyBaselineCard({
+  result,
+  badgeLabel,
+  accentClass,
+  badgeClass,
+  titleClass,
+}: {
+  result: LearningPolicyBaselineResult;
+  badgeLabel: string;
+  accentClass: string;
+  badgeClass: string;
+  titleClass: string;
+}) {
+  return (
+    <div className={`rounded p-3 ${accentClass}`}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <div className={`text-sm font-medium ${titleClass}`}>
+            {result.name}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {result.description}
+          </div>
+        </div>
+        <Badge variant="outline" className={badgeClass}>
+          {badgeLabel}
+        </Badge>
+      </div>
+      <div className="grid gap-2 text-xs md:grid-cols-3 xl:grid-cols-6">
+        <PolicyMetric
+          label="Selected"
+          value={String(result.metrics.selectedCount)}
+        />
+        <PolicyMetric
+          label="Accept %"
+          value={`${result.metrics.acceptanceRatePct.toFixed(1)}%`}
+        />
+        <PolicyMetric
+          label="Avg Reward"
+          value={result.metrics.avgPrimaryReward.toFixed(2)}
+        />
+        <PolicyMetric
+          label="Total Reward"
+          value={result.metrics.totalPrimaryReward.toFixed(2)}
+        />
+        <PolicyMetric
+          label="Win Rate"
+          value={`${result.metrics.winRatePct.toFixed(1)}%`}
+        />
+        <PolicyMetric
+          label="Avg PnL %"
+          value={`${result.metrics.avgEnteredPnlPct.toFixed(1)}%`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PolicyEvaluationWindowCard({
+  window,
+}: {
+  window: LearningPolicyEvaluationHarness["windows"][number];
+}) {
+  const bestName = window.evaluation.bestBaseline?.name ?? "No baseline leader";
+  const currentVsBest = window.evaluation.comparison.currentVsBestBaseline;
+
+  return (
+    <div className="rounded-lg border bg-background/70 p-3">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">{window.label}</span>
+            <Badge
+              variant="outline"
+              className={
+                window.supported
+                  ? "border-emerald-500/30 text-emerald-400"
+                  : "border-amber-500/30 text-amber-400"
+              }
+            >
+              {window.supported ? "supported" : "unsupported"}
+            </Badge>
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {window.startAt && window.endAt
+              ? `${new Date(window.startAt).toLocaleDateString()} to ${new Date(window.endAt).toLocaleDateString()}`
+              : "Full available corpus window"}
+          </div>
+        </div>
+        <div className="text-right text-xs text-muted-foreground">
+          <div>{window.evaluatedRecordCount} evaluated records</div>
+          <div>Leader: {bestName}</div>
+        </div>
+      </div>
+
+      {window.supportReason ? (
+        <div className="mt-3 rounded bg-amber-500/10 p-2 text-sm text-amber-300">
+          {window.supportReason}
+        </div>
+      ) : null}
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <LearningMetricTile
+          label="Current selected"
+          value={String(window.evaluation.current.metrics.selectedCount)}
+          detail="Rows the current policy would have entered in this window"
+        />
+        <LearningMetricTile
+          label="Reward delta"
+          value={
+            currentVsBest
+              ? `${currentVsBest.avgPrimaryRewardDiff >= 0 ? "+" : ""}${currentVsBest.avgPrimaryRewardDiff.toFixed(2)}`
+              : "n/a"
+          }
+          detail="Average primary reward difference versus the best baseline"
+        />
+        <LearningMetricTile
+          label="Win-rate delta"
+          value={
+            currentVsBest
+              ? `${currentVsBest.winRateDiffPct >= 0 ? "+" : ""}${currentVsBest.winRateDiffPct.toFixed(1)}%`
+              : "n/a"
+          }
+          detail="Realized win-rate delta versus the best baseline"
+        />
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div className="rounded border bg-muted/20 p-3">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Assumptions
+          </div>
+          <div className="space-y-1 text-sm text-muted-foreground">
+            {window.assumptions.map((item) => (
+              <div key={item}>{item}</div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded border bg-muted/20 p-3">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Caveats
+          </div>
+          <div className="space-y-1 text-sm text-muted-foreground">
+            {window.caveats.map((item) => (
+              <div key={item}>{item}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShadowDecisionCard({
+  decision,
+  pending,
+  onFeedback,
+}: {
+  decision: ShadowPolicyDecisionRecord;
+  pending: boolean;
+  onFeedback: (
+    shadowDecisionId: number,
+    verdict: ShadowPolicyFeedbackVerdict,
+  ) => Promise<void>;
+}) {
+  return (
+    <div className="rounded-lg border bg-background/70 p-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono font-bold">{decision.ticker}</span>
+            <Badge
+              variant="outline"
+              className={
+                decision.recommendedAction === "enter"
+                  ? "border-emerald-500/30 text-emerald-400"
+                  : "border-amber-500/30 text-amber-400"
+              }
+            >
+              shadow {decision.recommendedAction}
+            </Badge>
+            <Badge
+              variant="outline"
+              className={
+                decision.agreedWithCurrent
+                  ? "border-blue-500/30 text-blue-400"
+                  : "border-red-500/30 text-red-400"
+              }
+            >
+              {decision.agreedWithCurrent ? "agrees" : "disagrees"} with current{" "}
+              {decision.currentDecision}
+            </Badge>
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {decision.reasonSummary ?? "No shadow rationale recorded."}
+          </div>
+          <div className="mt-2 grid gap-2 text-xs md:grid-cols-3">
+            <PolicyMetric label="Score" value={decision.score.toFixed(2)} />
+            <PolicyMetric
+              label="Confidence"
+              value={decision.confidence.toFixed(2)}
+            />
+            <PolicyMetric
+              label="Logged"
+              value={decision.createdAt ? timeAgo(decision.createdAt) : "n/a"}
+            />
+          </div>
+          {decision.drivers.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {decision.drivers.map((driver) => (
+                <Badge
+                  key={`${decision.id}-${driver.label}`}
+                  variant="outline"
+                  className={
+                    driver.impact === "positive"
+                      ? "border-emerald-500/30 text-emerald-400"
+                      : "border-amber-500/30 text-amber-400"
+                  }
+                >
+                  {driver.label}: {driver.contribution >= 0 ? "+" : ""}
+                  {driver.contribution.toFixed(2)}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-2 lg:items-end">
+          {decision.feedback ? (
+            <Badge
+              variant="outline"
+              className={getFeedbackBadgeClass(decision.feedback.verdict)}
+            >
+              {decision.feedback.verdict.replace(/_/g, " ")}
+            </Badge>
+          ) : (
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() => onFeedback(decision.id, "useful")}
+              >
+                Useful
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() => onFeedback(decision.id, "misleading")}
+              >
+                Misleading
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onClick={() => onFeedback(decision.id, "needs_review")}
+              >
+                Needs Review
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PromotionChecklistCard({ item }: { item: PromotionChecklistItem }) {
+  return (
+    <div className="rounded-lg border bg-background/70 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">{item.label}</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {item.detail}
+          </div>
+        </div>
+        <Badge
+          variant="outline"
+          className={getPromotionChecklistBadgeClass(item.status)}
+        >
+          {item.status}
+        </Badge>
+      </div>
+    </div>
+  );
+}
+
+function PolicyMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-muted-foreground">{label}</span>
+      <p className="font-mono">{value}</p>
+    </div>
+  );
+}
+
+function formatLearningStatus(status: LearningReadinessScorecard["status"]) {
+  switch (status) {
+    case "ready_for_shadow_learning":
+      return "Ready For Shadow Learning";
+    case "limited_offline_tuning":
+      return "Limited Offline Tuning";
+    default:
+      return "Not Ready";
+  }
+}
+
+function getLearningStatusTrend(status: LearningReadinessScorecard["status"]) {
+  switch (status) {
+    case "ready_for_shadow_learning":
+      return 1;
+    case "limited_offline_tuning":
+      return 0;
+    default:
+      return -1;
+  }
+}
+
+function getLearningStatusCardClass(
+  status: LearningReadinessScorecard["status"],
+) {
+  switch (status) {
+    case "ready_for_shadow_learning":
+      return "border-emerald-500/20 bg-emerald-500/5";
+    case "limited_offline_tuning":
+      return "border-blue-500/20 bg-blue-500/5";
+    default:
+      return "border-amber-500/20 bg-amber-500/5";
+  }
+}
+
+function getLearningStatusBadgeClass(
+  status: LearningReadinessScorecard["status"],
+) {
+  switch (status) {
+    case "ready_for_shadow_learning":
+      return "border-emerald-500/30 text-emerald-400";
+    case "limited_offline_tuning":
+      return "border-blue-500/30 text-blue-400";
+    default:
+      return "border-amber-500/30 text-amber-400";
+  }
+}
+
+function getPromotionChecklistBadgeClass(
+  status: PromotionChecklistItem["status"],
+) {
+  switch (status) {
+    case "pass":
+      return "border-emerald-500/30 text-emerald-400";
+    case "warn":
+      return "border-blue-500/30 text-blue-400";
+    case "pending":
+      return "border-amber-500/30 text-amber-400";
+    default:
+      return "border-red-500/30 text-red-400";
+  }
+}
+
+function getPromotionModeBadgeClass(mode: PromotionGatesReport["currentMode"]) {
+  switch (mode) {
+    case "execution_eligible":
+      return "border-emerald-500/30 text-emerald-400";
+    case "advisory":
+      return "border-blue-500/30 text-blue-400";
+    case "shadow":
+      return "border-amber-500/30 text-amber-400";
+    default:
+      return "border-red-500/30 text-red-400";
+  }
+}
+
+function getFeedbackBadgeClass(verdict: ShadowPolicyFeedbackVerdict) {
+  switch (verdict) {
+    case "useful":
+      return "border-emerald-500/30 text-emerald-400";
+    case "misleading":
+      return "border-red-500/30 text-red-400";
+    default:
+      return "border-amber-500/30 text-amber-400";
+  }
 }
 
 // ============================================================

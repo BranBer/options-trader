@@ -21,6 +21,12 @@ import { fetchEarningsDate } from "@/lib/services/market-fetcher";
 import { isMarketOpen } from "@/lib/utils/market-hours";
 import { getEarningsProximity } from "@/lib/utils/earnings-proximity";
 import { getSector, areCorrelated } from "@/lib/utils/sector-map";
+import { loadLearningDataset } from "@/lib/analytics/learning-dataset";
+import {
+  evaluateShadowPolicyCandidate,
+  fitShadowPolicyModel,
+} from "@/lib/analytics/shadow-policy";
+import { recordShadowPolicyDecision } from "@/lib/analytics/shadow-policy-store";
 import type { TradeRecommendation, DeepDiveAnalysis } from "@/types/analysis";
 import type { TradeDecision } from "@/types/portfolio";
 import * as progress from "@/lib/cron/pipeline-progress";
@@ -450,6 +456,8 @@ export async function runSimPipeline(): Promise<number> {
   // Step 5: Get portfolio state
   const portfolio = await getOrCreatePortfolio();
   const openPositionsSummary = getOpenPositionsSummary(openTrades);
+  const { learningRecords } = await loadLearningDataset(300);
+  const shadowModel = fitShadowPolicyModel(learningRecords);
 
   // Step 6: Find tickers we already have open — avoid duplicates
   const openTickers = new Set(openTrades.map((t) => t.ticker));
@@ -542,6 +550,20 @@ export async function runSimPipeline(): Promise<number> {
 
       // Get deep dive context if available
       const deepDive = deepDiveMap.get(recData.ticker);
+      const shadowDecision = evaluateShadowPolicyCandidate(
+        {
+          ticker: recData.ticker,
+          qualityScore: quality,
+          recommendationConfidence: recData.confidence,
+          compositeConfidence: rec.confidence,
+          recommendationDirection: recData.direction,
+          deepDiveRiskLevel: deepDive?.risk_assessment.overall_risk ?? null,
+          openPositionsCount: openTrades.length,
+          portfolioBalance: portfolio.balance,
+          positionSizeDollars: Math.max(marketData.price * 100 * 0.03, 0),
+        },
+        shadowModel,
+      );
 
       // Ask LLM to evaluate
       const decision = await evaluateTradeForSim({
@@ -609,6 +631,13 @@ export async function runSimPipeline(): Promise<number> {
             rejectionGate: "validation",
             rejectionReason: validation.reason,
           });
+          await recordShadowPolicyDecision({
+            sourceAnalysisId: rec.id,
+            sourceWhaleId: whaleAlert[0]?.id ?? null,
+            ticker: recData.ticker,
+            currentDecision: "reject",
+            shadowDecision,
+          });
           continue;
         }
 
@@ -642,6 +671,13 @@ export async function runSimPipeline(): Promise<number> {
             rejectionGate: "iv_environment",
             rejectionReason: ivCheck.reason,
           });
+          await recordShadowPolicyDecision({
+            sourceAnalysisId: rec.id,
+            sourceWhaleId: whaleAlert[0]?.id ?? null,
+            ticker: recData.ticker,
+            currentDecision: "reject",
+            shadowDecision,
+          });
           continue;
         }
         if (ivCheck.warning) {
@@ -674,6 +710,13 @@ export async function runSimPipeline(): Promise<number> {
             sourceAnalysisId: rec.id,
             rejectionGate: "earnings_proximity",
             rejectionReason: earningsCheck.reason,
+          });
+          await recordShadowPolicyDecision({
+            sourceAnalysisId: rec.id,
+            sourceWhaleId: whaleAlert[0]?.id ?? null,
+            ticker: recData.ticker,
+            currentDecision: "reject",
+            shadowDecision,
           });
           continue;
         }
@@ -713,6 +756,13 @@ export async function runSimPipeline(): Promise<number> {
             rejectionGate: "concentration",
             rejectionReason: concentrationCheck.reason,
           });
+          await recordShadowPolicyDecision({
+            sourceAnalysisId: rec.id,
+            sourceWhaleId: whaleAlert[0]?.id ?? null,
+            ticker: recData.ticker,
+            currentDecision: "reject",
+            shadowDecision,
+          });
           continue;
         }
         for (const w of concentrationCheck.warnings) {
@@ -744,6 +794,13 @@ export async function runSimPipeline(): Promise<number> {
             portfolioBalance: portfolio.balance,
             sourceAnalysisId: rec.id,
           });
+          await recordShadowPolicyDecision({
+            sourceAnalysisId: rec.id,
+            sourceWhaleId: whaleAlert[0]?.id ?? null,
+            ticker: recData.ticker,
+            currentDecision: "enter",
+            shadowDecision,
+          });
         } else {
           const rejectionReason =
             "Trade could not be opened due to portfolio sizing or balance constraints";
@@ -763,6 +820,13 @@ export async function runSimPipeline(): Promise<number> {
             rejectionGate: "position_open",
             rejectionReason,
           });
+          await recordShadowPolicyDecision({
+            sourceAnalysisId: rec.id,
+            sourceWhaleId: whaleAlert[0]?.id ?? null,
+            ticker: recData.ticker,
+            currentDecision: "reject",
+            shadowDecision,
+          });
         }
       } else {
         // Story 20.4 — Log LLM rejection
@@ -776,6 +840,13 @@ export async function runSimPipeline(): Promise<number> {
           sourceAnalysisId: rec.id,
           rejectionGate: "llm_eval",
           rejectionReason: decision.reasoning,
+        });
+        await recordShadowPolicyDecision({
+          sourceAnalysisId: rec.id,
+          sourceWhaleId: whaleAlert[0]?.id ?? null,
+          ticker: recData.ticker,
+          currentDecision: "reject",
+          shadowDecision,
         });
       }
     } catch (err) {

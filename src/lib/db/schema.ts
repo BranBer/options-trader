@@ -120,6 +120,48 @@ export const pipelineRuns = sqliteTable(
   ],
 );
 
+export const policyShadowDecisions = sqliteTable(
+  "policy_shadow_decisions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sourceAnalysisId: integer("source_analysis_id"),
+    sourceWhaleId: integer("source_whale_id"),
+    ticker: text("ticker").notNull(),
+    modelName: text("model_name").notNull(),
+    modelVersion: text("model_version").notNull(),
+    deploymentMode: text("deployment_mode").notNull().default("shadow"),
+    recommendedAction: text("recommended_action").notNull(),
+    score: real("score").notNull(),
+    confidence: real("confidence").notNull(),
+    expectedValue: real("expected_value"),
+    reasonSummary: text("reason_summary"),
+    drivers: text("drivers"),
+    currentDecision: text("current_decision").notNull(),
+    agreedWithCurrent: integer("agreed_with_current", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_policy_shadow_created").on(table.createdAt),
+    index("idx_policy_shadow_analysis").on(table.sourceAnalysisId),
+  ],
+);
+
+export const policyShadowFeedback = sqliteTable(
+  "policy_shadow_feedback",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    shadowDecisionId: integer("shadow_decision_id").notNull(),
+    verdict: text("verdict").notNull(),
+    notes: text("notes"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_policy_shadow_feedback_decision").on(table.shadowDecisionId),
+  ],
+);
+
 // ============================================================
 // Epic 12 — Simulated Portfolio Tables
 // ============================================================

@@ -26,11 +26,20 @@ import { buildAlertCorrelations } from "@/lib/analytics/alert-correlation";
 import { buildAttributionDiagnostics } from "@/lib/analytics/funnel-diagnostics";
 import {
   buildLearningExportManifest,
-  buildLearningRecords,
   serializeLearningRecordsToCsv,
   serializeLearningRecordsToJsonl,
   summarizeLearningRecords,
 } from "@/lib/analytics/learning-records";
+import { buildLearningReadinessScorecard } from "@/lib/analytics/learning-readiness";
+import { runLearningPolicyBaselineEvaluation } from "@/lib/analytics/learning-policy-baselines";
+import { runLearningPolicyEvaluationHarness } from "@/lib/analytics/learning-policy-evaluator";
+import { buildPromotionGatesReport } from "@/lib/analytics/promotion-gates";
+import { fitShadowPolicyModel } from "@/lib/analytics/shadow-policy";
+import { loadLearningDataset } from "@/lib/analytics/learning-dataset";
+import {
+  getRecentShadowPolicyReview,
+  recordShadowPolicyFeedback,
+} from "@/lib/analytics/shadow-policy-store";
 import { runPostmortemEngine } from "@/lib/analytics/postmortem-engine";
 import { runReplayHarness } from "@/lib/analytics/replay-harness";
 import { getLastRefreshAt } from "@/lib/cron/scheduler";
@@ -41,19 +50,37 @@ import {
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
 
-function parseJsonObject(
-  value: string | null | undefined,
-): Record<string, unknown> {
-  if (!value) return {};
+export async function POST(req: NextRequest) {
+  const params = req.nextUrl.searchParams;
+  const view = params.get("view");
 
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
+  if (view !== "shadow-feedback") {
+    return NextResponse.json(
+      { error: "Unsupported POST view" },
+      { status: 400 },
+    );
   }
+
+  const body = (await req.json()) as {
+    shadowDecisionId?: number;
+    verdict?: "useful" | "misleading" | "needs_review";
+    notes?: string | null;
+  };
+
+  if (!body.shadowDecisionId || !body.verdict) {
+    return NextResponse.json(
+      { error: "shadowDecisionId and verdict are required" },
+      { status: 400 },
+    );
+  }
+
+  await recordShadowPolicyFeedback({
+    shadowDecisionId: body.shadowDecisionId,
+    verdict: body.verdict,
+    notes: body.notes ?? null,
+  });
+
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE() {
@@ -91,31 +118,35 @@ export async function DELETE() {
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
-  const view = params.get("view") ?? "overview"; // 'overview' | 'trades' | 'equity' | 'trade' | 'attribution' | 'diagnostics' | 'postmortem' | 'benchmark'
+  const view = params.get("view") ?? "overview";
   const tradeId = params.get("id");
-  const status = params.get("status"); // 'open' | 'closed' | 'all'
+  const status = params.get("status");
   const limit = Math.min(Number(params.get("limit")) || 50, 200);
 
-  // --- Mock data mode ---
   if (USE_MOCK) {
     if (view === "trade" && tradeId) {
       const result = getMockPortfolioTrade(Number(tradeId));
-      if (!result)
+      if (!result) {
         return NextResponse.json({ error: "Trade not found" }, { status: 404 });
+      }
+
       return NextResponse.json(result);
     }
+
     if (view === "equity") return NextResponse.json(getMockEquityCurve());
-    if (view === "trades")
+    if (view === "trades") {
       return NextResponse.json(getMockPortfolioTrades(status ?? undefined));
+    }
+
     return NextResponse.json(getMockPortfolioOverview());
   }
 
-  // --- Single trade detail ---
   if (view === "trade" && tradeId) {
     const id = Number(tradeId);
     if (isNaN(id)) {
       return NextResponse.json({ error: "Invalid trade ID" }, { status: 400 });
     }
+
     const [trade] = await db
       .select()
       .from(simTrades)
@@ -125,7 +156,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Trade not found" }, { status: 404 });
     }
 
-    // Fetch confidence breakdown from the source analysis if linked
     let confidenceBreakdown = null;
     let sourceAnalysis = null;
     if (trade.sourceAnalysisId) {
@@ -138,9 +168,10 @@ export async function GET(req: NextRequest) {
           try {
             confidenceBreakdown = JSON.parse(analysis.confidenceBreakdown);
           } catch {
-            // ignore malformed JSON
+            confidenceBreakdown = null;
           }
         }
+
         sourceAnalysis = {
           id: analysis.id,
           type: analysis.type,
@@ -150,7 +181,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Fetch source whale alert if linked
     let sourceWhale = null;
     if (trade.sourceWhaleId) {
       const [whale] = await db
@@ -189,9 +219,8 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // --- Story 20.4: Evaluations audit trail ---
   if (view === "evaluations") {
-    const filterStatus = params.get("status"); // 'accepted' | 'rejected' | null (all)
+    const filterStatus = params.get("status");
 
     let query = db.select().from(simEvaluations);
 
@@ -207,7 +236,6 @@ export async function GET(req: NextRequest) {
       .orderBy(desc(simEvaluations.createdAt))
       .limit(limit);
 
-    // Compute acceptance rate for the last 24h
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const recentEvals = await db
       .select({
@@ -217,7 +245,9 @@ export async function GET(req: NextRequest) {
       .where(gte(simEvaluations.createdAt, since24h));
 
     const total = recentEvals.length;
-    const accepted = recentEvals.filter((e) => e.shouldEnter).length;
+    const accepted = recentEvals.filter(
+      (evaluation) => evaluation.shouldEnter,
+    ).length;
     const acceptanceRate = total > 0 ? (accepted / total) * 100 : null;
 
     return NextResponse.json({
@@ -231,7 +261,6 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // --- Equity curve ---
   if (view === "equity") {
     const snapshots = await db
       .select()
@@ -240,16 +269,15 @@ export async function GET(req: NextRequest) {
       .limit(365);
 
     return NextResponse.json({
-      snapshots: snapshots.map((s) => ({
-        date: s.snapshotDate,
-        balance: s.balance,
-        totalPnl: s.totalPnl,
-        openPositions: s.openPositions,
+      snapshots: snapshots.map((snapshot) => ({
+        date: snapshot.snapshotDate,
+        balance: snapshot.balance,
+        totalPnl: snapshot.totalPnl,
+        openPositions: snapshot.openPositions,
       })),
     });
   }
 
-  // --- Trades list ---
   if (view === "trades") {
     let query = db.select().from(simTrades);
 
@@ -262,11 +290,11 @@ export async function GET(req: NextRequest) {
     const trades = await query.orderBy(desc(simTrades.createdAt)).limit(limit);
 
     return NextResponse.json({
-      trades: trades.map((t) => ({
-        ...t,
-        legs: t.legs ? JSON.parse(t.legs) : [],
-        geminiReasoning: t.geminiReasoning
-          ? JSON.parse(t.geminiReasoning)
+      trades: trades.map((trade) => ({
+        ...trade,
+        legs: trade.legs ? JSON.parse(trade.legs) : [],
+        geminiReasoning: trade.geminiReasoning
+          ? JSON.parse(trade.geminiReasoning)
           : null,
       })),
       total: trades.length,
@@ -487,8 +515,15 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // --- Epic 35.2: Lightweight learning-record inspection API ---
-  if (view === "learning") {
+  // --- Epic 35 / 36: Learning dataset inspection and offline evaluation APIs ---
+  if (
+    view === "learning" ||
+    view === "learning-readiness" ||
+    view === "policy-baseline" ||
+    view === "policy-evaluation" ||
+    view === "shadow-policy" ||
+    view === "promotion-gates"
+  ) {
     const format = params.get("format") ?? "json";
     const lineageQuality =
       (params.get("lineageQuality") as
@@ -497,151 +532,8 @@ export async function GET(req: NextRequest) {
         | "inferred"
         | "incomplete"
         | null) ?? null;
-
-    const whaleRows = await db
-      .select()
-      .from(whaleAlerts)
-      .orderBy(desc(whaleAlerts.id))
-      .limit(limit);
-
-    const tickers = [...new Set(whaleRows.map((row) => row.ticker))];
-
-    const evaluationRows = tickers.length
-      ? await db
-          .select({
-            id: simEvaluations.id,
-            ticker: simEvaluations.ticker,
-            shouldEnter: simEvaluations.shouldEnter,
-            reasoning: simEvaluations.reasoning,
-            strategyName: simEvaluations.strategyName,
-            legs: simEvaluations.legs,
-            positionSize: simEvaluations.positionSize,
-            netPremium: simEvaluations.netPremium,
-            confidence: simEvaluations.confidence,
-            whaleQualityScore: simEvaluations.whaleQualityScore,
-            portfolioBalance: simEvaluations.portfolioBalance,
-            sourceAnalysisId: simEvaluations.sourceAnalysisId,
-            rejectionGate: simEvaluations.rejectionGate,
-            rejectionReason: simEvaluations.rejectionReason,
-            createdAt: simEvaluations.createdAt,
-          })
-          .from(simEvaluations)
-          .where(inArray(simEvaluations.ticker, tickers))
-          .orderBy(desc(simEvaluations.createdAt))
-          .limit(limit * 6)
-      : [];
-
-    const tradeRows = tickers.length
-      ? await db
-          .select()
-          .from(simTrades)
-          .where(inArray(simTrades.ticker, tickers))
-          .orderBy(desc(simTrades.createdAt))
-          .limit(limit * 4)
-      : [];
-
-    const sourceAnalysisIds = [
-      ...new Set(
-        evaluationRows
-          .map((evaluation) => evaluation.sourceAnalysisId)
-          .filter((id): id is number => id != null)
-          .concat(
-            tradeRows
-              .map((trade) => trade.sourceAnalysisId)
-              .filter((id): id is number => id != null),
-          ),
-      ),
-    ];
-
-    const analysisRows = sourceAnalysisIds.length
-      ? await db
-          .select({
-            id: analyses.id,
-            type: analyses.type,
-            inputRefs: analyses.inputRefs,
-            output: analyses.output,
-            confidence: analyses.confidence,
-            confidenceBreakdown: analyses.confidenceBreakdown,
-            createdAt: analyses.createdAt,
-          })
-          .from(analyses)
-          .where(inArray(analyses.id, sourceAnalysisIds))
-      : [];
-
-    const [portfolio] = await db.select().from(simPortfolio).limit(1);
-
-    const analysisRefMap = new Map<number, Record<string, unknown>>(
-      analysisRows.map((row) => [
-        row.id,
-        parseJsonObject(row.inputRefs ?? undefined),
-      ]),
-    );
-
-    const learningRecords = buildLearningRecords({
-      whales: whaleRows,
-      evaluations: evaluationRows.map((evaluation) => {
-        const refs = evaluation.sourceAnalysisId
-          ? analysisRefMap.get(evaluation.sourceAnalysisId)
-          : undefined;
-
-        return {
-          ...evaluation,
-          primaryWhaleId:
-            typeof refs?.primaryWhaleId === "number"
-              ? refs.primaryWhaleId
-              : null,
-          whaleIds: Array.isArray(refs?.whaleIds)
-            ? refs.whaleIds.filter((id): id is number => typeof id === "number")
-            : [],
-        };
-      }),
-      trades: tradeRows.map((trade) => {
-        let strike: number | undefined;
-        let expiry: string | undefined;
-        try {
-          const legs = trade.legs ? JSON.parse(trade.legs) : [];
-          const firstLeg = Array.isArray(legs) ? legs[0] : null;
-          strike =
-            typeof firstLeg?.strike === "number" ? firstLeg.strike : undefined;
-          expiry =
-            typeof firstLeg?.expiry === "string" ? firstLeg.expiry : undefined;
-        } catch {
-          strike = undefined;
-          expiry = undefined;
-        }
-
-        return {
-          id: trade.id,
-          ticker: trade.ticker,
-          strike,
-          expiry,
-          entryPrice: Number(trade.entryPrice),
-          entryDate: trade.entryDate,
-          exitPrice: trade.exitPrice != null ? Number(trade.exitPrice) : null,
-          exitDate: trade.exitDate,
-          pnl: trade.pnl != null ? Number(trade.pnl) : null,
-          pnlPct: trade.pnlPct != null ? Number(trade.pnlPct) : null,
-          status: (trade.status as "open" | "closed" | "expired") ?? "open",
-          exitReason: trade.exitReason,
-          direction: trade.direction,
-          sourceWhaleId: trade.sourceWhaleId,
-          sourceAnalysisId: trade.sourceAnalysisId,
-        };
-      }),
-      analyses: analysisRows.map((analysis) => ({
-        id: analysis.id,
-        type: analysis.type,
-        inputRefs: parseJsonObject(analysis.inputRefs ?? undefined),
-        output: analysis.output ? parseJsonObject(analysis.output) : null,
-        confidence: analysis.confidence,
-        confidenceBreakdown: analysis.confidenceBreakdown
-          ? parseJsonObject(analysis.confidenceBreakdown)
-          : null,
-        createdAt: analysis.createdAt,
-      })),
-      startingBalance:
-        portfolio?.startingBalance ?? DEFAULT_SIM_PORTFOLIO_BALANCE,
-    }).filter(
+    const { learningRecords: dataset } = await loadLearningDataset(limit);
+    const learningRecords = dataset.filter(
       (record) =>
         !lineageQuality || record.metadata.lineageQuality === lineageQuality,
     );
@@ -651,6 +543,62 @@ export async function GET(req: NextRequest) {
       lineageQuality,
       limit,
     };
+
+    if (view === "learning-readiness") {
+      return NextResponse.json({
+        readiness: buildLearningReadinessScorecard(learningRecords),
+        summary,
+        filters,
+      });
+    }
+
+    if (view === "policy-baseline") {
+      return NextResponse.json({
+        policyBaseline: runLearningPolicyBaselineEvaluation(learningRecords),
+        summary,
+        filters,
+      });
+    }
+
+    if (view === "policy-evaluation") {
+      return NextResponse.json({
+        policyEvaluation: runLearningPolicyEvaluationHarness(learningRecords),
+        summary,
+        filters,
+      });
+    }
+
+    if (view === "shadow-policy") {
+      const model = fitShadowPolicyModel(learningRecords);
+      const shadowReview = await getRecentShadowPolicyReview(limit);
+
+      return NextResponse.json({
+        shadowPolicy: {
+          model,
+          summary: shadowReview.summary,
+          decisions: shadowReview.decisions,
+        },
+        summary,
+        filters,
+      });
+    }
+
+    if (view === "promotion-gates") {
+      const readiness = buildLearningReadinessScorecard(learningRecords);
+      const policyEvaluation =
+        runLearningPolicyEvaluationHarness(learningRecords);
+      const shadowReview = await getRecentShadowPolicyReview(limit);
+
+      return NextResponse.json({
+        promotionGates: buildPromotionGatesReport({
+          readiness,
+          policyEvaluation,
+          shadowSummary: shadowReview.summary,
+        }),
+        summary,
+        filters,
+      });
+    }
 
     if (format === "jsonl") {
       return new Response(
