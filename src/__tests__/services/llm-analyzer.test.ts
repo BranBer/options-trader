@@ -889,6 +889,117 @@ describe("generateDeepDive", () => {
     expect(result.support_resistance).toHaveLength(2);
     expect(result.indicators).toHaveLength(2);
     expect(result.risk_assessment.overall_risk).toBe("moderate");
+    expect(result.timeframe_patterns?.["3M"]).toHaveLength(1);
+    expect(result.technical_patterns[0].timeframe).toBe("3M");
+  });
+
+  it("normalizes timeframe-specific deep dive patterns into the aggregate field", async () => {
+    mockLLMResponse(
+      {
+        ...VALID_DEEP_DIVE_RESPONSE,
+        technical_patterns: [],
+        timeframe_patterns: {
+          "1W": [
+            {
+              ...VALID_DEEP_DIVE_RESPONSE.technical_patterns[0],
+              name: "V-Shape Recovery",
+              timeframe: "1W",
+            },
+          ],
+          "1M": [
+            {
+              ...VALID_DEEP_DIVE_RESPONSE.technical_patterns[0],
+              name: "Descending Channel",
+              timeframe: "1M",
+            },
+          ],
+          "3M": [],
+          "6M": [],
+          "1Y": [],
+        },
+      },
+      3200,
+    );
+
+    const result = await generateDeepDive({
+      ...mockInput,
+      historicalDataByTimeframe: {
+        "1W": mockInput.historicalData,
+        "1M": mockInput.historicalData,
+        "3M": mockInput.historicalData,
+        "6M": mockInput.historicalData,
+        "1Y": mockInput.historicalData,
+      },
+    });
+
+    expect(result.timeframe_patterns?.["1W"]).toHaveLength(1);
+    expect(result.timeframe_patterns?.["1M"]).toHaveLength(1);
+    expect(result.technical_patterns.map((pattern) => pattern.name)).toEqual(
+      expect.arrayContaining(["V-Shape Recovery", "Descending Channel"]),
+    );
+  });
+
+  it("backfills 6M and 1Y patterns when the model omits broad-horizon structures", async () => {
+    mockLLMResponse(
+      {
+        ...VALID_DEEP_DIVE_RESPONSE,
+        technical_patterns: [],
+        timeframe_patterns: {
+          "1W": [
+            {
+              ...VALID_DEEP_DIVE_RESPONSE.technical_patterns[0],
+              name: "Weekly Recovery",
+              timeframe: "1W",
+            },
+          ],
+          "1M": [
+            {
+              ...VALID_DEEP_DIVE_RESPONSE.technical_patterns[0],
+              name: "Monthly Base",
+              timeframe: "1M",
+            },
+          ],
+          "3M": [
+            {
+              ...VALID_DEEP_DIVE_RESPONSE.technical_patterns[0],
+              name: "Quarterly Breakout",
+              timeframe: "3M",
+            },
+          ],
+          "6M": [],
+          "1Y": [],
+        },
+      },
+      3200,
+    );
+
+    const longRangeCandles = [
+      { time: "2025-05-01", open: 160, high: 164, low: 156, close: 162, volume: 1000000 },
+      { time: "2025-07-01", open: 168, high: 173, low: 166, close: 171, volume: 1100000 },
+      { time: "2025-09-01", open: 176, high: 181, low: 174, close: 179, volume: 1050000 },
+      { time: "2025-11-03", open: 182, high: 188, low: 180, close: 186, volume: 1200000 },
+      { time: "2026-01-05", open: 188, high: 193, low: 184, close: 191, volume: 1150000 },
+      { time: "2026-03-31", open: 194, high: 198, low: 191, close: 196, volume: 1300000 },
+    ];
+
+    const result = await generateDeepDive({
+      ...mockInput,
+      historicalDataByTimeframe: {
+        "1W": mockInput.historicalData,
+        "1M": mockInput.historicalData,
+        "3M": mockInput.historicalData,
+        "6M": longRangeCandles,
+        "1Y": longRangeCandles,
+      },
+    });
+
+    expect(result.timeframe_patterns?.["6M"]).toHaveLength(1);
+    expect(result.timeframe_patterns?.["1Y"]).toHaveLength(1);
+    expect(result.timeframe_patterns?.["6M"]?.[0].timeframe).toBe("6M");
+    expect(result.timeframe_patterns?.["1Y"]?.[0].timeframe).toBe("1Y");
+    expect(result.technical_patterns.map((pattern) => pattern.timeframe)).toEqual(
+      expect.arrayContaining(["6M", "1Y"]),
+    );
   });
 });
 

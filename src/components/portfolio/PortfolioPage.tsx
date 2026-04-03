@@ -1167,8 +1167,10 @@ export function DiagnosticsSection() {
                 </div>
                 <p className="text-sm text-muted-foreground">
                   Recent whale alerts cannot be traced until a successful
-                  pipeline run stores evaluations. Once the pipeline runs, this
-                  tab will show the full alert lifecycle automatically.
+                  pipeline run stores evaluations. No completed refresh has
+                  been recorded in the database yet, so this is usually a
+                  startup or brand-new-db state rather than a hidden pipeline
+                  failure.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1196,10 +1198,10 @@ export function DiagnosticsSection() {
                   Pipeline freshness may be masking unevaluated alerts.
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  The last successful refresh was{" "}
-                  {pipelineHealth.minutesSinceRefresh} minute(s) ago. Use the
-                  pipeline-gap view to isolate alerts that were never evaluated
-                  before the pipeline went stale.
+                  The last completed refresh was {pipelineHealth.minutesSinceRefresh} minute(s)
+                  ago. In local development this often means the dev server was
+                  restarted or left idle. Use the pipeline-gap view to isolate
+                  alerts that were never evaluated before the data went stale.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1856,6 +1858,7 @@ function TradeDetail({
                 ticker={ticker}
                 supportResistance={deepDive?.support_resistance}
                 technicalPatterns={deepDive?.technical_patterns}
+                technicalPatternsByTimeframe={deepDive?.timeframe_patterns}
               />
             </CardContent>
           </Card>

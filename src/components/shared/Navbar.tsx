@@ -296,11 +296,11 @@ export default function Navbar() {
                   <p className="text-xs font-semibold mb-1">Pipeline Health</p>
                   <p className="text-xs text-muted-foreground">
                     {pipelineHealth.status === "healthy"
-                      ? `Last successful refresh ${pipelineHealth.minutesSinceRefresh ?? 0} minute(s) ago.`
+                      ? `Last completed refresh ${pipelineHealth.minutesSinceRefresh ?? 0} minute(s) ago.`
                       : pipelineHealth.status === "stale"
-                        ? `No recent refresh for ${pipelineHealth.minutesSinceRefresh ?? "?"} minute(s).`
+                        ? `No completed refresh for ${pipelineHealth.minutesSinceRefresh ?? "?"} minute(s). In local dev this often means the server was restarted or idle.`
                         : pipelineHealth.status === "never_run"
-                          ? "The pipeline has not completed a run yet."
+                          ? "No completed refresh has been recorded in the database yet."
                           : "The pipeline is currently running."}
                   </p>
                   <p className="text-[10px] text-muted-foreground/60 mt-1">

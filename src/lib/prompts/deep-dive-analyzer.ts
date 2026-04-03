@@ -44,6 +44,7 @@ interface DeepDivePromptInput {
   ticker: string;
   whaleTradeJson: string;
   historicalDataSummary: string;
+  historicalDataSummariesByTimeframe?: Partial<Record<"1W" | "1M" | "3M" | "6M" | "1Y", string>>;
   optionsChainSummary: string;
   currentPrice: number;
   correlatedEventJson?: string;
@@ -82,8 +83,16 @@ ${input.whaleTradeJson}
 ## Current Price
 $${input.currentPrice}
 
-## Historical Price Data (recent candles)
-${input.historicalDataSummary}
+## Historical Price Data
+${input.historicalDataSummariesByTimeframe
+  ? (["1W", "1M", "3M", "6M", "1Y"] as const)
+      .filter((timeframe) => input.historicalDataSummariesByTimeframe?.[timeframe])
+      .map(
+        (timeframe) =>
+          `### ${timeframe}\n${input.historicalDataSummariesByTimeframe?.[timeframe]}`,
+      )
+      .join("\n\n")
+  : input.historicalDataSummary}
 
 ## Options Chain Context
 ${input.optionsChainSummary}`;
@@ -167,13 +176,17 @@ ${input.newsContextJson}`;
 
 Analyze the chart data to identify:
 1. Key support and resistance levels from the price action
-2. Any clear technical patterns (head & shoulders, double bottom, channels, etc.) — for each pattern, specify the drawing_type, start_time, end_time, start_price, end_price from the historical data so patterns can be drawn on the chart. For channels, also specify secondary_start_price and secondary_end_price. Use the exact date strings from the candle data.
+2. Any clear technical patterns (head & shoulders, double bottom, channels, etc.) — provide these separately for each timeframe in timeframe_patterns. For each pattern, specify the drawing_type, start_time, end_time, start_price, end_price from that timeframe's historical data so patterns can be drawn on the chart. For channels, also specify secondary_start_price and secondary_end_price. Use the exact timestamp/date strings from the candle data for that timeframe.
 3. Technical indicator signals (trend, momentum, volatility)
 4. How the whale's trade aligns with the technical picture
 5. Specific entry/exit strategy with risk management
 6. How global events connect to this trade
 7. Educational notes explaining key concepts for beginners
 8. For greeks_breakdown, provide individual assessments for the most relevant Greeks (delta, gamma, theta, vega) with plain English explanations
+
+Also populate the top-level technical_patterns array as the combined union of all timeframe-specific patterns, and tag every pattern with its timeframe (1W, 1M, 3M, 6M, or 1Y).
+
+Do not leave 6M or 1Y blank if a dominant long-range trend, range, or channel is visible. For those broader horizons, return at least one primary structure whenever there is enough price history to infer one.
 
 Be specific with price levels. Ground everything in the data provided.`;
 
@@ -197,6 +210,11 @@ export const DEEP_DIVE_RESPONSE_SCHEMA = {
           type: { type: "string", enum: ["bullish", "bearish", "neutral"] },
           description: { type: "string" },
           confidence: { type: "number" },
+          timeframe: {
+            type: "string",
+            enum: ["1W", "1M", "3M", "6M", "1Y"],
+            nullable: true,
+          },
           price_target: { type: "number", nullable: true },
           drawing_type: {
             type: "string",
@@ -215,12 +233,38 @@ export const DEEP_DIVE_RESPONSE_SCHEMA = {
           "type",
           "description",
           "confidence",
+          "timeframe",
           "drawing_type",
           "start_time",
           "end_time",
           "start_price",
           "end_price",
         ],
+      },
+    },
+    timeframe_patterns: {
+      type: "object",
+      properties: {
+        "1W": {
+          type: "array",
+          items: { "$ref": "#/properties/technical_patterns/items" },
+        },
+        "1M": {
+          type: "array",
+          items: { "$ref": "#/properties/technical_patterns/items" },
+        },
+        "3M": {
+          type: "array",
+          items: { "$ref": "#/properties/technical_patterns/items" },
+        },
+        "6M": {
+          type: "array",
+          items: { "$ref": "#/properties/technical_patterns/items" },
+        },
+        "1Y": {
+          type: "array",
+          items: { "$ref": "#/properties/technical_patterns/items" },
+        },
       },
     },
     support_resistance: {

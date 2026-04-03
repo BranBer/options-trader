@@ -7,6 +7,12 @@ import { runSimPipeline } from "@/lib/cron/pipelines/sim-pipeline";
 import { runExitMonitor } from "@/lib/cron/exit-monitor";
 import * as progress from "./pipeline-progress";
 import type { StageResults } from "./pipeline-progress";
+import {
+  getLastCompletedPipelineRefreshAt,
+  recordPipelineRunCompletion,
+  recordPipelineRunStart,
+  type PipelineRunTrigger,
+} from "./pipeline-run-store";
 
 let lastRefreshAt: string | null = null;
 let isRunning = false;
@@ -18,7 +24,9 @@ let isRunning = false;
  * Story 17.1: Each stage is wrapped in its own try/catch so that
  * a failure in analysis does not prevent the sim pipeline from running.
  */
-export async function runPipeline(): Promise<{
+export async function runPipeline(
+  trigger: PipelineRunTrigger = "manual",
+): Promise<{
   status: string;
   timestamp: string;
   stages: { fetch: string; classify: string; analysis: string; sim: string };
@@ -38,6 +46,7 @@ export async function runPipeline(): Promise<{
   }
 
   isRunning = true;
+  const runId = recordPipelineRunStart(trigger);
   const startTime = new Date();
   console.log(`[Pipeline] Starting cycle at ${startTime.toISOString()}`);
 
@@ -135,7 +144,12 @@ export async function runPipeline(): Promise<{
     );
   }
 
-  lastRefreshAt = new Date().toISOString();
+  lastRefreshAt = recordPipelineRunCompletion({
+    runId,
+    status: hadError ? "partial" : "ok",
+    stages,
+    errorMessage: progress.getProgress().lastError?.message ?? null,
+  });
   const elapsed = Date.now() - startTime.getTime();
   console.log(
     `[Pipeline] Cycle complete in ${elapsed}ms (stages: ${JSON.stringify(stages)})`,
@@ -159,7 +173,7 @@ export async function runPipeline(): Promise<{
 }
 
 export function getLastRefreshAt(): string | null {
-  return lastRefreshAt;
+  return lastRefreshAt ?? getLastCompletedPipelineRefreshAt();
 }
 
 /**
@@ -171,7 +185,7 @@ export function startScheduler() {
 
   cron.schedule("*/10 * * * *", async () => {
     console.log("[Scheduler] Cron trigger");
-    await runPipeline();
+    await runPipeline("schedule");
   });
 
   // Exit monitor: configurable interval, defaults to 5 minutes
@@ -193,5 +207,5 @@ export function startScheduler() {
   }
 
   // Run immediately on startup
-  runPipeline().catch(console.error);
+  runPipeline("startup").catch(console.error);
 }

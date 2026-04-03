@@ -7,6 +7,11 @@ const mockRunWhalePipeline = vi.fn();
 const mockRunAnalysisPipeline = vi.fn();
 const mockRunSimPipeline = vi.fn();
 const mockRunExitMonitor = vi.fn();
+const mockRecordPipelineRunStart = vi.fn(() => 101);
+const mockRecordPipelineRunCompletion = vi.fn(
+  () => "2026-04-02T12:30:00.000Z",
+);
+const mockGetLastCompletedPipelineRefreshAt = vi.fn(() => null);
 
 vi.mock("@/lib/services/news-fetcher", () => ({
   fetchAllNews: (...args: unknown[]) => mockFetchAllNews(...args),
@@ -39,6 +44,15 @@ vi.mock("node-cron", () => ({
   default: { schedule: vi.fn() },
 }));
 
+vi.mock("@/lib/cron/pipeline-run-store", () => ({
+  recordPipelineRunStart: (...args: unknown[]) =>
+    mockRecordPipelineRunStart(...args),
+  recordPipelineRunCompletion: (...args: unknown[]) =>
+    mockRecordPipelineRunCompletion(...args),
+  getLastCompletedPipelineRefreshAt: (...args: unknown[]) =>
+    mockGetLastCompletedPipelineRefreshAt(...args),
+}));
+
 import { runPipeline } from "@/lib/cron/scheduler";
 import * as progress from "@/lib/cron/pipeline-progress";
 
@@ -51,6 +65,11 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
     mockClassifyAndStoreNews.mockResolvedValue(0);
     mockRunAnalysisPipeline.mockResolvedValue(0);
     mockRunSimPipeline.mockResolvedValue(0);
+    mockRecordPipelineRunStart.mockReturnValue(101);
+    mockRecordPipelineRunCompletion.mockReturnValue(
+      "2026-04-02T12:30:00.000Z",
+    );
+    mockGetLastCompletedPipelineRefreshAt.mockReturnValue(null);
   });
 
   it("continues to sim pipeline when analysis throws", async () => {

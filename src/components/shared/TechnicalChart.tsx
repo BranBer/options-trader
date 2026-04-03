@@ -1,10 +1,15 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { Separator } from "@/components/ui/separator";
+import { useState, useCallback, useMemo } from "react";
 import { useHistoricalData } from "@/hooks/useApiData";
 import type { TechnicalPattern } from "@/types/analysis";
 import type { DeepDiveAnalysis } from "@/types/analysis";
+import {
+  CHART_HISTORY_LABELS,
+  CHART_HISTORY_PERIODS,
+  type ChartHistoryPeriod,
+} from "@/lib/utils/chart-timeframes";
+import { getTechnicalPatternsForTimeframe } from "@/lib/utils/deep-dive-patterns";
 import PriceChart, {
   type IndicatorConfig,
 } from "@/components/charts/PriceChart";
@@ -14,15 +19,6 @@ import {
   IndicatorGuidePanel,
   InfoTooltip,
 } from "@/components/charts/IndicatorExplainers";
-
-const TIMEFRAMES = ["1wk", "1mo", "3mo", "6mo", "1y"] as const;
-const TIMEFRAME_LABELS: Record<string, string> = {
-  "1wk": "1W",
-  "1mo": "1M",
-  "3mo": "3M",
-  "6mo": "6M",
-  "1y": "1Y",
-};
 
 const INDICATOR_OPTIONS: {
   key: keyof IndicatorConfig;
@@ -41,6 +37,7 @@ interface TechnicalChartProps {
   ticker: string;
   supportResistance?: DeepDiveAnalysis["support_resistance"];
   technicalPatterns?: TechnicalPattern[];
+  technicalPatternsByTimeframe?: DeepDiveAnalysis["timeframe_patterns"];
   /** Entry price line (green for bullish, red for bearish) */
   entryPrice?: number;
   /** Exit price line (shown only for closed trades) */
@@ -53,12 +50,15 @@ interface TechnicalChartProps {
   optionsContext?: DeepDiveAnalysis["options_context"];
   /** Which computed indicators to display */
   indicators?: IndicatorConfig;
+  timeframe?: ChartHistoryPeriod;
+  onTimeframeChange?: (timeframe: ChartHistoryPeriod) => void;
 }
 
 export default function TechnicalChart({
   ticker,
   supportResistance,
   technicalPatterns,
+  technicalPatternsByTimeframe,
   entryPrice,
   exitPrice,
   hoveredPatternIndex = null,
@@ -66,8 +66,10 @@ export default function TechnicalChart({
   height = 300,
   optionsContext,
   indicators,
+  timeframe,
+  onTimeframeChange,
 }: TechnicalChartProps) {
-  const [timeframe, setTimeframe] = useState<string>("3mo");
+  const [internalTimeframe, setInternalTimeframe] = useState<ChartHistoryPeriod>("3mo");
   const [showPatterns, setShowPatterns] = useState(true);
   const [showIndicators, setShowIndicators] = useState(false);
   const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig>({
@@ -83,12 +85,38 @@ export default function TechnicalChart({
   const mergedIndicators: IndicatorConfig = indicators
     ? { ...activeIndicators, ...indicators }
     : activeIndicators;
+  const activeTimeframe = timeframe ?? internalTimeframe;
+  const activePatterns = useMemo(
+    () =>
+      getTechnicalPatternsForTimeframe({
+        technicalPatterns,
+        timeframePatterns: technicalPatternsByTimeframe,
+        period: activeTimeframe,
+      }),
+    [activeTimeframe, technicalPatterns, technicalPatternsByTimeframe],
+  );
+  const hasAnyPatterns =
+    activePatterns.length > 0 ||
+    (technicalPatterns?.length ?? 0) > 0 ||
+    Object.values(technicalPatternsByTimeframe ?? {}).some(
+      (patterns) => (patterns?.length ?? 0) > 0,
+    );
+
+  const handleTimeframeChange = useCallback(
+    (nextTimeframe: ChartHistoryPeriod) => {
+      onTimeframeChange?.(nextTimeframe);
+      if (!timeframe) {
+        setInternalTimeframe(nextTimeframe);
+      }
+    },
+    [onTimeframeChange, timeframe],
+  );
 
   const toggleIndicator = useCallback((key: keyof IndicatorConfig) => {
     setActiveIndicators((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
-  const { data: histData, isLoading } = useHistoricalData(ticker, timeframe);
+  const { data: histData, isLoading } = useHistoricalData(ticker, activeTimeframe);
   const candles = histData?.candles ?? [];
 
   const handleHover = useCallback(
@@ -115,7 +143,7 @@ export default function TechnicalChart({
             <BarChart3 className="h-3 w-3" />
             Indicators
           </button>
-          {technicalPatterns && technicalPatterns.length > 0 && (
+          {hasAnyPatterns && (
             <button
               onClick={() => setShowPatterns(!showPatterns)}
               className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
@@ -133,18 +161,18 @@ export default function TechnicalChart({
             </button>
           )}
           <div className="flex gap-1">
-            {TIMEFRAMES.map((tf) => (
+            {CHART_HISTORY_PERIODS.map((tf) => (
               <button
                 key={tf}
-                onClick={() => setTimeframe(tf)}
+                onClick={() => handleTimeframeChange(tf)}
                 className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                  timeframe === tf
+                  activeTimeframe === tf
                     ? "bg-primary text-primary-foreground"
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
                 }`}
-                aria-pressed={timeframe === tf}
+                aria-pressed={activeTimeframe === tf}
               >
-                {TIMEFRAME_LABELS[tf]}
+                {CHART_HISTORY_LABELS[tf]}
               </button>
             ))}
           </div>
@@ -192,7 +220,7 @@ export default function TechnicalChart({
           <PriceChart
             candles={candles}
             supportResistance={supportResistance}
-            technicalPatterns={technicalPatterns}
+            technicalPatterns={activePatterns}
             showPatterns={showPatterns}
             highlightedPatternIndex={hoveredPatternIndex}
             onHoveredPattern={handleHover}
@@ -204,7 +232,7 @@ export default function TechnicalChart({
           />
           <ChartLegend
             supportResistance={supportResistance}
-            technicalPatterns={technicalPatterns}
+            technicalPatterns={activePatterns}
             showPatterns={showPatterns}
           />
           <IndicatorGuidePanel

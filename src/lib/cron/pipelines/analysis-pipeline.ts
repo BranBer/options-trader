@@ -34,6 +34,7 @@ import {
 } from "@/lib/utils/sector-rotation";
 import { fetchSectorPerformance } from "@/lib/services/market-fetcher";
 import { computeCompositeConfidence } from "@/lib/utils/composite-confidence";
+import { isTimeframeAwareDeepDiveOutput } from "@/lib/utils/deep-dive-freshness";
 import type { InsiderSentiment } from "@/types/insider";
 import type { SectorRotationContext } from "@/lib/utils/sector-rotation";
 import type { DeepDiveAnalysis, TradeRecommendation } from "@/types/analysis";
@@ -85,7 +86,7 @@ async function crossReferenceWithFallback(
       insiderContextJson,
       sectorRotationPrompt,
     );
-  } catch (fullError) {
+  } catch {
     console.warn(
       "[AnalysisPipeline] Cross-reference failed with full input, retrying with reduced set",
     );
@@ -755,10 +756,18 @@ export async function runAnalysisPipeline(): Promise<number> {
         ),
       );
     const recentDiveTickers = new Set<string>();
+    let staleRecentDiveCount = 0;
     for (const dd of recentDives) {
       try {
         const parsed = JSON.parse(dd.output ?? "{}");
-        if (parsed.ticker) recentDiveTickers.add(parsed.ticker);
+        if (!parsed.ticker) {
+          continue;
+        }
+        if (isTimeframeAwareDeepDiveOutput(dd.output)) {
+          recentDiveTickers.add(parsed.ticker);
+        } else {
+          staleRecentDiveCount += 1;
+        }
       } catch {
         /* skip */
       }
@@ -773,6 +782,11 @@ export async function runAnalysisPipeline(): Promise<number> {
       );
       deepDiveQueue.length = 0;
       deepDiveQueue.push(...filtered);
+    }
+    if (staleRecentDiveCount > 0) {
+      console.log(
+        `[AnalysisPipeline] Deep dive dedup ignored ${staleRecentDiveCount} stale recent deep dive(s) without timeframe-aware patterns`,
+      );
     }
   }
 
@@ -794,11 +808,16 @@ export async function runAnalysisPipeline(): Promise<number> {
       const results = await Promise.allSettled(
         chunk.map(async (item) => {
           // Fetch historical data + options chain + current price
-          const [historicalData, chain, [marketSnap]] = await Promise.all([
+          const [historicalData1W, historicalData1M, historicalData3M, historicalData6M, historicalData1Y, chain, [marketSnap]] = await Promise.all([
+            fetchHistoricalData(item.ticker, "1wk"),
+            fetchHistoricalData(item.ticker, "1mo"),
             fetchHistoricalData(item.ticker, "3mo"),
+            fetchHistoricalData(item.ticker, "6mo"),
+            fetchHistoricalData(item.ticker, "1y"),
             fetchOptionsChain(item.ticker),
             fetchMarketData([item.ticker]),
           ]);
+          const historicalData = historicalData3M;
 
           const currentPrice = marketSnap?.price ?? 0;
           if (currentPrice === 0) {
@@ -834,6 +853,13 @@ export async function runAnalysisPipeline(): Promise<number> {
             ticker: item.ticker,
             whaleTrade: item.whaleTrade,
             historicalData,
+            historicalDataByTimeframe: {
+              "1W": historicalData1W,
+              "1M": historicalData1M,
+              "3M": historicalData3M,
+              "6M": historicalData6M,
+              "1Y": historicalData1Y,
+            },
             optionsChain: chain,
             currentPrice,
             correlatedEvent: item.correlatedEvent,

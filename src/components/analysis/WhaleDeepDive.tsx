@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useDeepDive } from "@/hooks/useApiData";
 import type { DeepDiveAnalysis } from "@/types/analysis";
+import { CHART_HISTORY_LABELS, type ChartHistoryPeriod } from "@/lib/utils/chart-timeframes";
+import { getTechnicalPatternsForTimeframe } from "@/lib/utils/deep-dive-patterns";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
 import TechnicalChart from "@/components/shared/TechnicalChart";
 import { InfoTooltip } from "@/components/charts/IndicatorExplainers";
@@ -39,6 +41,7 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
   const [hoveredPatternIndex, setHoveredPatternIndex] = useState<number | null>(
     null,
   );
+  const [timeframe, setTimeframe] = useState<ChartHistoryPeriod>("3mo");
 
   const { data: deepDiveData, isLoading: ddLoading } = useDeepDive(ticker);
 
@@ -49,6 +52,18 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
   const handleChartHover = useCallback((idx: number | null) => {
     setHoveredPatternIndex(idx);
   }, []);
+
+  const activePatterns = useMemo(
+    () =>
+      deepDive
+        ? getTechnicalPatternsForTimeframe({
+            technicalPatterns: deepDive.technical_patterns,
+            timeframePatterns: deepDive.timeframe_patterns,
+            period: timeframe,
+          })
+        : [],
+    [deepDive, timeframe],
+  );
 
   if (ddLoading) {
     return (
@@ -95,21 +110,31 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
         ticker={ticker}
         supportResistance={deepDive.support_resistance}
         technicalPatterns={deepDive.technical_patterns}
+        technicalPatternsByTimeframe={deepDive.timeframe_patterns}
         hoveredPatternIndex={hoveredPatternIndex}
         onHoveredPattern={handleChartHover}
         optionsContext={deepDive.options_context}
+        timeframe={timeframe}
+        onTimeframeChange={setTimeframe}
       />
 
       <Separator />
 
       {/* Technical Patterns */}
-      {deepDive.technical_patterns.length > 0 && (
+      {(deepDive.technical_patterns.length > 0 || activePatterns.length > 0) && (
         <div className="space-y-2">
-          <p className="text-sm font-medium">Technical Patterns</p>
-          <div className="space-y-2">
-            {deepDive.technical_patterns.map((p, i) => (
+          <p className="text-sm font-medium">
+            Technical Patterns <span className="text-muted-foreground">({CHART_HISTORY_LABELS[timeframe]})</span>
+          </p>
+          {activePatterns.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No technical patterns were identified for the selected timeframe.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {activePatterns.map((p, i) => (
               <div
-                key={i}
+                key={`${p.timeframe ?? timeframe}-${p.name}-${p.start_time ?? i}`}
                 className={`flex items-start gap-2 text-sm rounded-md px-2 py-1 transition-colors cursor-default ${
                   hoveredPatternIndex === i
                     ? "bg-accent/50 ring-1 ring-accent"
@@ -148,8 +173,9 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
                   </p>
                 </div>
               </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

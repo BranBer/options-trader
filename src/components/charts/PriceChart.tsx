@@ -435,13 +435,18 @@ export default function PriceChart({
       // Build a map from normalized YYYY-MM-DD → original Time value
       const candleTimeMap = new Map<string, Time>();
       for (const c of candles) {
-        const normalizedKey =
-          typeof c.time === "number"
-            ? new Date(c.time * 1000).toISOString().slice(0, 10)
-            : String(c.time);
-        // For intraday, multiple candles share the same date — keep the first
-        if (!candleTimeMap.has(normalizedKey)) {
-          candleTimeMap.set(normalizedKey, c.time as Time);
+        if (typeof c.time === "number") {
+          const exactKey = new Date(c.time * 1000).toISOString();
+          const dateKey = exactKey.slice(0, 10);
+          candleTimeMap.set(exactKey, c.time as Time);
+          if (!candleTimeMap.has(dateKey)) {
+            candleTimeMap.set(dateKey, c.time as Time);
+          }
+        } else {
+          const key = String(c.time);
+          if (!candleTimeMap.has(key)) {
+            candleTimeMap.set(key, c.time as Time);
+          }
         }
       }
       const overlays = createPatternOverlays(

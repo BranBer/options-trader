@@ -10,7 +10,7 @@ export async function GET() {
     return NextResponse.json({ status: "already_running" });
   }
   // Fire-and-forget: start pipeline without blocking the response
-  runPipeline().catch(console.error);
+  runPipeline("manual").catch(console.error);
   return NextResponse.json({
     status: "started",
     timestamp: new Date().toISOString(),

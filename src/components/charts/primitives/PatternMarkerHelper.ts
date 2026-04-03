@@ -15,19 +15,17 @@ export interface AttachedOverlays {
   regions: HighlightRegionPrimitive[];
 }
 
-/**
- * Normalize a date string to YYYY-MM-DD for matching.
- * Handles ISO 8601, "March 15, 2025", "2025/03/15", etc.
- */
-function normalizeDate(raw: string): string {
-  // Already YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  // Try parsing
-  const d = new Date(raw);
-  if (!isNaN(d.getTime())) {
-    return d.toISOString().slice(0, 10);
+function parseTimeValue(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric)) {
+      return trimmed.length <= 10 ? numeric * 1000 : numeric;
+    }
   }
-  return raw; // fallback — return as-is
+
+  const parsed = Date.parse(trimmed);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 /**
@@ -38,22 +36,22 @@ function findClosestCandleTime(
   target: string,
   candleTimesArr: string[],
 ): string | null {
-  const normalized = normalizeDate(target);
+  const trimmedTarget = target.trim();
 
-  // Exact match first (already normalized)
   for (const ct of candleTimesArr) {
-    if (ct === normalized || normalizeDate(ct) === normalized) return ct;
+    if (ct === trimmedTarget) return ct;
   }
 
-  // Fuzzy: find closest date by absolute distance
-  const targetMs = new Date(normalized).getTime();
-  if (isNaN(targetMs)) return null;
+  const targetMs = parseTimeValue(trimmedTarget);
+  if (targetMs == null) return null;
+  const isIntradayTarget =
+    /T\d{2}:\d{2}|:\d{2}/.test(trimmedTarget) || /^\d{10,}$/.test(trimmedTarget);
 
   let best: string | null = null;
   let bestDist = Infinity;
   for (const ct of candleTimesArr) {
-    const ctMs = new Date(normalizeDate(ct)).getTime();
-    if (isNaN(ctMs)) continue;
+    const ctMs = parseTimeValue(ct);
+    if (ctMs == null) continue;
     const dist = Math.abs(ctMs - targetMs);
     if (dist < bestDist) {
       bestDist = dist;
@@ -61,8 +59,10 @@ function findClosestCandleTime(
     }
   }
 
-  // Only accept if within 3 days
-  if (best && bestDist <= 3 * 86400000) return best;
+  const toleranceMs = isIntradayTarget
+    ? 6 * 60 * 60 * 1000
+    : 3 * 24 * 60 * 60 * 1000;
+  if (best && bestDist <= toleranceMs) return best;
   return null;
 }
 

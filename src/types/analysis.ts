@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ANALYSIS_TIMEFRAMES } from "@/lib/utils/chart-timeframes";
 
 // --- Cross-Reference Correlation ---
 export const correlationSchema = z.object({
@@ -99,12 +100,16 @@ export const tradeRecommendationSchema = z.object({
 
 export type TradeRecommendation = z.infer<typeof tradeRecommendationSchema>;
 
+export const analysisTimeframeEnum = z.enum(ANALYSIS_TIMEFRAMES);
+export type AnalysisTimeframe = z.infer<typeof analysisTimeframeEnum>;
+
 // --- Deep Dive Technical Pattern ---
 export const technicalPatternSchema = z.object({
   name: z.string(),
   type: z.enum(["bullish", "bearish", "neutral"]),
   description: z.string(),
   confidence: z.number().min(0).max(1),
+  timeframe: analysisTimeframeEnum.nullable().optional(),
   price_target: z.number().nullable().optional(),
   // Chart overlay coordinates (nullable for backward compat with existing data)
   drawing_type: z
@@ -159,12 +164,22 @@ export const entryExitStrategySchema = z.object({
 
 export type EntryExitStrategy = z.infer<typeof entryExitStrategySchema>;
 
+export const timeframePatternMapSchema = z.object({
+  "1W": z.array(technicalPatternSchema),
+  "1M": z.array(technicalPatternSchema),
+  "3M": z.array(technicalPatternSchema),
+  "6M": z.array(technicalPatternSchema),
+  "1Y": z.array(technicalPatternSchema),
+});
+export type TimeframePatternMap = z.infer<typeof timeframePatternMapSchema>;
+
 // --- Full Deep Dive Analysis ---
 export const deepDiveAnalysisSchema = z.object({
   ticker: z.string(),
   whale_trade_summary: z.string(),
   market_narrative: z.string(),
   technical_patterns: z.array(technicalPatternSchema),
+  timeframe_patterns: timeframePatternMapSchema.optional(),
   support_resistance: z.array(supportResistanceSchema),
   indicators: z.array(indicatorAnalysisSchema),
   options_context: z.object({

@@ -3,9 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  Activity,
-  Globe,
-  BarChart3,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -210,8 +207,8 @@ export default function DashboardHome() {
                   : pipelineHealth.status === "running"
                     ? "The pipeline is currently running. Diagnostics will update as soon as the latest refresh completes."
                     : pipelineHealth.status === "never_run"
-                      ? "No successful refresh has been recorded yet. Jump straight to diagnostics to inspect the unevaluated-alert lane."
-                      : `Pipeline freshness is degraded${pipelineHealth.minutesSinceRefresh != null ? ` (${pipelineHealth.minutesSinceRefresh} minute(s) since refresh)` : ""}. Open diagnostics to investigate pipeline gaps before reviewing signals.`}
+                      ? "No completed refresh has been recorded in the database yet. In local development this usually means the pipeline has not finished a full cycle since the current database was created."
+                      : `Pipeline freshness is degraded${pipelineHealth.minutesSinceRefresh != null ? ` (${pipelineHealth.minutesSinceRefresh} minute(s) since the last completed refresh)` : ""}. In local development this often means the dev server was idle or restarted, not that a stage failed.`}
             </p>
           </div>
 

@@ -15,6 +15,8 @@ import {
 import {
   type DeepDiveAnalysis,
   deepDiveAnalysisSchema,
+  type AnalysisTimeframe,
+  type TechnicalPattern,
 } from "@/types/analysis";
 import type { Correlation } from "@/types/analysis";
 import {
@@ -633,6 +635,7 @@ interface DeepDiveInput {
     sentiment?: string;
   };
   historicalData: CandleData[];
+  historicalDataByTimeframe?: Partial<Record<AnalysisTimeframe, CandleData[]>>;
   optionsChain: OptionsChainSummary | null;
   currentPrice: number;
   correlatedEvent?: {
@@ -666,24 +669,229 @@ interface DeepDiveInput {
   };
 }
 
+const DEEP_DIVE_TIMEFRAME_CONFIG: Array<{
+  timeframe: AnalysisTimeframe;
+  maxRows: number;
+}> = [
+  { timeframe: "1W", maxRows: 36 },
+  { timeframe: "1M", maxRows: 30 },
+  { timeframe: "3M", maxRows: 45 },
+  { timeframe: "6M", maxRows: 36 },
+  { timeframe: "1Y", maxRows: 36 },
+];
+
+function formatCandleTimeForPrompt(value: CandleData["time"]): string {
+  if (typeof value === "number") {
+    return new Date(value * 1000).toISOString();
+  }
+  return value;
+}
+
+function summarizeCandlesForPrompt(candles: CandleData[], maxRows: number): string {
+  if (candles.length === 0) {
+    return "No historical data available.";
+  }
+
+  const sampled =
+    candles.length <= maxRows
+      ? candles
+      : Array.from({ length: maxRows }, (_, idx) => {
+          const position = Math.round((idx * (candles.length - 1)) / (maxRows - 1));
+          return candles[position];
+        });
+
+  return (
+    `Time | Open | High | Low | Close | Volume\n` +
+    sampled
+      .map(
+        (c) =>
+          `${formatCandleTimeForPrompt(c.time)} | ${c.open.toFixed(2)} | ${c.high.toFixed(2)} | ${c.low.toFixed(2)} | ${c.close.toFixed(2)} | ${c.volume}`,
+      )
+      .join("\n")
+  );
+}
+
+function createFallbackTimeframePattern(args: {
+  timeframe: Extract<AnalysisTimeframe, "6M" | "1Y">;
+  candles: CandleData[];
+}): TechnicalPattern | null {
+  const { timeframe, candles } = args;
+  if (candles.length < 2) {
+    return null;
+  }
+
+  const first = candles[0];
+  const last = candles[candles.length - 1];
+  const startClose = first.close;
+  const endClose = last.close;
+  const changePct = startClose !== 0 ? (endClose - startClose) / startClose : 0;
+  const minLow = candles.reduce((acc, candle) => Math.min(acc, candle.low), Number.POSITIVE_INFINITY);
+  const maxHigh = candles.reduce((acc, candle) => Math.max(acc, candle.high), Number.NEGATIVE_INFINITY);
+
+  if (!Number.isFinite(minLow) || !Number.isFinite(maxHigh)) {
+    return null;
+  }
+
+  if (Math.abs(changePct) < 0.05) {
+    return {
+      name: timeframe === "1Y" ? "Primary Yearly Range" : "Primary Medium-Term Range",
+      type: "neutral",
+      description:
+        timeframe === "1Y"
+          ? "Price has remained in a broad yearly range, so the dominant long-horizon structure is a horizontal channel rather than a strong trend."
+          : "Price has remained in a broad medium-term range over the selected window, so the dominant structure is a horizontal channel.",
+      confidence: 0.55,
+      timeframe,
+      price_target: null,
+      drawing_type: "channel",
+      start_time: formatCandleTimeForPrompt(first.time),
+      end_time: formatCandleTimeForPrompt(last.time),
+      start_price: minLow,
+      end_price: minLow,
+      secondary_start_price: maxHigh,
+      secondary_end_price: maxHigh,
+    };
+  }
+
+  const isBullish = changePct > 0;
+  const lowerStart = Math.min(first.open, first.close, first.low);
+  const lowerEnd = Math.min(last.open, last.close, last.low);
+  const upperStart = Math.max(first.open, first.close, first.high);
+  const upperEnd = Math.max(last.open, last.close, last.high);
+
+  return {
+    name:
+      timeframe === "1Y"
+        ? isBullish
+          ? "Primary Yearly Uptrend"
+          : "Primary Yearly Downtrend"
+        : isBullish
+          ? "Primary Medium-Term Uptrend"
+          : "Primary Medium-Term Downtrend",
+    type: isBullish ? "bullish" : "bearish",
+    description: `${timeframe} candles imply a ${isBullish ? "rising" : "falling"} long-range price channel from ${startClose.toFixed(2)} to ${endClose.toFixed(2)}, so the dominant technical structure should remain visible on the broader chart range.`,
+    confidence: 0.58,
+    timeframe,
+    price_target: null,
+    drawing_type: "channel",
+    start_time: formatCandleTimeForPrompt(first.time),
+    end_time: formatCandleTimeForPrompt(last.time),
+    start_price: lowerStart,
+    end_price: lowerEnd,
+    secondary_start_price: upperStart,
+    secondary_end_price: upperEnd,
+  };
+}
+
+function normalizeDeepDivePatterns(
+  result: DeepDiveAnalysis,
+  historicalDataByTimeframe?: Partial<Record<AnalysisTimeframe, CandleData[]>>,
+): DeepDiveAnalysis {
+  const timeframePatterns = result.timeframe_patterns
+    ? {
+        "1W": result.timeframe_patterns["1W"] ?? [],
+        "1M": result.timeframe_patterns["1M"] ?? [],
+        "3M": result.timeframe_patterns["3M"] ?? [],
+        "6M": result.timeframe_patterns["6M"] ?? [],
+        "1Y": result.timeframe_patterns["1Y"] ?? [],
+      }
+    : {
+        "1W": [],
+        "1M": [],
+        "3M": result.technical_patterns.map((pattern) => ({
+          ...pattern,
+          timeframe: pattern.timeframe ?? "3M",
+        })),
+        "6M": [],
+        "1Y": [],
+      };
+
+  for (const timeframe of ["6M", "1Y"] as const) {
+    if (timeframePatterns[timeframe].length === 0) {
+      const fallback = createFallbackTimeframePattern({
+        timeframe,
+        candles: historicalDataByTimeframe?.[timeframe] ?? [],
+      });
+      if (fallback) {
+        timeframePatterns[timeframe] = [fallback];
+      }
+    }
+  }
+
+  const taggedTimeframePatterns = {
+    "1W": timeframePatterns["1W"].map((pattern) => ({
+      ...pattern,
+      timeframe: pattern.timeframe ?? "1W",
+    })),
+    "1M": timeframePatterns["1M"].map((pattern) => ({
+      ...pattern,
+      timeframe: pattern.timeframe ?? "1M",
+    })),
+    "3M": timeframePatterns["3M"].map((pattern) => ({
+      ...pattern,
+      timeframe: pattern.timeframe ?? "3M",
+    })),
+    "6M": timeframePatterns["6M"].map((pattern) => ({
+      ...pattern,
+      timeframe: pattern.timeframe ?? "6M",
+    })),
+    "1Y": timeframePatterns["1Y"].map((pattern) => ({
+      ...pattern,
+      timeframe: pattern.timeframe ?? "1Y",
+    })),
+  };
+
+  const aggregatePatterns = new Map<string, TechnicalPattern>();
+  const addPattern = (pattern: TechnicalPattern) => {
+    const key = [
+      pattern.timeframe ?? "",
+      pattern.name,
+      pattern.type,
+      pattern.start_time ?? "",
+      pattern.end_time ?? "",
+      pattern.start_price ?? "",
+      pattern.end_price ?? "",
+    ].join("|");
+    aggregatePatterns.set(key, pattern);
+  };
+
+  for (const pattern of result.technical_patterns) {
+    addPattern({
+      ...pattern,
+      timeframe: pattern.timeframe ?? "3M",
+    });
+  }
+  for (const patterns of Object.values(taggedTimeframePatterns)) {
+    for (const pattern of patterns) {
+      addPattern(pattern);
+    }
+  }
+
+  return {
+    ...result,
+    technical_patterns: [...aggregatePatterns.values()],
+    timeframe_patterns: taggedTimeframePatterns,
+  };
+}
+
 export async function generateDeepDive(
   input: DeepDiveInput,
 ): Promise<DeepDiveAnalysis> {
   const { ticker } = input;
   console.log(`[LLM] Generating deep dive for ${ticker}`);
 
-  // Build historical summary (last N candles as compact table)
-  const recentCandles = input.historicalData.slice(-60);
+  const historicalSummariesByTimeframe = Object.fromEntries(
+    DEEP_DIVE_TIMEFRAME_CONFIG.map(({ timeframe, maxRows }) => [
+      timeframe,
+      summarizeCandlesForPrompt(
+        input.historicalDataByTimeframe?.[timeframe] ??
+          (timeframe === "3M" ? input.historicalData : []),
+        maxRows,
+      ),
+    ]),
+  ) as Partial<Record<AnalysisTimeframe, string>>;
   const historicalSummary =
-    recentCandles.length > 0
-      ? `Date | Open | High | Low | Close | Volume\n` +
-        recentCandles
-          .map(
-            (c) =>
-              `${c.time} | ${c.open.toFixed(2)} | ${c.high.toFixed(2)} | ${c.low.toFixed(2)} | ${c.close.toFixed(2)} | ${c.volume}`,
-          )
-          .join("\n")
-      : "No historical data available.";
+    historicalSummariesByTimeframe["3M"] ?? "No historical data available.";
 
   // Build options chain summary
   let chainSummary = "No options chain data available.";
@@ -725,6 +933,7 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
     ticker,
     whaleTradeJson: JSON.stringify(input.whaleTrade, null, 2),
     historicalDataSummary: historicalSummary,
+    historicalDataSummariesByTimeframe: historicalSummariesByTimeframe,
     optionsChainSummary: chainSummary,
     currentPrice: input.currentPrice,
     correlatedEventJson: input.correlatedEvent
@@ -748,13 +957,17 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
       maxOutputTokens: 16384,
     },
   );
-
-  console.log(
-    `[LLM] Deep dive for ${ticker}: risk=${result.risk_assessment.overall_risk}, ` +
-      `patterns=${result.technical_patterns.length}, S/R=${result.support_resistance.length}`,
+  const normalized = normalizeDeepDivePatterns(
+    result,
+    input.historicalDataByTimeframe,
   );
 
-  return result;
+  console.log(
+    `[LLM] Deep dive for ${ticker}: risk=${normalized.risk_assessment.overall_risk}, ` +
+      `patterns=${normalized.technical_patterns.length}, S/R=${normalized.support_resistance.length}`,
+  );
+
+  return normalized;
 }
 
 // ============================================================

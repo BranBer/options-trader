@@ -102,6 +102,24 @@ export const analyses = sqliteTable(
   ],
 );
 
+export const pipelineRuns = sqliteTable(
+  "pipeline_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    trigger: text("trigger").notNull().default("manual"),
+    status: text("status").notNull().default("running"),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+    stages: text("stages"),
+    errorMessage: text("error_message"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_pipeline_runs_completed").on(table.completedAt),
+    index("idx_pipeline_runs_status").on(table.status),
+  ],
+);
+
 // ============================================================
 // Epic 12 — Simulated Portfolio Tables
 // ============================================================
