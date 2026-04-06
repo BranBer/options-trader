@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type MockResponse = { data: unknown };
+type MockResponse = { data: unknown; init?: { status?: number } };
 
-const { mockDb } = vi.hoisted(() => ({
+const {
+  mockDb,
+  mockRecordShadowPolicyFeedback,
+  mockGetRecentShadowPolicyReview,
+} = vi.hoisted(() => ({
   mockDb: {
     select: vi.fn(),
   },
+  mockRecordShadowPolicyFeedback: vi.fn(),
+  mockGetRecentShadowPolicyReview: vi.fn(),
 }));
 
 vi.mock("@/lib/db/client", () => ({
@@ -16,13 +22,21 @@ vi.mock("@/lib/cron/scheduler", () => ({
   getLastRefreshAt: vi.fn(() => "2026-04-02T12:10:00.000Z"),
 }));
 
+vi.mock("@/lib/analytics/shadow-policy-store", () => ({
+  recordShadowPolicyFeedback: mockRecordShadowPolicyFeedback,
+  getRecentShadowPolicyReview: mockGetRecentShadowPolicyReview,
+}));
+
 vi.mock("next/server", () => ({
   NextResponse: {
-    json: vi.fn((data: unknown) => ({ data })),
+    json: vi.fn((data: unknown, init?: { status?: number }) => ({
+      data,
+      init,
+    })),
   },
 }));
 
-import { GET } from "@/app/api/portfolio/route";
+import { GET, POST } from "@/app/api/portfolio/route";
 
 function createChain(result: unknown) {
   return {
@@ -242,6 +256,20 @@ function seedLearningQueries() {
 describe("GET /api/portfolio learning insights", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetRecentShadowPolicyReview.mockResolvedValue({
+      decisions: [],
+      summary: {
+        totalLoggedDecisions: 0,
+        recommendEnterCount: 0,
+        disagreeCount: 0,
+        agreementRatePct: 0,
+        feedbackCount: 0,
+        usefulCount: 0,
+        misleadingCount: 0,
+        needsReviewCount: 0,
+        lastLoggedAt: null,
+      },
+    });
   });
 
   it("returns a learning readiness scorecard", async () => {
@@ -348,5 +376,48 @@ describe("GET /api/portfolio learning insights", () => {
       data.promotionGates.currentMode,
     );
     expect(data.promotionGates.checklist.length).toBeGreaterThan(0);
+  });
+});
+
+describe("POST /api/portfolio shadow feedback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("persists shadow recommendation feedback", async () => {
+    const req = {
+      nextUrl: new URL("http://localhost/api/portfolio?view=shadow-feedback"),
+      json: vi.fn().mockResolvedValue({
+        shadowDecisionId: 42,
+        verdict: "useful",
+        notes: "Aligned with the later price follow-through.",
+      }),
+    };
+
+    const response = await POST(req as unknown as Parameters<typeof POST>[0]);
+    const data = (response as MockResponse).data as { ok: boolean };
+
+    expect(mockRecordShadowPolicyFeedback).toHaveBeenCalledWith({
+      shadowDecisionId: 42,
+      verdict: "useful",
+      notes: "Aligned with the later price follow-through.",
+    });
+    expect(data.ok).toBe(true);
+  });
+
+  it("rejects invalid shadow feedback payloads", async () => {
+    const req = {
+      nextUrl: new URL("http://localhost/api/portfolio?view=shadow-feedback"),
+      json: vi.fn().mockResolvedValue({ verdict: "useful" }),
+    };
+
+    const response = await POST(req as unknown as Parameters<typeof POST>[0]);
+    const payload = (response as MockResponse).data as { error: string };
+
+    expect(mockRecordShadowPolicyFeedback).not.toHaveBeenCalled();
+    expect(payload.error).toContain(
+      "shadowDecisionId and verdict are required",
+    );
+    expect((response as MockResponse).init?.status).toBe(400);
   });
 });

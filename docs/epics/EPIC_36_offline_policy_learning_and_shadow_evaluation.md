@@ -15,7 +15,7 @@ This epic is the sensible next step after data readiness, not before it. The goa
 
 This epic treats learning as an assistive layer first, and only later as a candidate decision-maker.
 
-## Progress Update (2026-04-02)
+## Progress Update (2026-04-03)
 
 - ✅ Story 36.1 started: the portfolio API now compares the current enter-policy against deterministic offline baseline selectors on the materialized learning corpus
 - ✅ Story 36.1 inspected: the portfolio learning tab now shows baseline-level acceptance rate, reward, and win-rate comparisons for quick operator review
@@ -25,6 +25,7 @@ This epic treats learning as an assistive layer first, and only later as a candi
 - ✅ Story 36.3 started: the simulation pipeline now logs empirical shadow-policy recommendations alongside current decisions without affecting execution
 - ✅ Story 36.4 started: the portfolio learning tab now shows recent shadow decisions, disagreement review, and operator feedback capture
 - ✅ Story 36.5 started: promotion gates now summarize readiness, replay support, shadow evidence, rollback triggers, and deployment modes
+- ✅ Validation updated: focused Epic 35/36 analytics and portfolio API tests are green after tightening shadow-policy guardrails and promotion gating behavior
 
 ---
 
@@ -92,14 +93,14 @@ Generate policy recommendations in parallel with the current system without affe
 
 ### Acceptance Criteria
 
-- [ ] Shadow policy never changes live simulated execution
-- [ ] Disagreements are visible and attributable in diagnostics
-- [ ] Shadow output is persisted for audit and review
+- [x] Shadow policy never changes live simulated execution
+- [x] Disagreements are visible and attributable in diagnostics
+- [x] Shadow output is persisted for audit and review
 
 ### Testing Plan
 
 - [ ] Shadow logging tests
-- [ ] Non-interference tests
+- [x] Non-interference tests
 - [ ] UI/API comparison tests
 
 ---
@@ -118,14 +119,14 @@ Expose the learned policy as a decision-support signal for sprint review and tun
 
 ### Acceptance Criteria
 
-- [ ] Operators can compare policy disagreement without reading raw training outputs
-- [ ] Learned recommendations are reviewable enough to support trust decisions
-- [ ] Feedback can be captured for future model evaluation
+- [x] Operators can compare policy disagreement without reading raw training outputs
+- [x] Learned recommendations are reviewable enough to support trust decisions
+- [x] Feedback can be captured for future model evaluation
 
 ### Testing Plan
 
 - [ ] Comparison-view tests
-- [ ] Feedback-capture tests
+- [x] Feedback-capture tests
 
 ---
 
@@ -143,14 +144,14 @@ Set strict criteria for when a learned policy may influence simulated execution.
 
 ### Acceptance Criteria
 
-- [ ] Promotion requires evidence across multiple evaluation windows
-- [ ] Rollback triggers are defined before any advisory or live use
-- [ ] Deployment modes are explicit and auditable
+- [x] Promotion requires evidence across multiple evaluation windows
+- [x] Rollback triggers are defined before any advisory or live use
+- [x] Deployment modes are explicit and auditable
 
 ### Testing Plan
 
 - [ ] Checklist/schema validation tests
-- [ ] Mode-gating tests
+- [x] Mode-gating tests
 
 ---
 

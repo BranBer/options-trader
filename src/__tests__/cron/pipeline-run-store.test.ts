@@ -23,6 +23,7 @@ vi.mock("@/lib/db/client", () => ({
 }));
 
 import {
+  getLatestPipelineRun,
   getLastCompletedPipelineRefreshAt,
   recordPipelineRunCompletion,
   recordPipelineRunStart,
@@ -67,5 +68,25 @@ describe("pipeline-run-store", () => {
     expect(getLastCompletedPipelineRefreshAt()).toBe(
       "2026-04-03T00:24:00.000Z",
     );
+  });
+
+  it("returns the latest pipeline run row from storage", () => {
+    mockGet.mockReturnValue({
+      id: 15,
+      trigger: "startup",
+      status: "running",
+      startedAt: "2026-04-06T13:07:51.832Z",
+      completedAt: null,
+      errorMessage: null,
+    });
+
+    expect(getLatestPipelineRun()).toEqual({
+      id: 15,
+      trigger: "startup",
+      status: "running",
+      startedAt: "2026-04-06T13:07:51.832Z",
+      completedAt: null,
+      errorMessage: null,
+    });
   });
 });

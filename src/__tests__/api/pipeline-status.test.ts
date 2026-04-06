@@ -17,6 +17,14 @@ vi.mock("@/lib/cron/scheduler", () => ({
   getLastRefreshAt: vi.fn(() => "2026-03-29T12:30:00Z"),
 }));
 
+const { mockGetLatestPipelineRun } = vi.hoisted(() => ({
+  mockGetLatestPipelineRun: vi.fn(() => null),
+}));
+
+vi.mock("@/lib/cron/pipeline-run-store", () => ({
+  getLatestPipelineRun: mockGetLatestPipelineRun,
+}));
+
 vi.mock("@/lib/cron/exit-monitor", () => ({
   getExitMonitorStatus: vi.fn(() => ({
     lastRunAt: "2026-03-29T12:25:00Z",
@@ -59,6 +67,11 @@ vi.mock("next/server", () => ({
 import { GET } from "@/app/api/pipeline-status/route";
 
 describe("GET /api/pipeline-status", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetLatestPipelineRun.mockReturnValue(null);
+  });
+
   it("returns pipeline progress fields", async () => {
     const response = await GET();
     const data = (response as any).data;
@@ -97,5 +110,22 @@ describe("GET /api/pipeline-status", () => {
     expect(data.pipelineHealth).toHaveProperty("isStale");
     expect(data.pipelineHealth).toHaveProperty("minutesSinceRefresh");
     expect(data.pipelineHealth).toHaveProperty("status");
+  });
+
+  it("reports running when a recent persisted pipeline run is still open", async () => {
+    mockGetLatestPipelineRun.mockReturnValue({
+      id: 15,
+      trigger: "startup",
+      status: "running",
+      startedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      completedAt: null,
+      errorMessage: null,
+    });
+
+    const response = await GET();
+    const data = (response as any).data;
+
+    expect(data.persistedRun?.status).toBe("running");
+    expect(data.pipelineHealth.status).toBe("running");
   });
 });

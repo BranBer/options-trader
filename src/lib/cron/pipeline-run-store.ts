@@ -3,6 +3,15 @@ import { sqlite } from "@/lib/db/client";
 export type PipelineRunTrigger = "manual" | "schedule" | "startup";
 export type PipelineRunStatus = "running" | "ok" | "partial";
 
+export interface PipelineRunRecord {
+  id: number;
+  trigger: PipelineRunTrigger;
+  status: PipelineRunStatus;
+  startedAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
 export function recordPipelineRunStart(trigger: PipelineRunTrigger): number {
   const startedAt = new Date().toISOString();
   const result = sqlite
@@ -51,4 +60,22 @@ export function getLastCompletedPipelineRefreshAt(): string | null {
     .get() as { completedAt?: string | null } | undefined;
 
   return row?.completedAt ?? null;
+}
+
+export function getLatestPipelineRun(): PipelineRunRecord | null {
+  const row = sqlite
+    .prepare(
+      `SELECT id,
+              trigger,
+              status,
+              started_at AS startedAt,
+              completed_at AS completedAt,
+              error_message AS errorMessage
+       FROM pipeline_runs
+       ORDER BY id DESC
+       LIMIT 1`,
+    )
+    .get() as PipelineRunRecord | undefined;
+
+  return row ?? null;
 }
