@@ -276,4 +276,41 @@ describe("buildLearningRecords", () => {
     );
     expect(csv).toContain("alert-101");
   });
+
+  it("builds observation-only event ticker records without forcing rewards", () => {
+    const records = buildLearningRecords({
+      whales: [],
+      evaluations: [],
+      trades: [],
+      analyses: [],
+      eventSignals: [
+        {
+          id: "event-77-NVDA",
+          eventId: 77,
+          ticker: "NVDA",
+          detectedAt: "2026-04-06T12:00:00.000Z",
+          sentiment: "bullish",
+          impactScore: 9,
+          analysis: createAnalysis({
+            id: 177,
+            inputRefs: { eventId: 77, ticker: "NVDA" },
+            output: {
+              ...createAnalysis().output,
+              ticker: "NVDA",
+              deepDive: {
+                market_narrative: "Event-driven momentum remains constructive.",
+                risk_assessment: { overall_risk: "moderate" },
+              },
+            },
+          }),
+        },
+      ],
+      startingBalance: 30000,
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0].state.alert.signalSource).toBe("event_ticker");
+    expect(records[0].reward.status).toBe("not_applicable");
+    expect(records[0].metadata.sourceRefs.primaryWhaleId).toBeNull();
+  });
 });

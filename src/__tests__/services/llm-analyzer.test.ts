@@ -893,6 +893,28 @@ describe("generateDeepDive", () => {
     expect(result.technical_patterns[0].timeframe).toBe("3M");
   });
 
+  it("normalizes support/resistance strength labels when the model drifts off enum", async () => {
+    mockLLMResponse(
+      {
+        ...VALID_DEEP_DIVE_RESPONSE,
+        support_resistance: [
+          ...VALID_DEEP_DIVE_RESPONSE.support_resistance,
+          {
+            level: 205,
+            type: "resistance",
+            strength: "major",
+            note: "Repeated rejection near prior breakout area",
+          },
+        ],
+      },
+      3000,
+    );
+
+    const result = await generateDeepDive(mockInput);
+
+    expect(result.support_resistance[2].strength).toBe("strong");
+  });
+
   it("normalizes timeframe-specific deep dive patterns into the aggregate field", async () => {
     mockLLMResponse(
       {

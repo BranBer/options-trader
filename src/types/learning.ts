@@ -29,6 +29,13 @@ export const learningRewardStatusEnum = z.enum([
 ]);
 export type LearningRewardStatus = z.infer<typeof learningRewardStatusEnum>;
 
+export const learningSignalSourceEnum = z.enum([
+  "whale",
+  "event_ticker",
+  "correlation",
+]);
+export type LearningSignalSource = z.infer<typeof learningSignalSourceEnum>;
+
 export const learningOutcomeEnum = z.enum([
   "entered",
   "rejected",
@@ -40,6 +47,7 @@ export const learningAlertStateSchema = z.object({
   alertId: z.number().int().nullable(),
   ticker: z.string(),
   detectedAt: z.string(),
+  signalSource: learningSignalSourceEnum.nullable().optional(),
   callPut: z.enum(["C", "P"]).nullable(),
   strike: z.number().nullable(),
   expiry: z.string().nullable(),

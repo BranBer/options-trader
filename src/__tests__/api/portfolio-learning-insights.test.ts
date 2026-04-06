@@ -242,6 +242,9 @@ function seedLearningQueries() {
       })),
     })
     .mockReturnValueOnce({
+      from: vi.fn(() => createChain([])),
+    })
+    .mockReturnValueOnce({
       from: vi.fn(() => ({
         limit: vi.fn().mockResolvedValue([
           {

@@ -2,7 +2,8 @@ import { fetchAllNews } from "@/lib/services/news-fetcher";
 import { classifyNews } from "@/lib/services/llm-analyzer";
 import { db } from "@/lib/db/client";
 import { newsEvents } from "@/lib/db/schema";
-import { inArray } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
+import { autoTriggerEventAnalysis } from "@/lib/services/event-ticker-analyzer";
 import type { RawNewsArticle } from "@/types/news";
 
 /**
@@ -85,12 +86,40 @@ export async function classifyAndStoreNews(
   }
 
   let stored = 0;
+  const insertedEvents = [];
   for (const row of rows) {
     try {
       await db.insert(newsEvents).values(row);
       stored++;
+
+      const [inserted] = await db
+        .select()
+        .from(newsEvents)
+        .where(
+          row.url
+            ? eq(newsEvents.url, row.url)
+            : eq(newsEvents.headline, row.headline),
+        )
+        .orderBy(desc(newsEvents.id))
+        .limit(1);
+      if (inserted) {
+        insertedEvents.push(inserted);
+      }
     } catch (error) {
       console.warn(`[NewsPipeline] Failed to insert: ${row.headline}`, error);
+    }
+  }
+
+  if (insertedEvents.length > 0) {
+    try {
+      const triggered = await autoTriggerEventAnalysis(insertedEvents);
+      if (triggered > 0) {
+        console.log(
+          `[NewsPipeline] Auto-triggered event-ticker analysis for ${triggered} event(s)`,
+        );
+      }
+    } catch (error) {
+      console.warn("[NewsPipeline] Event auto-trigger failed", error);
     }
   }
 

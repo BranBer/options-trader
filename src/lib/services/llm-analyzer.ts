@@ -242,6 +242,7 @@ async function callLLMWithRetry<T>(
     temperature?: number;
     maxOutputTokens?: number;
     maxRetries?: number;
+    preprocessParsedJson?: (data: unknown) => unknown;
   } = {},
 ): Promise<T> {
   const {
@@ -250,6 +251,7 @@ async function callLLMWithRetry<T>(
     temperature = 0.1,
     maxOutputTokens = 8192,
     maxRetries = 3,
+    preprocessParsedJson,
   } = options;
 
   const openai = getClient();
@@ -323,7 +325,9 @@ async function callLLMWithRetry<T>(
       }
 
       const jsonText = extractJson(rawText);
-      const parsed = JSON.parse(jsonText);
+      const parsed = preprocessParsedJson
+        ? preprocessParsedJson(JSON.parse(jsonText))
+        : JSON.parse(jsonText);
       return zodSchema.parse(parsed);
     } catch (error) {
       if (
@@ -888,6 +892,62 @@ function normalizeDeepDivePatterns(
   };
 }
 
+function normalizeSupportResistanceStrength(
+  value: unknown,
+): "weak" | "moderate" | "strong" {
+  if (typeof value !== "string") {
+    return "moderate";
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (["weak", "minor", "light", "soft", "low"].includes(normalized)) {
+    return "weak";
+  }
+
+  if (
+    [
+      "strong",
+      "major",
+      "key",
+      "significant",
+      "high",
+      "very_strong",
+      "critical",
+    ].includes(normalized)
+  ) {
+    return "strong";
+  }
+
+  return "moderate";
+}
+
+function sanitizeDeepDiveResponse(data: unknown): unknown {
+  if (!data || typeof data !== "object") {
+    return data;
+  }
+
+  const candidate = structuredClone(data) as Record<string, unknown>;
+  if (!Array.isArray(candidate.support_resistance)) {
+    return candidate;
+  }
+
+  candidate.support_resistance = candidate.support_resistance.map((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return entry;
+    }
+
+    const level = { ...(entry as Record<string, unknown>) };
+    level.strength = normalizeSupportResistanceStrength(level.strength);
+    return level;
+  });
+
+  return candidate;
+}
+
 export async function generateDeepDive(
   input: DeepDiveInput,
 ): Promise<DeepDiveAnalysis> {
@@ -969,6 +1029,7 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
       callType: "deepDive",
       temperature: 0.25,
       maxOutputTokens: 16384,
+      preprocessParsedJson: sanitizeDeepDiveResponse,
     },
   );
   const normalized = normalizeDeepDivePatterns(

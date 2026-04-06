@@ -167,8 +167,71 @@ describe("buildLearningReadinessScorecard", () => {
 
     expect(scorecard.status).toBe("limited_offline_tuning");
     expect(scorecard.metrics.totalRecords).toBe(60);
+    expect(scorecard.metrics.whaleSignalCount).toBe(60);
     expect(scorecard.metrics.computedRewardCoveragePct).toBeGreaterThanOrEqual(
       45,
     );
+  });
+
+  it("segments event ticker records separately in readiness metrics", () => {
+    const scorecard = buildLearningReadinessScorecard(
+      buildLearningRecords({
+        whales: [],
+        evaluations: [],
+        trades: [],
+        analyses: [],
+        eventSignals: [
+          {
+            id: "event-1-NVDA",
+            eventId: 1,
+            ticker: "NVDA",
+            detectedAt: "2026-04-06T12:00:00.000Z",
+            sentiment: "bullish",
+            impactScore: 8,
+            analysis: {
+              id: 5001,
+              type: "event_ticker_analysis",
+              inputRefs: { eventId: 1, ticker: "NVDA" },
+              output: {
+                ticker: "NVDA",
+                direction: "bullish",
+                confidence: 0.7,
+                primary_strategy: {
+                  name: "Bull Call Spread",
+                  legs: [],
+                  max_profit: "$100",
+                  max_loss: "$50",
+                  breakeven: "$123",
+                  risk_reward_ratio: "1:2",
+                },
+                market_context: {
+                  iv_assessment: "normal",
+                  iv_strategy_note: "ok",
+                  volume_assessment: "normal",
+                },
+                risk_factors: [],
+                whale_alignment: {
+                  matches_whale: false,
+                  whale_position_size: "$0",
+                  similarity_note: "event only",
+                },
+                disclaimer: "paper trade only",
+                deepDive: {
+                  market_narrative: "Event narrative",
+                  risk_assessment: { overall_risk: "moderate" },
+                },
+              },
+              confidence: 0.7,
+              confidenceBreakdown: { composite: 0.68 },
+              createdAt: "2026-04-06T12:00:00.000Z",
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(scorecard.metrics.totalRecords).toBe(1);
+    expect(scorecard.metrics.eventTickerSignalCount).toBe(1);
+    expect(scorecard.metrics.whaleSignalCount).toBe(0);
   });
 });

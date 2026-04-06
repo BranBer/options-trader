@@ -9,6 +9,7 @@ import {
 import { desc, inArray } from "drizzle-orm";
 import {
   buildLearningRecords,
+  type LearningEventSignal,
   type LearningRecordAnalysis,
   type LearningRecordEvaluation,
   type LearningRecordTrade,
@@ -149,6 +150,109 @@ export async function loadLearningDataset(limit: number) {
       }))
     : [];
 
+  let rawEventAnalysisRows: Array<{
+    id: number;
+    type: string | null;
+    source: string | null;
+    output: string | null;
+    confidence: number | null;
+    confidenceBreakdown: string | null;
+    createdAt: string | null;
+  }> = [];
+
+  try {
+    const query = db
+      .select({
+        id: analyses.id,
+        type: analyses.type,
+        source: analyses.source,
+        output: analyses.output,
+        confidence: analyses.confidence,
+        confidenceBreakdown: analyses.confidenceBreakdown,
+        createdAt: analyses.createdAt,
+      })
+      .from(analyses) as {
+      orderBy?: (...args: unknown[]) => {
+        limit?: (n: number) => Promise<typeof rawEventAnalysisRows>;
+      };
+      limit?: (n: number) => Promise<typeof rawEventAnalysisRows>;
+    };
+
+    if (query.orderBy) {
+      rawEventAnalysisRows = await query.orderBy(desc(analyses.createdAt))
+        .limit!(limit * 3);
+    } else if (query.limit) {
+      rawEventAnalysisRows = await query.limit(limit * 3);
+    }
+  } catch {
+    rawEventAnalysisRows = [];
+  }
+
+  const eventAnalysisRows: LearningEventSignal[] = rawEventAnalysisRows
+    .filter((analysis) => analysis.type === "event_ticker_analysis")
+    .filter((analysis) => analysis.source === "event_ticker" && analysis.output)
+    .flatMap((analysis) => {
+      const parsed = parseJsonObject(analysis.output ?? undefined);
+      const eventContext =
+        parsed.eventContext && typeof parsed.eventContext === "object"
+          ? (parsed.eventContext as Record<string, unknown>)
+          : {};
+      const recommendation =
+        parsed.recommendation && typeof parsed.recommendation === "object"
+          ? (parsed.recommendation as Record<string, unknown>)
+          : null;
+      const deepDive =
+        parsed.deepDive && typeof parsed.deepDive === "object"
+          ? (parsed.deepDive as Record<string, unknown>)
+          : null;
+      const ticker = typeof parsed.ticker === "string" ? parsed.ticker : null;
+      const eventId =
+        typeof parsed.eventId === "number"
+          ? parsed.eventId
+          : typeof parsed.eventId === "string"
+            ? Number(parsed.eventId)
+            : NaN;
+
+      if (!ticker || Number.isNaN(eventId)) {
+        return [];
+      }
+
+      return [
+        {
+          id: `event-${eventId}-${ticker}`,
+          eventId,
+          ticker,
+          detectedAt: analysis.createdAt ?? new Date().toISOString(),
+          sentiment:
+            typeof eventContext.sentiment === "string"
+              ? eventContext.sentiment
+              : null,
+          impactScore:
+            typeof eventContext.impactScore === "number"
+              ? eventContext.impactScore
+              : null,
+          analysis: {
+            id: analysis.id,
+            type: analysis.type,
+            inputRefs: {
+              eventId,
+              ticker,
+            },
+            output: {
+              ...parsed,
+              recommendation,
+              deepDive,
+            },
+            confidence: analysis.confidence,
+            confidenceBreakdown: analysis.confidenceBreakdown
+              ? parseJsonObject(analysis.confidenceBreakdown)
+              : null,
+            createdAt: analysis.createdAt,
+          },
+        },
+      ];
+    });
+
   const [portfolio] = await db.select().from(simPortfolio).limit(1);
 
   const analysisRefMap = new Map<number, Record<string, unknown>>(
@@ -173,6 +277,7 @@ export async function loadLearningDataset(limit: number) {
     }),
     trades: tradeRows,
     analyses: analysisRows,
+    eventSignals: eventAnalysisRows,
     startingBalance:
       portfolio?.startingBalance ?? DEFAULT_SIM_PORTFOLIO_BALANCE,
   });

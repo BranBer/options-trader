@@ -58,5 +58,20 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_policy_shadow_feedback_decision ON policy_shadow_feedback (shadow_decision_id);
 `);
 
+const analysisColumns = sqlite
+  .prepare("PRAGMA table_info(analyses)")
+  .all() as Array<{ name: string }>;
+
+if (analysisColumns.some((column) => column.name === "source")) {
+  sqlite.exec(
+    "CREATE INDEX IF NOT EXISTS idx_analyses_source_created ON analyses (source, created_at);",
+  );
+} else if (analysisColumns.length > 0) {
+  sqlite.exec(`
+    ALTER TABLE analyses ADD COLUMN source text;
+    CREATE INDEX IF NOT EXISTS idx_analyses_source_created ON analyses (source, created_at);
+  `);
+}
+
 export const db = drizzle(sqlite, { schema });
 export { sqlite };

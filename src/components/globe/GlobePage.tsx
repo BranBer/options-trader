@@ -3,10 +3,35 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useNews, type NewsEvent } from "@/hooks/useApiData";
+import EventTickerAnalysisPanel from "@/components/globe/EventTickerAnalysis";
 import { timeAgo } from "@/lib/utils/formatters";
+import type { EventTickerAnalysis } from "@/types/analysis";
+
+type AnalysisState = {
+  status: "idle" | "loading" | "done" | "error";
+  cached: boolean;
+  error?: string;
+};
+
+type EventTickerResponse = {
+  analyses: EventTickerAnalysis[];
+  cached: boolean;
+  error?: string;
+};
+
+type AnalyzedEventsResponse = {
+  analyzedEventIds: number[];
+  recentAnalyses: Array<{
+    eventId: number;
+    headline: string;
+    tickers: string[];
+    createdAt: string | null;
+  }>;
+};
 
 function impactColor(score: number): string {
   if (score >= 8) return "#22d3ee";
@@ -60,6 +85,16 @@ function parseStringArray(input: string | null | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+function getAnalyzableTickers(event: NewsEvent): string[] {
+  return [
+    ...new Set(
+      parseStringArray(event.tickers)
+        .map((ticker) => ticker.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ].slice(0, 5);
 }
 
 type ClusterPoint = {
@@ -169,6 +204,18 @@ export default function GlobePage() {
   const [collapsedClusters, setCollapsedClusters] = useState<Set<string>>(
     new Set(),
   );
+  const [eventAnalyses, setEventAnalyses] = useState<
+    Record<number, EventTickerAnalysis[]>
+  >({});
+  const [analysisStateByEvent, setAnalysisStateByEvent] = useState<
+    Record<number, AnalysisState>
+  >({});
+  const [analyzedEventIds, setAnalyzedEventIds] = useState<Set<number>>(
+    new Set(),
+  );
+  const [recentAnalyses, setRecentAnalyses] = useState<
+    AnalyzedEventsResponse["recentAnalyses"]
+  >([]);
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const globeInstanceRef = useRef<any>(null);
@@ -215,8 +262,12 @@ export default function GlobePage() {
         points.push({
           lat: coords.lat,
           lng: coords.lng,
-          size: Math.max(0.45, ((event.impactScore ?? 1) / 10) * 1.5),
-          color: impactColor(event.impactScore ?? 1),
+          size:
+            Math.max(0.45, ((event.impactScore ?? 1) / 10) * 1.5) +
+            (analyzedEventIds.has(event.id) ? 0.15 : 0),
+          color: analyzedEventIds.has(event.id)
+            ? "#f59e0b"
+            : impactColor(event.impactScore ?? 1),
           isCluster: false as const,
           clusterKey: key,
           clustered: false,
@@ -226,11 +277,14 @@ export default function GlobePage() {
         const maxImpact = Math.max(
           ...entries.map((x) => x.event.impactScore ?? 1),
         );
+        const hasAnalyzedEvent = entries.some((entry) =>
+          analyzedEventIds.has(entry.event.id),
+        );
         points.push({
           lat: centLat,
           lng: centLng,
-          size: Math.max(0.8, 0.4 + N * 0.15),
-          color: impactColor(maxImpact),
+          size: Math.max(0.8, 0.4 + N * 0.15) + (hasAnalyzedEvent ? 0.15 : 0),
+          color: hasAnalyzedEvent ? "#f59e0b" : impactColor(maxImpact),
           isCluster: true as const,
           clusterKey: key,
           count: N,
@@ -247,11 +301,12 @@ export default function GlobePage() {
         const packed = packCircles(radii);
         const cosLat = Math.cos((centLat * Math.PI) / 180);
         sorted.forEach(({ event }, i) => {
+          const isAnalyzed = analyzedEventIds.has(event.id);
           points.push({
             lat: centLat + packed[i].y,
             lng: centLng + packed[i].x / cosLat,
-            size: radii[i],
-            color: impactColor(event.impactScore ?? 1),
+            size: radii[i] + (isAnalyzed ? 0.15 : 0),
+            color: isAnalyzed ? "#f59e0b" : impactColor(event.impactScore ?? 1),
             isCluster: false as const,
             clusterKey: key,
             clustered: true,
@@ -262,7 +317,171 @@ export default function GlobePage() {
     }
 
     return points;
-  }, [events, collapsedClusters]);
+  }, [analyzedEventIds, events, collapsedClusters]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadAnalyzedEvents = async () => {
+      try {
+        const response = await fetch(
+          "/api/analysis/event-tickers/analyzed-events",
+        );
+        if (!response.ok) return;
+        const payload = (await response.json()) as AnalyzedEventsResponse;
+        if (!active) return;
+        setAnalyzedEventIds(new Set(payload.analyzedEventIds));
+        setRecentAnalyses(payload.recentAnalyses);
+      } catch {
+        // Non-critical UI enhancement
+      }
+    };
+
+    const ensureHighImpactAnalyses = async () => {
+      try {
+        await fetch("/api/analysis/event-tickers/high-impact", {
+          method: "POST",
+        });
+        await loadAnalyzedEvents();
+      } catch {
+        // Best-effort backfill only
+      }
+    };
+
+    void loadAnalyzedEvents();
+    void ensureHighImpactAnalyses();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectedEventAnalysis = selectedEvent
+    ? eventAnalyses[selectedEvent.id]
+    : null;
+  const selectedAnalysisState = selectedEvent
+    ? (analysisStateByEvent[selectedEvent.id] ?? {
+        status: "idle",
+        cached: false,
+      })
+    : { status: "idle", cached: false };
+
+  useEffect(() => {
+    if (!selectedEvent) return;
+
+    const tickers = getAnalyzableTickers(selectedEvent);
+    if (tickers.length === 0) return;
+    if (eventAnalyses[selectedEvent.id]?.length) return;
+    if (analysisStateByEvent[selectedEvent.id]?.status === "loading") return;
+
+    const controller = new AbortController();
+
+    const loadCachedAnalysis = async () => {
+      try {
+        const response = await fetch(
+          `/api/analysis/event-tickers?eventId=${selectedEvent.id}`,
+          {
+            signal: controller.signal,
+          },
+        );
+        if (!response.ok) return;
+
+        const payload = (await response.json()) as EventTickerResponse;
+        if (payload.analyses.length === 0) return;
+
+        setEventAnalyses((current) => ({
+          ...current,
+          [selectedEvent.id]: payload.analyses,
+        }));
+        setAnalysisStateByEvent((current) => ({
+          ...current,
+          [selectedEvent.id]: { status: "done", cached: payload.cached },
+        }));
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+      }
+    };
+
+    void loadCachedAnalysis();
+
+    return () => controller.abort();
+  }, [analysisStateByEvent, eventAnalyses, selectedEvent]);
+
+  async function handleAnalyzeEvent(event: NewsEvent) {
+    const tickers = getAnalyzableTickers(event);
+    if (tickers.length === 0) return;
+
+    const sentiment =
+      event.sentiment === "bullish" ||
+      event.sentiment === "bearish" ||
+      event.sentiment === "neutral"
+        ? event.sentiment
+        : "neutral";
+
+    setAnalysisStateByEvent((current) => ({
+      ...current,
+      [event.id]: { status: "loading", cached: false },
+    }));
+
+    try {
+      const response = await fetch("/api/analysis/event-tickers", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          eventId: event.id,
+          tickers,
+          eventContext: {
+            headline: event.headline,
+            summary: event.rawSummary ?? undefined,
+            sentiment,
+            impactScore: event.impactScore ?? 1,
+            eventType: event.eventType ?? undefined,
+            sectors: parseStringArray(event.sectors),
+          },
+        }),
+      });
+
+      const payload = (await response.json()) as EventTickerResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Event analysis failed");
+      }
+
+      setEventAnalyses((current) => ({
+        ...current,
+        [event.id]: payload.analyses,
+      }));
+      setAnalyzedEventIds((current) => new Set(current).add(event.id));
+      setRecentAnalyses((current) => {
+        const next = [
+          {
+            eventId: event.id,
+            headline: event.headline,
+            tickers,
+            createdAt: new Date().toISOString(),
+          },
+          ...current.filter((entry) => entry.eventId !== event.id),
+        ];
+        return next.slice(0, 5);
+      });
+      setAnalysisStateByEvent((current) => ({
+        ...current,
+        [event.id]: { status: "done", cached: payload.cached },
+      }));
+    } catch (error) {
+      setAnalysisStateByEvent((current) => ({
+        ...current,
+        [event.id]: {
+          status: "error",
+          cached: false,
+          error:
+            error instanceof Error ? error.message : "Event analysis failed",
+        },
+      }));
+    }
+  }
 
   // Single init: fetch GeoJSON + globe.gl in parallel, then construct
   // globe with polygon data + style in ONE chain (official example pattern).
@@ -482,14 +701,31 @@ export default function GlobePage() {
                 <EventDetail
                   event={selectedEvent}
                   onBack={() => setSelectedEvent(null)}
+                  analysisState={selectedAnalysisState}
+                  hasAnalysis={Boolean(selectedEventAnalysis?.length)}
+                  onAnalyze={handleAnalyzeEvent}
                 />
               ) : (
-                <EventsList events={events} onSelect={setSelectedEvent} />
+                <EventsList
+                  events={events}
+                  onSelect={setSelectedEvent}
+                  analyzedEventIds={analyzedEventIds}
+                  recentAnalyses={recentAnalyses}
+                />
               )}
             </ScrollArea>
           </CardContent>
         </Card>
       </div>
+
+      {selectedEvent &&
+        selectedEventAnalysis &&
+        selectedEventAnalysis.length > 0 && (
+          <EventTickerAnalysisPanel
+            analyses={selectedEventAnalysis}
+            eventHeadline={selectedEvent.headline}
+          />
+        )}
 
       {/* Legend */}
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -514,12 +750,19 @@ export default function GlobePage() {
 function EventDetail({
   event,
   onBack,
+  onAnalyze,
+  analysisState,
+  hasAnalysis,
 }: {
   event: NewsEvent;
   onBack: () => void;
+  onAnalyze: (event: NewsEvent) => Promise<void>;
+  analysisState: AnalysisState;
+  hasAnalysis: boolean;
 }) {
   const sectors = parseStringArray(event.sectors);
-  const tickers = parseStringArray(event.tickers);
+  const allTickers = parseStringArray(event.tickers);
+  const tickers = getAnalyzableTickers(event);
 
   return (
     <div className="space-y-3 pr-3">
@@ -562,13 +805,51 @@ function EventDetail({
 
       {tickers.length > 0 && (
         <div>
-          <p className="text-xs text-muted-foreground mb-1">Tickers</p>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">Tickers</p>
+            {hasAnalysis && (
+              <Badge
+                variant="outline"
+                className="text-[10px] uppercase tracking-wide"
+              >
+                {analysisState.cached ? "Cached" : "Ready"}
+              </Badge>
+            )}
+          </div>
           <div className="flex flex-wrap gap-1">
             {tickers.map((t) => (
               <Badge key={t} variant="secondary" className="text-xs font-mono">
                 {t}
               </Badge>
             ))}
+          </div>
+          <div className="mt-3 space-y-2">
+            <Button
+              onClick={() => void onAnalyze(event)}
+              disabled={analysisState.status === "loading" || hasAnalysis}
+              size="sm"
+              className="w-full"
+            >
+              {analysisState.status === "loading"
+                ? `Analyzing ${tickers.length} ticker${tickers.length === 1 ? "" : "s"}...`
+                : hasAnalysis
+                  ? "Analysis Loaded"
+                  : "Analyze Tickers"}
+            </Button>
+            {allTickers.length > tickers.length && (
+              <p className="text-xs text-muted-foreground">
+                Analyzing the first {tickers.length} affected tickers for this
+                event.
+              </p>
+            )}
+            {analysisState.status === "error" && (
+              <p className="text-xs text-destructive">{analysisState.error}</p>
+            )}
+            {analysisState.status === "done" && hasAnalysis && (
+              <p className="text-xs text-muted-foreground">
+                Scroll down for the event-driven analysis panel.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -609,9 +890,13 @@ function EventDetail({
 function EventsList({
   events,
   onSelect,
+  analyzedEventIds,
+  recentAnalyses,
 }: {
   events: NewsEvent[];
   onSelect: (e: NewsEvent) => void;
+  analyzedEventIds: Set<number>;
+  recentAnalyses: AnalyzedEventsResponse["recentAnalyses"];
 }) {
   if (events.length === 0) {
     return (
@@ -635,9 +920,14 @@ function EventsList({
             <span
               aria-hidden="true"
               className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: impactColor(e.impactScore ?? 1) }}
+              style={{
+                backgroundColor: analyzedEventIds.has(e.id)
+                  ? "#f59e0b"
+                  : impactColor(e.impactScore ?? 1),
+              }}
             />
             <span>{e.impactScore ?? 0}/10</span>
+            {analyzedEventIds.has(e.id) && <span>Analyzed</span>}
             {e.countryCode && <span>{e.countryCode}</span>}
             {e.publishedAt && (
               <span suppressHydrationWarning>{timeAgo(e.publishedAt)}</span>
@@ -645,6 +935,34 @@ function EventsList({
           </div>
         </button>
       ))}
+      {recentAnalyses.length > 0 && (
+        <div className="pt-3">
+          <Separator />
+          <div className="mt-3 space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Recent Analyses
+            </p>
+            {recentAnalyses.map((entry) => (
+              <button
+                key={entry.eventId}
+                onClick={() => {
+                  const event = events.find(
+                    (candidate) => candidate.id === entry.eventId,
+                  );
+                  if (event) onSelect(event);
+                }}
+                className="w-full rounded-md border p-2 text-left text-xs hover:bg-muted/50"
+              >
+                <div className="font-medium line-clamp-2">{entry.headline}</div>
+                <div className="mt-1 text-muted-foreground">
+                  {entry.tickers.join(", ")}
+                  {entry.createdAt ? ` · ${timeAgo(entry.createdAt)}` : ""}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

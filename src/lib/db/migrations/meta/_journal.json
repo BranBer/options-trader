@@ -50,6 +50,13 @@
       "when": 1774968017774,
       "tag": "0006_short_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1775426400000,
+      "tag": "0007_event_ticker_source",
+      "breakpoints": true
     }
   ]
 }

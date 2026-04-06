@@ -72,6 +72,16 @@ export interface LearningRecordAnalysis {
   createdAt: string | null;
 }
 
+export interface LearningEventSignal {
+  id: string;
+  eventId: number;
+  ticker: string;
+  detectedAt: string;
+  sentiment: string | null;
+  impactScore: number | null;
+  analysis: LearningRecordAnalysis;
+}
+
 function parseTimestamp(value: string | null | undefined): number | null {
   if (!value) return null;
   const parsed = Date.parse(value);
@@ -102,6 +112,52 @@ function parseTradeDecisionLegs(
   } catch {
     return null;
   }
+}
+
+function normalizeRecommendationLegs(value: unknown): LearningAction["legs"] {
+  if (!Array.isArray(value)) return null;
+
+  const normalized = value
+    .map((leg) => {
+      if (!leg || typeof leg !== "object") return null;
+      const candidate = leg as Record<string, unknown>;
+      const action =
+        candidate.action === "buy" || candidate.action === "sell"
+          ? candidate.action
+          : null;
+      const type =
+        candidate.type === "call" || candidate.type === "put"
+          ? candidate.type
+          : null;
+      const strike =
+        typeof candidate.strike === "number" ? candidate.strike : null;
+      const expiry =
+        typeof candidate.expiry === "string" ? candidate.expiry : null;
+      const premium =
+        typeof candidate.premium === "number"
+          ? candidate.premium
+          : typeof candidate.estimated_premium === "number"
+            ? candidate.estimated_premium
+            : null;
+      const quantity =
+        typeof candidate.quantity === "number" ? candidate.quantity : 1;
+
+      if (!action || !type || strike == null || !expiry || premium == null) {
+        return null;
+      }
+
+      return {
+        action,
+        type,
+        strike,
+        expiry,
+        premium,
+        quantity,
+      };
+    })
+    .filter((leg): leg is NonNullable<typeof leg> => leg != null);
+
+  return normalized.length > 0 ? normalized : null;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -358,6 +414,24 @@ function computeLearningReward(args: {
 }): LearningRecord["reward"] {
   const { state, action, outcome } = args;
 
+  if (
+    state.alert.signalSource === "event_ticker" &&
+    action.decision === "not_evaluated" &&
+    outcome.finalOutcome === "not_evaluated"
+  ) {
+    return {
+      status: "not_applicable",
+      primaryReward: null,
+      realizedPnl: null,
+      realizedPnlPct: null,
+      drawdownPenalty: null,
+      opportunityCostPenalty: null,
+      notes: [
+        "observation-only event-driven record without an executed decision or trade outcome",
+      ],
+    };
+  }
+
   if (outcome.finalOutcome === "entered" && outcome.tradeStatus === "open") {
     return {
       status: "pending",
@@ -592,6 +666,7 @@ export function buildLearningRecords(args: {
   evaluations: LearningRecordEvaluation[];
   trades: LearningRecordTrade[];
   analyses: LearningRecordAnalysis[];
+  eventSignals?: LearningEventSignal[];
   startingBalance?: number | null;
 }): LearningRecord[] {
   const {
@@ -599,13 +674,14 @@ export function buildLearningRecords(args: {
     evaluations,
     trades,
     analyses,
+    eventSignals = [],
     startingBalance = DEFAULT_SIM_PORTFOLIO_BALANCE,
   } = args;
   const analysisMap = new Map<number, LearningRecordAnalysis>(
     analyses.map((analysis) => [analysis.id, analysis]),
   );
 
-  return whales.map((whale) => {
+  const whaleRecords = whales.map((whale) => {
     const evaluation = findNearestEvaluation(whale, evaluations);
     const trade = findMatchedTrade(whale, trades);
     const analysis =
@@ -647,6 +723,7 @@ export function buildLearningRecords(args: {
         ticker: whale.ticker,
         detectedAt:
           whale.detectedAt ?? whale.createdAt ?? new Date().toISOString(),
+        signalSource: "whale",
         callPut:
           whale.callPut === "C" || whale.callPut === "P" ? whale.callPut : null,
         strike: whale.strike,
@@ -784,4 +861,207 @@ export function buildLearningRecords(args: {
 
     return learningRecordSchema.parse(record);
   });
+
+  const eventRecords = eventSignals.map((signal) => {
+    const evaluation =
+      evaluations.find(
+        (candidate) => candidate.sourceAnalysisId === signal.analysis.id,
+      ) ?? null;
+    const trade =
+      trades.find(
+        (candidate) => candidate.sourceAnalysisId === signal.analysis.id,
+      ) ?? null;
+    const recommendation = parseRecommendationAnalysis(signal.analysis);
+    const compositeConfidence = parseCompositeConfidence(signal.analysis);
+    const decisionTimestamp =
+      trade?.entryDate ?? evaluation?.createdAt ?? signal.detectedAt;
+    const { openTrades, openTickers, counts } = getOpenPositionsAtTimestamp(
+      trades,
+      decisionTimestamp,
+    );
+    const firstLeg = recommendation.strategyName
+      ? (parseTradeDecisionLegs(evaluation?.legs) ??
+        (Array.isArray(signal.analysis.output?.primary_strategy?.legs)
+          ? normalizeRecommendationLegs(
+              signal.analysis.output?.primary_strategy?.legs,
+            )
+          : null))
+      : null;
+    const primaryLeg = firstLeg?.[0] ?? null;
+    const actionDecision = trade
+      ? "enter"
+      : evaluation
+        ? evaluation.shouldEnter
+          ? "enter"
+          : "reject"
+        : "not_evaluated";
+    const finalOutcome = trade
+      ? "entered"
+      : evaluation
+        ? "rejected"
+        : "not_evaluated";
+
+    const state: LearningRecord["state"] = {
+      alert: {
+        alertId: null,
+        ticker: signal.ticker,
+        detectedAt: signal.detectedAt,
+        signalSource: "event_ticker",
+        callPut:
+          primaryLeg?.type === "call"
+            ? "C"
+            : primaryLeg?.type === "put"
+              ? "P"
+              : null,
+        strike:
+          typeof primaryLeg?.strike === "number" ? primaryLeg.strike : null,
+        expiry:
+          typeof primaryLeg?.expiry === "string" ? primaryLeg.expiry : null,
+        premium:
+          typeof primaryLeg?.estimated_premium === "number"
+            ? primaryLeg.estimated_premium
+            : null,
+        volume: null,
+        openInterest: null,
+        underlyingPrice: null,
+        sentiment: signal.sentiment,
+        inferredSentiment: null,
+        sentimentConfidence: null,
+        intentHint: null,
+        qualityScore:
+          signal.impactScore != null
+            ? Math.round(signal.impactScore * 10)
+            : null,
+        delta: null,
+        gamma: null,
+        theta: null,
+        vega: null,
+        impliedVolatility: null,
+        breakEvenPrice: null,
+      },
+      analysis: {
+        sourceAnalysisId: signal.analysis.id,
+        recommendationDirection: recommendation.recommendationDirection,
+        recommendationConfidence: recommendation.recommendationConfidence,
+        compositeConfidence,
+        whaleQualityScore: null,
+        strategyName: evaluation?.strategyName ?? recommendation.strategyName,
+        riskRewardRatio: recommendation.riskRewardRatio,
+        riskFactors: recommendation.riskFactors,
+        deepDiveRiskLevel:
+          typeof signal.analysis.output?.deepDive === "object" &&
+          signal.analysis.output?.deepDive &&
+          typeof (signal.analysis.output.deepDive as Record<string, unknown>)
+            .risk_assessment === "object" &&
+          (signal.analysis.output.deepDive as Record<string, unknown>)
+            .risk_assessment &&
+          "overall_risk" in
+            ((signal.analysis.output.deepDive as Record<string, unknown>)
+              .risk_assessment as Record<string, unknown>)
+            ? String(
+                ((
+                  (signal.analysis.output.deepDive as Record<string, unknown>)
+                    .risk_assessment as Record<string, unknown>
+                ).overall_risk as string) ?? "",
+              ) || null
+            : null,
+        marketNarrative:
+          typeof signal.analysis.output?.deepDive === "object" &&
+          signal.analysis.output?.deepDive &&
+          typeof (signal.analysis.output.deepDive as Record<string, unknown>)
+            .market_narrative === "string"
+            ? ((signal.analysis.output.deepDive as Record<string, unknown>)
+                .market_narrative as string)
+            : null,
+      },
+      portfolio: {
+        portfolioBalance:
+          evaluation?.portfolioBalance ??
+          startingBalance ??
+          DEFAULT_SIM_PORTFOLIO_BALANCE,
+        startingBalance: startingBalance ?? DEFAULT_SIM_PORTFOLIO_BALANCE,
+        openPositionsCount: openTrades.length,
+        openTickers,
+        openDirectionCounts: counts,
+      },
+    };
+
+    const action: LearningRecord["action"] = {
+      decision: actionDecision,
+      evaluationId: evaluation?.id ?? null,
+      decisionTimestamp: evaluation?.createdAt ?? null,
+      shouldEnter: evaluation?.shouldEnter ?? (trade ? true : null),
+      reasoning: evaluation?.reasoning ?? null,
+      rejectionGate: evaluation?.rejectionGate ?? null,
+      rejectionReason: evaluation?.rejectionReason ?? null,
+      positionSizeDollars: evaluation?.positionSize ?? null,
+      netPremium: evaluation?.netPremium ?? (trade ? trade.entryPrice : null),
+      strategyName: evaluation?.strategyName ?? recommendation.strategyName,
+      legs: parseTradeDecisionLegs(evaluation?.legs) ?? firstLeg,
+    };
+
+    const outcome: LearningRecord["outcome"] = {
+      finalOutcome,
+      tradeId: trade?.id ?? null,
+      tradeStatus: trade?.status ?? null,
+      pnl: trade?.pnl ?? null,
+      pnlPct: trade?.pnlPct ?? null,
+      exitReason:
+        trade?.exitReason === null ||
+        trade?.exitReason === "profit_target" ||
+        trade?.exitReason === "stop_loss" ||
+        trade?.exitReason === "time_exit" ||
+        trade?.exitReason === "expiry" ||
+        trade?.exitReason === "manual" ||
+        trade?.exitReason === "insufficient_data"
+          ? (trade?.exitReason ?? null)
+          : null,
+      holdingDays:
+        trade?.entryDate && trade?.exitDate
+          ? Math.max(
+              0,
+              Math.round(
+                (Date.parse(trade.exitDate) - Date.parse(trade.entryDate)) /
+                  (24 * 60 * 60 * 1000),
+              ),
+            )
+          : null,
+      realizedAt: trade?.exitDate ?? null,
+    };
+
+    const reward = computeLearningReward({ state, action, outcome });
+
+    return learningRecordSchema.parse({
+      state,
+      action,
+      outcome,
+      reward,
+      metadata: {
+        recordId: signal.id,
+        schemaVersion: LEARNING_RECORD_SCHEMA_VERSION,
+        generatedAt: new Date().toISOString(),
+        lineageQuality:
+          evaluation?.sourceAnalysisId === signal.analysis.id ||
+          trade?.sourceAnalysisId === signal.analysis.id
+            ? "explicit"
+            : "backfilled",
+        sourceRefs: {
+          primaryWhaleId: null,
+          whaleIds: [],
+          sourceAnalysisId: signal.analysis.id,
+          evaluationId: evaluation?.id ?? null,
+          tradeId: trade?.id ?? null,
+        },
+        completeness: {
+          hasAlert: true,
+          hasAnalysis: true,
+          hasEvaluation: evaluation != null,
+          hasTrade: trade != null,
+          hasReward: reward.status !== "not_applicable",
+        },
+      },
+    });
+  });
+
+  return [...whaleRecords, ...eventRecords];
 }

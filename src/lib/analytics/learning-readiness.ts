@@ -12,6 +12,9 @@ export interface LearningReadinessScorecard {
   blockers: string[];
   metrics: {
     totalRecords: number;
+    whaleSignalCount: number;
+    eventTickerSignalCount: number;
+    correlationSignalCount: number;
     enterCount: number;
     rejectCount: number;
     notEvaluatedCount: number;
@@ -59,6 +62,15 @@ export function buildLearningReadinessScorecard(
   records: LearningRecord[],
 ): LearningReadinessScorecard {
   const totalRecords = records.length;
+  const whaleSignalCount = records.filter(
+    (record) => record.state.alert.signalSource === "whale",
+  ).length;
+  const eventTickerSignalCount = records.filter(
+    (record) => record.state.alert.signalSource === "event_ticker",
+  ).length;
+  const correlationSignalCount = records.filter(
+    (record) => record.state.alert.signalSource === "correlation",
+  ).length;
   const enterCount = records.filter(
     (record) => record.action.decision === "enter",
   ).length;
@@ -180,6 +192,9 @@ export function buildLearningReadinessScorecard(
     blockers,
     metrics: {
       totalRecords,
+      whaleSignalCount,
+      eventTickerSignalCount,
+      correlationSignalCount,
       enterCount,
       rejectCount,
       notEvaluatedCount,

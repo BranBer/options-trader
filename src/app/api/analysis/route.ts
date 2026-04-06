@@ -5,12 +5,17 @@ import { desc, eq, and, like, lt } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
-  const type = params.get("type"); // 'cross_reference' | 'trade_recommendation' | 'deep_dive'
+  const type = params.get("type"); // 'cross_reference' | 'trade_recommendation' | 'deep_dive' | 'event_ticker_analysis'
   const ticker = params.get("ticker");
   const cursor = params.get("cursor"); // id of the last item from previous page
   const limit = Math.min(Number(params.get("limit")) || 20, 100);
 
-  const validTypes = ["cross_reference", "trade_recommendation", "deep_dive"];
+  const validTypes = [
+    "cross_reference",
+    "trade_recommendation",
+    "deep_dive",
+    "event_ticker_analysis",
+  ];
   const conditions = [];
 
   if (type && validTypes.includes(type)) {

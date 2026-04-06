@@ -27,13 +27,18 @@ import {
   fitShadowPolicyModel,
 } from "@/lib/analytics/shadow-policy";
 import { recordShadowPolicyDecision } from "@/lib/analytics/shadow-policy-store";
-import type { TradeRecommendation, DeepDiveAnalysis } from "@/types/analysis";
+import type {
+  TradeRecommendation,
+  DeepDiveAnalysis,
+  EventTickerAnalysis,
+} from "@/types/analysis";
 import type { TradeDecision } from "@/types/portfolio";
 import * as progress from "@/lib/cron/pipeline-progress";
 
 const MAX_OPEN_POSITIONS = 5;
 const MIN_CONFIDENCE_FOR_SIM = 0.45;
 const MIN_WHALE_QUALITY = 50;
+const MIN_EVENT_SIGNAL_QUALITY = 70;
 const SIM_STEP_INDEX = 5;
 
 // Story 20.1 — IV environment thresholds
@@ -58,6 +63,7 @@ export interface TradeRejection {
     | "whale_quality"
     | "market_data"
     | "llm_eval"
+    | "signal_quality"
     | "validation"
     | "iv_environment"
     | "earnings_proximity"
@@ -70,6 +76,37 @@ export interface TradeRejection {
 let _lastRunRejections: TradeRejection[] = [];
 export function getLastRunRejections(): TradeRejection[] {
   return _lastRunRejections;
+}
+
+function parseInputRefs(value: string | null): {
+  eventId: number | null;
+  source: string | null;
+  ticker: string | null;
+} {
+  if (!value) {
+    return { eventId: null, source: null, ticker: null };
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const eventId =
+      typeof parsed.eventId === "number"
+        ? parsed.eventId
+        : typeof parsed.eventId === "string"
+          ? Number(parsed.eventId)
+          : null;
+    return {
+      eventId: Number.isFinite(eventId) ? eventId : null,
+      source: typeof parsed.source === "string" ? parsed.source : null,
+      ticker: typeof parsed.ticker === "string" ? parsed.ticker : null,
+    };
+  } catch {
+    return { eventId: null, source: null, ticker: null };
+  }
+}
+
+function eventAnalysisKey(eventId: number | null, ticker: string): string {
+  return `${eventId ?? "none"}:${ticker.toUpperCase()}`;
 }
 
 // ============================================================
@@ -443,11 +480,41 @@ export async function runSimPipeline(): Promise<number> {
     .where(and(gte(analyses.createdAt, since), eq(analyses.type, "deep_dive")))
     .orderBy(desc(analyses.createdAt));
 
+  const recentEventAnalyses = await db
+    .select()
+    .from(analyses)
+    .where(
+      and(
+        gte(analyses.createdAt, since),
+        eq(analyses.type, "event_ticker_analysis"),
+        eq(analyses.source, "event_ticker"),
+      ),
+    )
+    .orderBy(desc(analyses.createdAt));
+
   const deepDiveMap = new Map<string, DeepDiveAnalysis>();
   for (const dd of recentDeepDives) {
     try {
       const parsed = JSON.parse(dd.output ?? "{}") as DeepDiveAnalysis;
       if (parsed.ticker) deepDiveMap.set(parsed.ticker, parsed);
+    } catch {
+      /* skip invalid */
+    }
+  }
+
+  const eventAnalysisMap = new Map<string, EventTickerAnalysis>();
+  const latestEventAnalysisByTicker = new Map<string, EventTickerAnalysis>();
+  for (const row of recentEventAnalyses) {
+    try {
+      const parsed = JSON.parse(row.output ?? "{}") as EventTickerAnalysis;
+      if (!parsed.ticker) continue;
+      const key = eventAnalysisKey(parsed.eventId, parsed.ticker);
+      if (!eventAnalysisMap.has(key)) {
+        eventAnalysisMap.set(key, parsed);
+      }
+      if (!latestEventAnalysisByTicker.has(parsed.ticker)) {
+        latestEventAnalysisByTicker.set(parsed.ticker, parsed);
+      }
     } catch {
       /* skip invalid */
     }
@@ -477,6 +544,9 @@ export async function runSimPipeline(): Promise<number> {
     try {
       const recData = JSON.parse(rec.output ?? "{}") as TradeRecommendation;
       if (!recData.ticker) continue;
+      const inputRefs = parseInputRefs(rec.inputRefs);
+      const isEventTickerRecommendation =
+        rec.source === "event_ticker" || inputRefs.source === "event_ticker";
 
       // Skip tickers we already have open
       if (openTickers.has(recData.ticker)) {
@@ -484,29 +554,48 @@ export async function runSimPipeline(): Promise<number> {
         continue;
       }
 
-      // Find associated whale alert — require minimum quality score
-      const whaleAlert = await db
-        .select()
-        .from(whaleAlerts)
-        .where(
-          and(
-            eq(whaleAlerts.ticker, recData.ticker),
-            gte(whaleAlerts.createdAt, since),
-          ),
-        )
-        .orderBy(desc(whaleAlerts.createdAt))
-        .limit(1);
+      const matchedEventAnalysis = isEventTickerRecommendation
+        ? (eventAnalysisMap.get(
+            eventAnalysisKey(inputRefs.eventId, recData.ticker),
+          ) ?? latestEventAnalysisByTicker.get(recData.ticker))
+        : null;
+      const whaleAlert = isEventTickerRecommendation
+        ? (matchedEventAnalysis?.whaleMatch.alerts.slice(0, 1) ?? [])
+        : await db
+            .select()
+            .from(whaleAlerts)
+            .where(
+              and(
+                eq(whaleAlerts.ticker, recData.ticker),
+                gte(whaleAlerts.createdAt, since),
+              ),
+            )
+            .orderBy(desc(whaleAlerts.createdAt))
+            .limit(1);
 
-      const quality = whaleAlert[0]?.qualityScore ?? 0;
-      if (quality < MIN_WHALE_QUALITY) {
-        const rejectionReason = `Whale quality ${quality} < ${MIN_WHALE_QUALITY}`;
+      const quality = isEventTickerRecommendation
+        ? (whaleAlert[0]?.qualityScore ??
+          Math.round(
+            (matchedEventAnalysis?.eventContext.impactScore ?? 0) * 10,
+          ))
+        : (whaleAlert[0]?.qualityScore ?? 0);
+      const minimumSignalQuality = isEventTickerRecommendation
+        ? MIN_EVENT_SIGNAL_QUALITY
+        : MIN_WHALE_QUALITY;
+
+      if (quality < minimumSignalQuality) {
+        const rejectionReason = isEventTickerRecommendation
+          ? `Event signal quality ${quality} < ${minimumSignalQuality}`
+          : `Whale quality ${quality} < ${minimumSignalQuality}`;
         console.log(
           `[SimPipeline] Skipping ${recData.ticker}: ${rejectionReason}`,
         );
         _lastRunRejections.push({
           ticker: recData.ticker,
           reason: rejectionReason,
-          stage: "whale_quality",
+          stage: isEventTickerRecommendation
+            ? "signal_quality"
+            : "whale_quality",
           timestamp: new Date().toISOString(),
         });
         await recordPipelineRejection({
@@ -516,7 +605,9 @@ export async function runSimPipeline(): Promise<number> {
           currentPrice: 0,
           portfolioBalance: portfolio.balance,
           sourceAnalysisId: rec.id,
-          rejectionGate: "whale_quality",
+          rejectionGate: isEventTickerRecommendation
+            ? "signal_quality"
+            : "whale_quality",
           rejectionReason,
         });
         continue;
@@ -549,7 +640,9 @@ export async function runSimPipeline(): Promise<number> {
       }
 
       // Get deep dive context if available
-      const deepDive = deepDiveMap.get(recData.ticker);
+      const deepDive = isEventTickerRecommendation
+        ? (matchedEventAnalysis?.deepDive ?? deepDiveMap.get(recData.ticker))
+        : deepDiveMap.get(recData.ticker);
       const shadowDecision = evaluateShadowPolicyCandidate(
         {
           ticker: recData.ticker,
@@ -596,7 +689,7 @@ export async function runSimPipeline(): Promise<number> {
             }
           : undefined,
         compositeConfidence: rec.confidence ?? undefined,
-        whaleQualityScore: whaleAlert[0]?.qualityScore ?? undefined,
+        whaleQualityScore: quality,
         portfolioBalance: portfolio.balance,
         openPositions: openPositionsSummary,
       });

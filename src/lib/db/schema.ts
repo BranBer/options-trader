@@ -91,6 +91,7 @@ export const analyses = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     type: text("type"), // 'news_classification' | 'cross_reference' | 'trade_recommendation'
+    source: text("source"), // 'whale_pipeline' | 'event_ticker'
     inputRefs: text("input_refs"), // JSON: references to news_event ids, whale_alert ids
     output: text("output"), // full LLM structured JSON
     confidence: real("confidence"),
@@ -99,6 +100,7 @@ export const analyses = sqliteTable(
   },
   (table) => [
     index("idx_analyses_type_created").on(table.type, table.createdAt),
+    index("idx_analyses_source_created").on(table.source, table.createdAt),
   ],
 );
 

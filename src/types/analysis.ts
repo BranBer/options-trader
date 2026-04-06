@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { ANALYSIS_TIMEFRAMES } from "@/lib/utils/chart-timeframes";
+import type { MarketSnapshot, OptionsChainSummary } from "@/types/market";
+import type { WhaleAlertRow } from "@/types/whale";
 
 // --- Cross-Reference Correlation ---
 export const correlationSchema = z.object({
@@ -246,9 +248,45 @@ export type {
 export interface AnalysisRow {
   id: number;
   type: string | null;
+  source: string | null;
   inputRefs: string | null; // JSON
   output: string | null; // JSON
   confidence: number | null;
   confidenceBreakdown: string | null; // JSON CompositeConfidenceBreakdown
+  createdAt: string | null;
+}
+
+export interface EventTickerAnalysisEventContext {
+  headline: string;
+  summary?: string;
+  sentiment: "bullish" | "bearish" | "neutral";
+  impactScore: number;
+  eventType?: string;
+  sectors?: string[];
+}
+
+export interface EventTickerWhaleMatch {
+  hasWhaleActivity: boolean;
+  alerts: WhaleAlertRow[];
+  bestQualityScore: number | null;
+}
+
+export interface EventTickerAnalysis {
+  ticker: string;
+  eventId: number;
+  eventContext: EventTickerAnalysisEventContext;
+  marketSnapshot: (MarketSnapshot & { marketOpen: boolean }) | null;
+  optionsSummary: OptionsChainSummary | null;
+  deepDive: DeepDiveAnalysis;
+  recommendation: TradeRecommendation;
+  whaleMatch: EventTickerWhaleMatch;
+  source: "event_ticker";
+  createdAt?: string | null;
+}
+
+export interface EventTickerAnalysisSummary {
+  eventId: number;
+  headline: string;
+  tickers: string[];
   createdAt: string | null;
 }
