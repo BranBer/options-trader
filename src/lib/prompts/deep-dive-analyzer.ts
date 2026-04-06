@@ -1,3 +1,5 @@
+import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
+
 // ---------- System Instruction ----------
 
 export const DEEP_DIVE_SYSTEM_INSTRUCTION = `You are an expert options analyst and educator. Given a whale trade, historical price data, and options chain context, produce a comprehensive deep dive analysis designed for beginner-to-intermediate traders.
@@ -9,6 +11,7 @@ Core principles:
 4. HONEST: Rate your own confidence honestly. Clearly state what you're uncertain about. Most analyses should acknowledge significant uncertainty.
 5. RISK-FIRST: Lead with risk assessment. Never minimize downside potential. Prefer defined-risk strategies.
 6. CONNECTED: Tie the whale trade to broader market context and global events when relevant.
+7. If pre-computed technical indicator patterns are provided, treat them as the primary technical signal source and reconcile any disagreement with your own chart reading transparently.
 
 Technical analysis rules:
 - Identify chart patterns only when they are clearly formed (not "emerging" or "potential").
@@ -74,6 +77,36 @@ interface DeepDivePromptInput {
       dealerPositioning: string;
     } | null;
   };
+  computedIndicators?: Partial<
+    Record<"1W" | "1M" | "3M" | "6M" | "1Y", IndicatorPatternReport>
+  >;
+}
+
+function renderIndicatorReport(report: IndicatorPatternReport): string {
+  const recentPatterns = report.patterns.slice(0, 8);
+  const recentCombinations = report.combinations.slice(0, 5);
+
+  const individualSection =
+    recentPatterns.length > 0
+      ? recentPatterns
+          .map(
+            (pattern) =>
+              `- [${pattern.signal.toUpperCase()}] ${pattern.name} (${pattern.patternId}) @ candle ${pattern.detectedAt}${pattern.detectedDate ? ` (${pattern.detectedDate})` : ""} — confidence ${Math.round(pattern.confidence * 100)}%\n  ${pattern.description}`,
+          )
+          .join("\n")
+      : "- No clear individual indicator patterns detected.";
+
+  const combinationSection =
+    recentCombinations.length > 0
+      ? recentCombinations
+          .map(
+            (combination) =>
+              `- [${combination.signal.toUpperCase()}] ${combination.name} (${Math.round(combination.confidence * 100)}%)\n  ${combination.educationalNote}`,
+          )
+          .join("\n")
+      : "- No combination patterns detected.";
+
+  return `Aggregate signal: ${report.aggregateSignal.summary}\nIndividual signals:\n${individualSection}\nCombination signals:\n${combinationSection}`;
 }
 
 export function buildDeepDivePrompt(input: DeepDivePromptInput): string {
@@ -175,6 +208,24 @@ ${input.newsContextJson}`;
       if (g.topConcentrations.length > 0) {
         prompt += `\n- Top GEX Concentrations: ${g.topConcentrations.map((c) => `$${c.strike} ($${Math.abs(c.gex).toLocaleString()})`).join(", ")}`;
       }
+    }
+  }
+
+  if (input.computedIndicators) {
+    const indicatorSections = (
+      Object.entries(input.computedIndicators) as Array<
+        ["1W" | "1M" | "3M" | "6M" | "1Y", IndicatorPatternReport | undefined]
+      >
+    )
+      .filter(([, report]) => report != null)
+      .map(
+        ([timeframe, report]) =>
+          `### ${timeframe}\n${renderIndicatorReport(report!)}`,
+      )
+      .join("\n\n");
+
+    if (indicatorSections) {
+      prompt += `\n\n## Pre-Computed Technical Indicator Analysis\n${indicatorSections}`;
     }
   }
 

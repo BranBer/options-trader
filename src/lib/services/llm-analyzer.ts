@@ -20,6 +20,10 @@ import {
 } from "@/types/analysis";
 import type { Correlation } from "@/types/analysis";
 import {
+  detectAllIndicatorPatterns,
+  type IndicatorPatternReport,
+} from "@/lib/utils/indicator-patterns";
+import {
   NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
   NEWS_CLASSIFIER_RESPONSE_SCHEMA,
   buildNewsClassifierPrompt,
@@ -580,6 +584,7 @@ interface MarketDataForRecommendation {
     } | null;
   };
   sectorRotationContext?: string;
+  indicatorReport?: IndicatorPatternReport;
 }
 
 export async function generateRecommendation(
@@ -601,6 +606,7 @@ export async function generateRecommendation(
     marketData.macroContext,
     marketData.optionsAnalytics,
     marketData.sectorRotationContext,
+    marketData.indicatorReport,
   );
 
   const result = await callLLMWithRetry(
@@ -671,6 +677,9 @@ interface DeepDiveInput {
       dealerPositioning: string;
     } | null;
   };
+  computedIndicators?: Partial<
+    Record<AnalysisTimeframe, IndicatorPatternReport>
+  >;
 }
 
 const DEEP_DIVE_TIMEFRAME_CONFIG: Array<{
@@ -967,6 +976,25 @@ export async function generateDeepDive(
   const historicalSummary =
     historicalSummariesByTimeframe["3M"] ?? "No historical data available.";
 
+  const computedIndicators = Object.fromEntries(
+    DEEP_DIVE_TIMEFRAME_CONFIG.map(({ timeframe }) => {
+      const existing = input.computedIndicators?.[timeframe];
+      if (existing) {
+        return [timeframe, existing];
+      }
+
+      const candles =
+        input.historicalDataByTimeframe?.[timeframe] ??
+        (timeframe === "3M" ? input.historicalData : []);
+      return [
+        timeframe,
+        candles.length > 0
+          ? detectAllIndicatorPatterns(candles, ticker, timeframe)
+          : undefined,
+      ];
+    }),
+  ) as Partial<Record<AnalysisTimeframe, IndicatorPatternReport>>;
+
   // Build options chain summary
   let chainSummary = "No options chain data available.";
   if (input.optionsChain) {
@@ -1018,6 +1046,7 @@ ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.
       : undefined,
     macroContext: input.macroContext,
     optionsAnalytics: input.optionsAnalytics,
+    computedIndicators,
   });
 
   const result = await callLLMWithRetry(

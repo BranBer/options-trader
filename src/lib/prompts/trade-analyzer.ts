@@ -1,3 +1,5 @@
+import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
+
 // ---------- System Instruction ----------
 
 export const TRADE_ANALYZER_SYSTEM_INSTRUCTION = `You are an options trading strategist. Given whale options activity (with or without a correlated news event), macro context, and current market data, you generate a structured trade thesis and recommendation.
@@ -15,6 +17,7 @@ Rules:
 10. The IV-RV spread indicates whether options are over- or under-priced relative to actual stock movement. A spread > 10% means options are expensive — favor credit strategies (selling premium). A spread < -5% means options are cheap — favor debit strategies (buying premium).
 11. OI walls are large concentrations of open interest where market-maker hedging creates price magnets or barriers. Max pain is the price at which open option positions lose the most — price often gravitates here near expiration.
 12. CRITICAL: All recommended expiry dates MUST be in the future and at least 7 calendar days from today's date. Never recommend options that have already expired or expire within the next week.
+13. If pre-computed technical indicator patterns are provided, use them to adjust your confidence, entry timing, and strategy selection. Strong bullish confluences should support directional bullish trades; conflicting bearish momentum should reduce confidence or push you toward defined-risk structures.
 
 Always respond with the exact JSON schema provided.`;
 
@@ -46,6 +49,7 @@ export function buildTradeAnalyzerPrompt(
     realizedVol?: number | null;
   },
   sectorRotationContext?: string,
+  indicatorReport?: IndicatorPatternReport,
 ): string {
   const todayStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/New_York",
@@ -110,6 +114,29 @@ Market Data for ${ticker}:
 
   if (sectorRotationContext) {
     prompt += `\n\n${sectorRotationContext}`;
+  }
+
+  if (indicatorReport) {
+    const topPatterns = indicatorReport.patterns.slice(0, 6);
+    const topCombinations = indicatorReport.combinations.slice(0, 4);
+    prompt += `\n\nTechnical Indicator Signals:\n- Aggregate: ${indicatorReport.aggregateSignal.summary}`;
+    if (topPatterns.length > 0) {
+      prompt += `\n- Individual Patterns: ${topPatterns
+        .map(
+          (pattern) =>
+            `${pattern.name} [${pattern.signal}] ${Math.round(pattern.confidence * 100)}%`,
+        )
+        .join("; ")}`;
+    }
+    if (topCombinations.length > 0) {
+      prompt += `\n- Combination Patterns: ${topCombinations
+        .map(
+          (combination) =>
+            `${combination.name} [${combination.signal}] ${Math.round(combination.confidence * 100)}%`,
+        )
+        .join("; ")}`;
+    }
+    prompt += `\n\nUse these computed technical signals in your thesis. Include an optional indicator_analysis object in the response if it helps explain the recommendation.`;
   }
 
   prompt += `\n\nGenerate a trade recommendation with risk analysis.`;
@@ -183,6 +210,27 @@ export const TRADE_ANALYZER_RESPONSE_SCHEMA = {
     risk_factors: {
       type: "array",
       items: { type: "string" },
+    },
+    indicator_analysis: {
+      type: "object",
+      properties: {
+        signals_supporting_thesis: {
+          type: "array",
+          items: { type: "string" },
+        },
+        signals_opposing_thesis: {
+          type: "array",
+          items: { type: "string" },
+        },
+        impact_on_confidence: { type: "string" },
+        impact_on_strategy: { type: "string" },
+      },
+      required: [
+        "signals_supporting_thesis",
+        "signals_opposing_thesis",
+        "impact_on_confidence",
+        "impact_on_strategy",
+      ],
     },
     whale_alignment: {
       type: "object",

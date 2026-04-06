@@ -5,6 +5,7 @@ import { crossReferenceAnalysisSchema } from "@/types/analysis";
 import { tradeRecommendationSchema } from "@/types/analysis";
 import { deepDiveAnalysisSchema } from "@/types/analysis";
 import { tradeDecisionSchema } from "@/types/portfolio";
+import type { Correlation } from "@/types/analysis";
 
 // ---------------------------------------------------------------------------
 // Mock OpenAI SDK — intercept all API calls
@@ -610,6 +611,7 @@ describe("Zod schema validation — newsClassificationSchema", () => {
 
   it("rejects missing required field (articles)", () => {
     const { articles, ...rest } = VALID_CLASSIFICATION_RESPONSE;
+    void articles;
     expect(() => newsClassificationSchema.parse(rest)).toThrow();
   });
 
@@ -667,6 +669,7 @@ describe("Zod schema validation — tradeRecommendationSchema", () => {
 
   it("rejects missing primary_strategy", () => {
     const { primary_strategy, ...rest } = VALID_RECOMMENDATION_RESPONSE;
+    void primary_strategy;
     expect(() => tradeRecommendationSchema.parse(rest)).toThrow();
   });
 
@@ -676,7 +679,21 @@ describe("Zod schema validation — tradeRecommendationSchema", () => {
   });
 
   it("accepts nullable catalyst_date", () => {
-    const nullCatalyst = structuredClone(VALID_RECOMMENDATION_RESPONSE);
+    type NullableCatalystRecommendation = Omit<
+      typeof VALID_RECOMMENDATION_RESPONSE,
+      "market_context"
+    > & {
+      market_context: Omit<
+        typeof VALID_RECOMMENDATION_RESPONSE.market_context,
+        "catalyst_date" | "days_to_catalyst"
+      > & {
+        catalyst_date: string | null;
+        days_to_catalyst: number | null;
+      };
+    };
+    const nullCatalyst = structuredClone(
+      VALID_RECOMMENDATION_RESPONSE,
+    ) as NullableCatalystRecommendation;
     nullCatalyst.market_context.catalyst_date = null;
     nullCatalyst.market_context.days_to_catalyst = null;
     expect(() => tradeRecommendationSchema.parse(nullCatalyst)).not.toThrow();
@@ -691,7 +708,29 @@ describe("Zod schema validation — deepDiveAnalysisSchema", () => {
   });
 
   it("accepts optional nullable fields as null", () => {
-    const withNulls = structuredClone(VALID_DEEP_DIVE_RESPONSE);
+    type NullableDeepDiveResponse = Omit<
+      typeof VALID_DEEP_DIVE_RESPONSE,
+      "technical_patterns" | "options_context"
+    > & {
+      technical_patterns: Array<
+        Omit<
+          (typeof VALID_DEEP_DIVE_RESPONSE.technical_patterns)[number],
+          "price_target"
+        > & { price_target: number | null }
+      >;
+      options_context: Omit<
+        typeof VALID_DEEP_DIVE_RESPONSE.options_context,
+        "max_pain" | "oi_walls" | "gex_summary" | "iv_rv_spread"
+      > & {
+        max_pain: number | null;
+        oi_walls: null;
+        gex_summary: null;
+        iv_rv_spread: null;
+      };
+    };
+    const withNulls = structuredClone(
+      VALID_DEEP_DIVE_RESPONSE,
+    ) as NullableDeepDiveResponse;
     withNulls.technical_patterns[0].price_target = null;
     withNulls.options_context.max_pain = null;
     withNulls.options_context.oi_walls = null;
@@ -732,6 +771,7 @@ describe("Zod schema validation — tradeDecisionSchema", () => {
 
   it("rejects missing exit_plan", () => {
     const { exit_plan, ...rest } = VALID_TRADE_DECISION_RESPONSE;
+    void exit_plan;
     expect(() => tradeDecisionSchema.parse(rest)).toThrow();
   });
 });
@@ -820,7 +860,8 @@ describe("crossReferenceAnalysis", () => {
 // ============================================================
 
 describe("generateRecommendation", () => {
-  const mockCorrelation = VALID_CROSS_REFERENCE_RESPONSE.correlations[0];
+  const mockCorrelation = VALID_CROSS_REFERENCE_RESPONSE
+    .correlations[0] as Correlation;
   const mockMarketData = {
     price: 195,
     ivRank: 72,
@@ -841,6 +882,58 @@ describe("generateRecommendation", () => {
     expect(result.primary_strategy.legs).toHaveLength(2);
     expect(result.confidence).toBeGreaterThanOrEqual(0);
     expect(result.confidence).toBeLessThanOrEqual(1);
+  });
+
+  it("includes indicator signal context when provided", async () => {
+    mockLLMResponse(VALID_RECOMMENDATION_RESPONSE, 1200);
+
+    await generateRecommendation(mockCorrelation, {
+      ...mockMarketData,
+      indicatorReport: {
+        ticker: "AAPL",
+        timeframe: "3M",
+        patterns: [
+          {
+            indicator: "ema",
+            name: "EMA 9 / EMA 21 Golden Cross",
+            patternId: "ema_golden_cross",
+            signal: "bullish",
+            confidence: 0.82,
+            detectedAt: 28,
+            detectedDate: "2026-01-29T00:00:00.000Z",
+            description: "Fast EMA crossed above slow EMA",
+            isRecent: true,
+          },
+        ],
+        combinations: [
+          {
+            name: "EMA Cross + Volume Breakout",
+            patternId: "ema_cross_volume_breakout_bullish",
+            signal: "bullish",
+            confidence: 0.88,
+            description: "Volume confirmed the crossover",
+            constituentPatternIds: [
+              "ema_golden_cross",
+              "volume_breakout_bullish",
+            ],
+            educationalNote: "Trend change confirmed by participation.",
+          },
+        ],
+        aggregateSignal: {
+          direction: "bullish",
+          strength: 0.84,
+          summary:
+            "1 bullish / 0 bearish / 0 neutral — bullish bias (84% strength)",
+        },
+        computedAt: "2026-04-06T10:00:00.000Z",
+      },
+    });
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const userPrompt = callArgs.messages[1].content;
+    expect(userPrompt).toContain("Technical Indicator Signals");
+    expect(userPrompt).toContain("EMA 9 / EMA 21 Golden Cross");
+    expect(userPrompt).toContain("EMA Cross + Volume Breakout");
   });
 });
 
@@ -891,6 +984,61 @@ describe("generateDeepDive", () => {
     expect(result.risk_assessment.overall_risk).toBe("moderate");
     expect(result.timeframe_patterns?.["3M"]).toHaveLength(1);
     expect(result.technical_patterns[0].timeframe).toBe("3M");
+  });
+
+  it("includes computed indicator analysis when provided", async () => {
+    mockLLMResponse(VALID_DEEP_DIVE_RESPONSE, 3000);
+
+    await generateDeepDive({
+      ...mockInput,
+      computedIndicators: {
+        "3M": {
+          ticker: "AAPL",
+          timeframe: "3M",
+          patterns: [
+            {
+              indicator: "rsi",
+              name: "RSI Oversold",
+              patternId: "rsi_oversold",
+              signal: "bullish",
+              confidence: 0.76,
+              detectedAt: 14,
+              detectedDate: "2026-03-28T00:00:00.000Z",
+              description: "RSI fell below 30",
+              isRecent: true,
+            },
+          ],
+          combinations: [
+            {
+              name: "RSI Divergence + Lower Band Touch",
+              patternId: "rsi_divergence_bb_touch_bullish",
+              signal: "bullish",
+              confidence: 0.88,
+              description: "Momentum and volatility converged",
+              constituentPatternIds: [
+                "rsi_oversold",
+                "bb_mean_reversion_bullish",
+              ],
+              educationalNote:
+                "Oversold momentum and lower-band touch can support a bounce.",
+            },
+          ],
+          aggregateSignal: {
+            direction: "bullish",
+            strength: 0.81,
+            summary:
+              "1 bullish / 0 bearish / 0 neutral — bullish bias (81% strength)",
+          },
+          computedAt: "2026-04-06T10:00:00.000Z",
+        },
+      },
+    });
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const userPrompt = callArgs.messages[1].content;
+    expect(userPrompt).toContain("Pre-Computed Technical Indicator Analysis");
+    expect(userPrompt).toContain("RSI Oversold");
+    expect(userPrompt).toContain("RSI Divergence + Lower Band Touch");
   });
 
   it("normalizes support/resistance strength labels when the model drifts off enum", async () => {

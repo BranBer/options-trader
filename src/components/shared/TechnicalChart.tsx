@@ -10,6 +10,7 @@ import {
   type ChartHistoryPeriod,
 } from "@/lib/utils/chart-timeframes";
 import { getTechnicalPatternsForTimeframe } from "@/lib/utils/deep-dive-patterns";
+import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
 import PriceChart, {
   type IndicatorConfig,
 } from "@/components/charts/PriceChart";
@@ -19,6 +20,7 @@ import {
   IndicatorGuidePanel,
   InfoTooltip,
 } from "@/components/charts/IndicatorExplainers";
+import IndicatorPatternSummary from "@/components/charts/IndicatorPatternSummary";
 
 const INDICATOR_OPTIONS: {
   key: keyof IndicatorConfig;
@@ -122,6 +124,13 @@ export default function TechnicalChart({
     activeTimeframe,
   );
   const candles = histData?.candles ?? [];
+  const indicatorPatternReport = useMemo(
+    () =>
+      candles.length > 0
+        ? detectAllIndicatorPatterns(candles, ticker, activeTimeframe)
+        : null,
+    [activeTimeframe, candles, ticker],
+  );
 
   const handleHover = useCallback(
     (idx: number | null) => onHoveredPattern?.(idx),
@@ -239,6 +248,7 @@ export default function TechnicalChart({
             technicalPatterns={activePatterns}
             showPatterns={showPatterns}
           />
+          <IndicatorPatternSummary report={indicatorPatternReport} />
           <IndicatorGuidePanel
             activeIndicators={Object.entries(mergedIndicators)
               .filter(([, v]) => v)

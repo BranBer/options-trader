@@ -10,6 +10,7 @@ import {
   generateDeepDive,
   generateRecommendation,
 } from "@/lib/services/llm-analyzer";
+import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
 import {
   computeRealizedVol,
   fetchEarningsDate,
@@ -574,6 +575,7 @@ async function analyzeSingleTicker(args: {
     marketData,
     candles3M,
   });
+  const indicatorReport = detectAllIndicatorPatterns(candles3M, ticker, "3M");
   const primaryWhale = whaleMatch.alerts[0] ?? null;
   const syntheticCorrelation = buildSyntheticCorrelation({
     ticker,
@@ -597,6 +599,7 @@ async function analyzeSingleTicker(args: {
       ivCrushRisk: earningsContext.ivCrushRisk,
     },
     optionsAnalytics: optionsData.optionsAnalytics,
+    indicatorReport,
   });
   const normalizedRecommendation = enrichWhaleAlignment({
     recommendation,
@@ -645,6 +648,7 @@ async function analyzeSingleTicker(args: {
       ivCrushRisk: earningsContext.ivCrushRisk,
     },
     optionsAnalytics: optionsData.optionsAnalytics,
+    indicatorReport,
   });
 
   const eventAnalysis: EventTickerAnalysis = {

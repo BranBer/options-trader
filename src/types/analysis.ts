@@ -92,6 +92,14 @@ export const tradeRecommendationSchema = z.object({
     days_to_catalyst: z.number().int().nullable().optional(),
   }),
   risk_factors: z.array(z.string()),
+  indicator_analysis: z
+    .object({
+      signals_supporting_thesis: z.array(z.string()),
+      signals_opposing_thesis: z.array(z.string()),
+      impact_on_confidence: z.string(),
+      impact_on_strategy: z.string(),
+    })
+    .optional(),
   whale_alignment: z.object({
     matches_whale: z.boolean(),
     whale_position_size: z.string(),

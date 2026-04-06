@@ -35,6 +35,7 @@ import {
 import { fetchSectorPerformance } from "@/lib/services/market-fetcher";
 import { computeCompositeConfidence } from "@/lib/utils/composite-confidence";
 import { isTimeframeAwareDeepDiveOutput } from "@/lib/utils/deep-dive-freshness";
+import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
 import type { InsiderSentiment } from "@/types/insider";
 import type { SectorRotationContext } from "@/lib/utils/sector-rotation";
 import type { DeepDiveAnalysis, TradeRecommendation } from "@/types/analysis";
@@ -358,6 +359,11 @@ export async function runAnalysisPipeline(): Promise<number> {
           let realizedVol: number | null = null;
           let ivRvSpread: number | null = null;
           let atmIV: number | null = null;
+          const indicatorReport = detectAllIndicatorPatterns(
+            candles3M,
+            ticker,
+            "3M",
+          );
           if (chain && marketData) {
             const allContracts = [
               ...chain.nearestExpiry.calls,
@@ -410,6 +416,7 @@ export async function runAnalysisPipeline(): Promise<number> {
                 }
               : undefined,
             sectorRotationContext: sectorRotationPrompt,
+            indicatorReport,
           });
 
           // Store latest market snapshot
@@ -539,6 +546,11 @@ export async function runAnalysisPipeline(): Promise<number> {
             let realizedVol: number | null = null;
             let ivRvSpread: number | null = null;
             let atmIV: number | null = null;
+            const indicatorReport = detectAllIndicatorPatterns(
+              candles3M,
+              ticker,
+              "3M",
+            );
             if (chain && marketData) {
               const allContracts = [
                 ...chain.nearestExpiry.calls,
@@ -592,6 +604,7 @@ export async function runAnalysisPipeline(): Promise<number> {
                     }
                   : undefined,
                 sectorRotationContext: sectorRotationPrompt,
+                indicatorReport,
               },
             );
 
