@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { fetchHistoricalData } from "@/lib/services/market-fetcher";
 
-const VALID_PERIODS = ["1wk", "1mo", "3mo", "6mo", "1y"];
+const VALID_PERIODS = ["1d", "1wk", "1mo", "3mo", "6mo", "1y"];
 
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;

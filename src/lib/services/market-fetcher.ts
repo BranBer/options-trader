@@ -147,11 +147,12 @@ export async function fetchHistoricalData(
 ): Promise<CandleData[]> {
   try {
     // Map period to interval: short periods get intraday, longer get daily
-    const interval = period === "1wk" ? "1h" : "1d";
+    const interval = period === "1d" ? "5m" : period === "1wk" ? "1h" : "1d";
 
     // Calculate period1 from period string
     const now = new Date();
     const periodMap: Record<string, number> = {
+      "1d": 1,
       "1wk": 7,
       "1mo": 30,
       "3mo": 90,
@@ -175,7 +176,7 @@ export async function fetchHistoricalData(
     const candles: CandleData[] = result.quotes
       .filter((q: any) => q.open != null && q.close != null)
       .map((q: any) => ({
-        // Hourly candles need unix timestamp (seconds); daily use YYYY-MM-DD string
+        // Intraday (5m/1h) candles need unix timestamp (seconds); daily use YYYY-MM-DD string
         time:
           interval === "1d"
             ? new Date(q.date).toISOString().split("T")[0]

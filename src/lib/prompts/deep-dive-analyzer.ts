@@ -1,3 +1,5 @@
+import type { AnalysisTimeframe } from "@/lib/utils/chart-timeframes";
+import { ANALYSIS_TIMEFRAMES } from "@/lib/utils/chart-timeframes";
 import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
 
 // ---------- System Instruction ----------
@@ -48,7 +50,7 @@ interface DeepDivePromptInput {
   whaleTradeJson: string;
   historicalDataSummary: string;
   historicalDataSummariesByTimeframe?: Partial<
-    Record<"1W" | "1M" | "3M" | "6M" | "1Y", string>
+    Record<AnalysisTimeframe, string>
   >;
   optionsChainSummary: string;
   currentPrice: number;
@@ -78,7 +80,7 @@ interface DeepDivePromptInput {
     } | null;
   };
   computedIndicators?: Partial<
-    Record<"1W" | "1M" | "3M" | "6M" | "1Y", IndicatorPatternReport>
+    Record<AnalysisTimeframe, IndicatorPatternReport>
   >;
 }
 
@@ -121,13 +123,14 @@ $${input.currentPrice}
 ## Historical Price Data
 ${
   input.historicalDataSummariesByTimeframe
-    ? (["1W", "1M", "3M", "6M", "1Y"] as const)
+    ? ([...ANALYSIS_TIMEFRAMES] as const)
         .filter(
           (timeframe) => input.historicalDataSummariesByTimeframe?.[timeframe],
         )
         .map(
           (timeframe) =>
-            `### ${timeframe}\n${input.historicalDataSummariesByTimeframe?.[timeframe]}`,
+            `### ${timeframe}${timeframe === "1D" ? " (Intraday — 5-minute candles, today only)" : ""}
+${input.historicalDataSummariesByTimeframe?.[timeframe]}`,
         )
         .join("\n\n")
     : input.historicalDataSummary
@@ -214,13 +217,13 @@ ${input.newsContextJson}`;
   if (input.computedIndicators) {
     const indicatorSections = (
       Object.entries(input.computedIndicators) as Array<
-        ["1W" | "1M" | "3M" | "6M" | "1Y", IndicatorPatternReport | undefined]
+        [AnalysisTimeframe, IndicatorPatternReport | undefined]
       >
     )
       .filter(([, report]) => report != null)
       .map(
         ([timeframe, report]) =>
-          `### ${timeframe}\n${renderIndicatorReport(report!)}`,
+          `### ${timeframe}${timeframe === "1D" ? " (Intraday — short-term noise; do NOT let this override macro trend direction from 1M+ timeframes)" : ""}\n${renderIndicatorReport(report!)}`,
       )
       .join("\n\n");
 
@@ -241,7 +244,9 @@ Analyze the chart data to identify:
 7. Educational notes explaining key concepts for beginners
 8. For greeks_breakdown, provide individual assessments for the most relevant Greeks (delta, gamma, theta, vega) with plain English explanations
 
-Also populate the top-level technical_patterns array as the combined union of all timeframe-specific patterns, and tag every pattern with its timeframe (1W, 1M, 3M, 6M, or 1Y).
+Also populate the top-level technical_patterns array as the combined union of all timeframe-specific patterns, and tag every pattern with its timeframe (1D, 1W, 1M, 3M, 6M, or 1Y).
+
+IMPORTANT: 1D (intraday) patterns are for educational context only. They show today's short-term price action and should be labeled as such. If 1D patterns contradict the macro trend (1M+), explicitly note this is short-term noise and the macro trend should dominate directional analysis.
 
 Do not leave 6M or 1Y blank if a dominant long-range trend, range, or channel is visible. For those broader horizons, return at least one primary structure whenever there is enough price history to infer one.
 
@@ -269,7 +274,7 @@ export const DEEP_DIVE_RESPONSE_SCHEMA = {
           confidence: { type: "number" },
           timeframe: {
             type: "string",
-            enum: ["1W", "1M", "3M", "6M", "1Y"],
+            enum: ["1D", "1W", "1M", "3M", "6M", "1Y"],
             nullable: true,
           },
           price_target: { type: "number", nullable: true },
@@ -302,6 +307,10 @@ export const DEEP_DIVE_RESPONSE_SCHEMA = {
     timeframe_patterns: {
       type: "object",
       properties: {
+        "1D": {
+          type: "array",
+          items: { $ref: "#/properties/technical_patterns/items" },
+        },
         "1W": {
           type: "array",
           items: { $ref: "#/properties/technical_patterns/items" },

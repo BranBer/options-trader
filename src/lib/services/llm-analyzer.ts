@@ -724,6 +724,7 @@ const DEEP_DIVE_TIMEFRAME_CONFIG: Array<{
   timeframe: AnalysisTimeframe;
   maxRows: number;
 }> = [
+  { timeframe: "1D", maxRows: 78 },
   { timeframe: "1W", maxRows: 36 },
   { timeframe: "1M", maxRows: 30 },
   { timeframe: "3M", maxRows: 45 },

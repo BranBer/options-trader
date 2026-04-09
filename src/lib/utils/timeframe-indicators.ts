@@ -2,13 +2,14 @@
  * Timeframe-aware technical indicator configuration.
  *
  * Maps chart timeframes to the most relevant indicators:
+ * - 1D: Intraday indicators (RSI, MACD, Bollinger Bands, 20-SMA) — 5-min candles
  * - 1W: Micro indicators (RSI, MACD, Bollinger Bands, 20-SMA)
  * - 1M: Mixed micro/macro (adds 50-SMA, Fibonacci)
  * - 3M: Transition zone (50-SMA, 200-SMA, Fibonacci, MACD)
  * - 6M+: Macro indicators (200-SMA, Fibonacci, Volume Profile)
  */
 
-export type Timeframe = "1W" | "1M" | "3M" | "6M" | "1Y";
+export type Timeframe = "1D" | "1W" | "1M" | "3M" | "6M" | "1Y";
 
 export interface IndicatorConfig {
   name: string;
@@ -24,7 +25,7 @@ export const INDICATOR_CONFIG: IndicatorConfig[] = [
     description: "Relative Strength Index — measures momentum",
     beginnerExplanation:
       "RSI shows if a stock is overbought (>70) or oversold (<30). Think of it like a spring — stretched too far in either direction tends to snap back.",
-    timeframes: ["1W", "1M"],
+    timeframes: ["1D", "1W", "1M"],
     category: "momentum",
   },
   {
@@ -32,7 +33,7 @@ export const INDICATOR_CONFIG: IndicatorConfig[] = [
     description: "Moving Average Convergence Divergence — trend following",
     beginnerExplanation:
       "MACD shows the relationship between two moving averages. When the fast line crosses above the slow line, it's bullish. Crosses below = bearish.",
-    timeframes: ["1W", "1M", "3M"],
+    timeframes: ["1D", "1W", "1M", "3M"],
     category: "trend",
   },
   {
@@ -40,7 +41,7 @@ export const INDICATOR_CONFIG: IndicatorConfig[] = [
     description: "Volatility bands around price",
     beginnerExplanation:
       "Bollinger Bands are like rubber bands around price. When price touches the upper band, it might be overbought. Touches lower band = possibly oversold. Squeeze = low volatility, expect a big move soon.",
-    timeframes: ["1W", "1M"],
+    timeframes: ["1D", "1W", "1M"],
     category: "volatility",
   },
   {
@@ -48,7 +49,7 @@ export const INDICATOR_CONFIG: IndicatorConfig[] = [
     description: "20-day Simple Moving Average — short-term trend",
     beginnerExplanation:
       "The 20-day average shows the short-term trend. Price above = uptrend. Price below = downtrend.",
-    timeframes: ["1W", "1M"],
+    timeframes: ["1D", "1W", "1M"],
     category: "trend",
   },
   {

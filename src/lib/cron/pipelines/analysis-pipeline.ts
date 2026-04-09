@@ -877,6 +877,7 @@ export async function runAnalysisPipeline(): Promise<number> {
         chunk.map(async (item) => {
           // Fetch historical data + options chain + current price
           const [
+            historicalData1D,
             historicalData1W,
             historicalData1M,
             historicalData3M,
@@ -885,6 +886,7 @@ export async function runAnalysisPipeline(): Promise<number> {
             chain,
             [marketSnap],
           ] = await Promise.all([
+            fetchHistoricalData(item.ticker, "1d"),
             fetchHistoricalData(item.ticker, "1wk"),
             fetchHistoricalData(item.ticker, "1mo"),
             fetchHistoricalData(item.ticker, "3mo"),
@@ -930,6 +932,7 @@ export async function runAnalysisPipeline(): Promise<number> {
             whaleTrade: item.whaleTrade,
             historicalData,
             historicalDataByTimeframe: {
+              "1D": historicalData1D,
               "1W": historicalData1W,
               "1M": historicalData1M,
               "3M": historicalData3M,

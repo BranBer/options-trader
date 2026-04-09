@@ -175,6 +175,7 @@ export const entryExitStrategySchema = z.object({
 export type EntryExitStrategy = z.infer<typeof entryExitStrategySchema>;
 
 export const timeframePatternMapSchema = z.object({
+  "1D": z.array(technicalPatternSchema).optional(),
   "1W": z.array(technicalPatternSchema),
   "1M": z.array(technicalPatternSchema),
   "3M": z.array(technicalPatternSchema),
