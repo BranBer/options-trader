@@ -28,7 +28,17 @@ import { IndicatorGuide } from "@/components/charts/IndicatorExplainers";
 import { InfiniteScrollTrigger } from "@/components/shared/InfiniteScrollTrigger";
 import { VirtualizedAnalysisList } from "@/components/shared/VirtualizedAnalysisList";
 import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
-import { ChevronDown, ChevronUp, HelpCircle, BookOpen } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  HelpCircle,
+  BookOpen,
+  Shield,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle,
+} from "lucide-react";
 
 export default function AnalysisPage() {
   const {
@@ -362,7 +372,33 @@ function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
                   </p>
                   <p className="text-sm">{c.thesis}</p>
                 </button>
-                {isExpanded && <WhaleDeepDive ticker={c.whale_trade.ticker} />}
+                {isExpanded && (
+                  <>
+                    {c.alignment === "hedging" && (
+                      <div className="mx-3 mb-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-1.5">
+                        <div className="flex items-center gap-2 text-amber-400">
+                          <Shield className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span className="text-xs font-semibold">
+                            Hedging Alignment Detected
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          The AI classified this whale trade as a{" "}
+                          <strong className="text-foreground/80">hedge</strong>,
+                          not a directional bet. Large institutions routinely
+                          buy options to protect existing short positions — a
+                          big call purchase isn&apos;t always a bullish signal.
+                        </p>
+                        <p className="text-xs text-amber-400 font-medium">
+                          ⚠️ Reduce confidence in this signal. Verify short
+                          interest data for {c.whale_trade.ticker} before
+                          acting.
+                        </p>
+                      </div>
+                    )}
+                    <WhaleDeepDive ticker={c.whale_trade.ticker} />
+                  </>
+                )}
               </div>
             );
           })}
@@ -601,7 +637,22 @@ function RecommendationCard({ analysis }: { analysis: Analysis }) {
 
         {/* Whale alignment */}
         <div>
-          <p className="text-xs text-muted-foreground mb-1">Whale Alignment</p>
+          <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+            Whale Alignment
+            <TooltipProvider delay={200}>
+              <Tooltip>
+                <TooltipTrigger>
+                  <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-64 text-xs">
+                  Whether this recommendation follows the same direction as the
+                  whale trade. &quot;Aligned&quot; means you&apos;d be trading
+                  alongside the whale. &quot;Not aligned&quot; means the AI
+                  found reasons to take the opposite view.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </p>
           <div className="flex items-center gap-2 text-sm">
             <Badge
               variant={
@@ -609,14 +660,95 @@ function RecommendationCard({ analysis }: { analysis: Analysis }) {
               }
             >
               {output.whale_alignment?.matches_whale
-                ? "Aligned"
-                : "Not aligned"}
+                ? "Aligned with whale"
+                : "Contrarian to whale"}
             </Badge>
-            <span className="text-xs">
+            <span className="text-xs text-muted-foreground">
               {output.whale_alignment?.similarity_note}
             </span>
           </div>
+          {!output.whale_alignment?.matches_whale && (
+            <p className="text-xs text-amber-400 mt-1">
+              ⚠️ The AI is recommending against the whale&apos;s direction —
+              likely because the whale may be hedging rather than making a
+              directional bet.
+            </p>
+          )}
         </div>
+
+        {/* Technical indicator analysis — signals supporting/opposing (Story 39.7) */}
+        {output.indicator_analysis && (
+          <>
+            <Separator />
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground font-medium flex items-center gap-1">
+                Technical Signal Analysis
+                <TooltipProvider delay={200}>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-64 text-xs">
+                      The AI analyzed indicator patterns across multiple
+                      timeframes (1W, 1M, 3M) and listed which signals support
+                      the thesis and which contradict it. More supporting
+                      signals = higher conviction.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </p>
+              {output.indicator_analysis.signals_supporting_thesis.length >
+                0 && (
+                <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2.5 space-y-1">
+                  <p className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3" aria-hidden="true" />
+                    Supporting signals
+                  </p>
+                  <ul className="space-y-0.5">
+                    {output.indicator_analysis.signals_supporting_thesis.map(
+                      (s, i) => (
+                        <li key={i} className="text-xs text-muted-foreground">
+                          • {s}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+              )}
+              {output.indicator_analysis.signals_opposing_thesis.length > 0 && (
+                <div className="rounded-md border border-red-500/20 bg-red-500/5 p-2.5 space-y-1">
+                  <p className="text-[10px] font-semibold text-red-400 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                    Opposing signals
+                  </p>
+                  <ul className="space-y-0.5">
+                    {output.indicator_analysis.signals_opposing_thesis.map(
+                      (s, i) => (
+                        <li key={i} className="text-xs text-muted-foreground">
+                          • {s}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Impact on confidence</p>
+                  <p className="text-foreground/80">
+                    {output.indicator_analysis.impact_on_confidence}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Impact on strategy</p>
+                  <p className="text-foreground/80">
+                    {output.indicator_analysis.impact_on_strategy}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Risk factors */}
         {(output.risk_factors?.length ?? 0) > 0 && (

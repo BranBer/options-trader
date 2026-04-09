@@ -1,6 +1,15 @@
 ﻿"use client";
 
-import { X, TrendingUp, TrendingDown, Minus, HelpCircle } from "lucide-react";
+import {
+  X,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  HelpCircle,
+  Shield,
+  Zap,
+  Building2,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +46,117 @@ function InfoTip({ text }: { text: string }) {
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+}
+
+type IntentHint = "speculative" | "institutional" | "hedge" | "unknown";
+
+const INTENT_CONFIG: Record<
+  IntentHint,
+  {
+    label: string;
+    icon: React.ReactNode;
+    colorClass: string;
+    borderClass: string;
+    bgClass: string;
+    headline: string;
+    explanation: string;
+    takeaway: string;
+  }
+> = {
+  hedge: {
+    label: "Short Hedge",
+    icon: <Shield className="h-4 w-4" aria-hidden="true" />,
+    colorClass: "text-amber-400",
+    borderClass: "border-amber-500/30",
+    bgClass: "bg-amber-500/5",
+    headline: "Likely protecting an existing short position",
+    explanation:
+      "Deep in-the-money options or high-delta contracts are a classic way for large institutions to hedge short stock exposure. Buying calls while short stock caps the upside risk — it is not necessarily a bullish bet on the company.",
+    takeaway:
+      "⚠️ Don't blindly follow this signal. The whale may be managing risk, not predicting a rally. Check if short interest in this name is elevated.",
+  },
+  speculative: {
+    label: "Speculative Bet",
+    icon: <Zap className="h-4 w-4" aria-hidden="true" />,
+    colorClass: "text-violet-400",
+    borderClass: "border-violet-500/30",
+    bgClass: "bg-violet-500/5",
+    headline: "Aggressive directional trade — not a hedge",
+    explanation:
+      "Far out-of-the-money options with volume eclipsing open interest signal a new, conviction-driven bet. No known existing position to protect — this institution is expecting a significant price move before expiry.",
+    takeaway:
+      "✅ Higher signal quality. This trade is more likely to reflect inside knowledge or strong conviction rather than routine hedging.",
+  },
+  institutional: {
+    label: "Institutional Block",
+    icon: <Building2 className="h-4 w-4" aria-hidden="true" />,
+    colorClass: "text-blue-400",
+    borderClass: "border-blue-500/30",
+    bgClass: "bg-blue-500/5",
+    headline: "Large measured entry near the current stock price",
+    explanation:
+      "A very large premium placed at-the-money (near the current price) typically means an institution is opening a significant directional position — not a speculative long shot, but a confident, deliberate bet.",
+    takeaway:
+      "📊 Watch volume over the next 1–3 days. Institutional blocks often front-run a catalyst (earnings, FDA approval, M&A). Check upcoming news dates.",
+  },
+  unknown: {
+    label: "Intent Unclear",
+    icon: <HelpCircle className="h-4 w-4" aria-hidden="true" />,
+    colorClass: "text-muted-foreground",
+    borderClass: "border-muted/30",
+    bgClass: "bg-muted/5",
+    headline: "Not enough data to classify this trade's purpose",
+    explanation:
+      "The available data (volume, OI, strike distance, Greeks) doesn't clearly suggest hedging, speculation, or an institutional block. This may be a small trade or one with missing data.",
+    takeaway:
+      "🔍 Use other signals: check the Vol/OI ratio, how far out-of-the-money the strike is, and whether news or earnings are coming up.",
+  },
+};
+
+function IntentSignalPanel({
+  intent,
+  callPut,
+}: {
+  intent: IntentHint;
+  callPut: string | null;
+}) {
+  const cfg = INTENT_CONFIG[intent] ?? INTENT_CONFIG.unknown;
+
+  // Contextualise hedge explanation based on call vs put
+  const contextNote =
+    intent === "hedge" && callPut === "C"
+      ? "Buying calls while holding a short stock position is called a 'short hedge' or 'short cover hedge' — the institution limits its losses if the stock price rises unexpectedly."
+      : intent === "hedge" && callPut === "P"
+        ? "Buying puts while holding long stock is standard portfolio insurance — the institution is capping downside risk, not necessarily predicting a crash."
+        : null;
+
+  return (
+    <div
+      className={`rounded-md border ${cfg.borderClass} ${cfg.bgClass} p-3 space-y-2`}
+      role="region"
+      aria-label="Whale intent classification"
+    >
+      <div className="flex items-center gap-2">
+        <span className={cfg.colorClass}>{cfg.icon}</span>
+        <span className={`text-sm font-semibold ${cfg.colorClass}`}>
+          {cfg.label}
+        </span>
+        <InfoTip text="ML-derived classification based on strike distance from price, volume/OI ratio, premium size, and option Greeks. Helps distinguish hedging from directional speculation." />
+      </div>
+      <p className="text-xs font-medium text-foreground/80">{cfg.headline}</p>
+      <p className="text-xs text-muted-foreground leading-relaxed">
+        {cfg.explanation}
+      </p>
+      {contextNote && (
+        <p className="text-xs text-muted-foreground leading-relaxed italic">
+          {contextNote}
+        </p>
+      )}
+      <p className={`text-xs font-medium ${cfg.colorClass} leading-relaxed`}>
+        {cfg.takeaway}
+      </p>
+    </div>
   );
 }
 
@@ -143,6 +263,23 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
                     ? "Moderate conviction â€” some positive signals detected"
                     : "Low conviction â€” may be hedging or routine activity"}
               </p>
+            </div>
+          </>
+        )}
+
+        {/* Intent Signal Panel — hedging vs speculative vs institutional */}
+        {alert.intentHint && (
+          <>
+            <Separator />
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground font-medium flex items-center gap-1">
+                Intent Classification
+                <InfoTip text="Automated analysis of whether this trade is likely a hedge (risk management), a speculative bet (directional conviction), or an institutional block (measured large entry)." />
+              </p>
+              <IntentSignalPanel
+                intent={alert.intentHint as IntentHint}
+                callPut={alert.callPut}
+              />
             </div>
           </>
         )}

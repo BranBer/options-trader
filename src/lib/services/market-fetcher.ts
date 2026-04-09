@@ -406,3 +406,56 @@ export async function enrichWithIV(
 // (kept at bottom so barrel imports work cleanly)
 export type { VIXContext } from "@/lib/utils/vix-regimes";
 export type { EarningsProximity } from "@/lib/utils/earnings-proximity";
+
+// ---------- Short Interest (Story 39.3) ----------
+
+export interface ShortInterestData {
+  ticker: string;
+  sharesShort: number | null;
+  shortRatio: number | null; // days to cover
+  shortPercentOfFloat: number | null; // 0-1
+  dateShortInterest: Date | null;
+  squeezePressure: "extreme" | "high" | "moderate" | "low";
+}
+
+/**
+ * Fetch short interest data for a ticker using yahoo-finance2 defaultKeyStatistics.
+ * Returns null if the data is unavailable or the fetch fails.
+ */
+export async function fetchShortInterest(
+  ticker: string,
+): Promise<ShortInterestData | null> {
+  try {
+    const result = await (yf as any).quoteSummary(ticker, {
+      modules: ["defaultKeyStatistics"],
+    });
+    const s = result?.defaultKeyStatistics;
+    if (!s) return null;
+
+    const shortPct: number | null =
+      typeof s.shortPercentOfFloat === "number" ? s.shortPercentOfFloat : null;
+
+    let squeezePressure: ShortInterestData["squeezePressure"] = "low";
+    if (shortPct != null) {
+      if (shortPct > 0.2) squeezePressure = "extreme";
+      else if (shortPct > 0.1) squeezePressure = "high";
+      else if (shortPct > 0.05) squeezePressure = "moderate";
+    }
+
+    return {
+      ticker,
+      sharesShort: typeof s.sharesShort === "number" ? s.sharesShort : null,
+      shortRatio: typeof s.shortRatio === "number" ? s.shortRatio : null,
+      shortPercentOfFloat: shortPct,
+      dateShortInterest:
+        s.dateShortInterest instanceof Date ? s.dateShortInterest : null,
+      squeezePressure,
+    };
+  } catch (err) {
+    console.warn(
+      `[market-fetcher] Short interest fetch failed for ${ticker}:`,
+      err,
+    );
+    return null;
+  }
+}

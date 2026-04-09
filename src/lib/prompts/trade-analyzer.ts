@@ -18,6 +18,11 @@ Rules:
 11. OI walls are large concentrations of open interest where market-maker hedging creates price magnets or barriers. Max pain is the price at which open option positions lose the most — price often gravitates here near expiration.
 12. CRITICAL: All recommended expiry dates MUST be in the future and at least 7 calendar days from today's date. Never recommend options that have already expired or expire within the next week.
 13. If pre-computed technical indicator patterns are provided, use them to adjust your confidence, entry timing, and strategy selection. Strong bullish confluences should support directional bullish trades; conflicting bearish momentum should reduce confidence or push you toward defined-risk structures.
+14. CRITICAL — WHALE TIMEFRAME ALIGNMENT: Your recommendation MUST reflect the whale's actual trading horizon. Compute the whale's DTE (days to expiry) from their option's expiry date.
+    - Short-term whale (DTE ≤ 7): This is a short-dated, aggressive bet — likely targeting an imminent catalyst. Recommend short-dated strategies (weeklies or 2-3 week expiries). Do NOT recommend 60-90 day expiries for a whale playing a 1-day move. Frame the thesis around immediate price action.
+    - Medium-term whale (DTE 8-45): Recommend expiries in a similar window (±2 weeks of the whale's expiry). The whale expects a move within weeks, not months.
+    - Long-term whale (DTE > 45): Recommend expiries 60-90+ days out. This whale has a longer-term thesis.
+    - Always state the whale's DTE and what timeframe it implies in your thesis. If the whale's option has already expired or expires within 1 day, note this is an extremely aggressive short-term play and the recommended strategy should reflect that urgency.
 
 Always respond with the exact JSON schema provided.`;
 
@@ -47,20 +52,55 @@ export function buildTradeAnalyzerPrompt(
     } | null;
     ivRvSpread?: number | null;
     realizedVol?: number | null;
+    gex?: {
+      netGEX: number;
+      gexFlipLevel: number | null;
+      topConcentrations: { strike: number; gex: number }[];
+      dealerPositioning: string;
+    } | null;
   },
   sectorRotationContext?: string,
   indicatorReport?: IndicatorPatternReport,
+  whaleIntentHint?: string | null,
+  indicatorReportsByTimeframe?: Partial<Record<string, IndicatorPatternReport>>,
 ): string {
   const todayStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/New_York",
   });
+  // Extract whale expiry from the correlation to compute DTE
+  let whaleDteNote = "";
+  try {
+    const parsed = JSON.parse(correlationJson);
+    const whaleExpiry = parsed?.whale_trade?.expiry;
+    if (whaleExpiry) {
+      const expiryDate = new Date(whaleExpiry);
+      const today = new Date(todayStr);
+      if (!Number.isNaN(expiryDate.getTime())) {
+        const dte = Math.round(
+          (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+        );
+        const horizon =
+          dte <= 0
+            ? "ALREADY EXPIRED — was an extremely aggressive short-term play"
+            : dte <= 7
+              ? `${dte} days — SHORT-TERM aggressive bet, likely targeting an imminent catalyst`
+              : dte <= 45
+                ? `${dte} days — MEDIUM-TERM play, expects a move within weeks`
+                : `${dte} days — LONG-TERM thesis`;
+        whaleDteNote = `\nWhale DTE (Days to Expiry): ${horizon}\nCRITICAL: Your recommended expiry must align with this whale timeframe. Do NOT recommend 60-90 day expiries for a short-term whale play.`;
+      }
+    }
+  } catch {
+    /* correlation may not be valid JSON in edge cases */
+  }
+
   let prompt = `Based on the following whale trade signal and market data, generate a structured trade recommendation.
 
 Today's Date: ${todayStr}
 IMPORTANT: All option expiry dates must be after ${todayStr}. Do not recommend expired options.
 
 Whale Trade Signal:
-${correlationJson}
+${correlationJson}${whaleDteNote}
 
 Market Data for ${ticker}:
 - Current Price: $${price}
@@ -68,6 +108,10 @@ Market Data for ${ticker}:
 - 30-day Avg Volume: ${avgVolume.toLocaleString()}
 - Today's Volume: ${todayVolume.toLocaleString()}
 - Options Chain Snapshot: ${optionsChainSummary}`;
+
+  if (whaleIntentHint) {
+    prompt += `\n- Whale Intent Classification: ${whaleIntentHint} (ML-derived signal from broker order flow analysis)`;
+  }
 
   if (macroContext) {
     if (macroContext.vixLevel != null) {
@@ -110,13 +154,54 @@ Market Data for ${ticker}:
     if (optionsAnalytics.realizedVol != null) {
       prompt += `\n- 20-day Realized Volatility: ${(optionsAnalytics.realizedVol * 100).toFixed(1)}%`;
     }
+    if (optionsAnalytics.gex != null) {
+      const g = optionsAnalytics.gex;
+      const gexSign = g.netGEX >= 0 ? "+" : "";
+      prompt += `\n- Dealer GEX (Gamma Exposure): ${gexSign}${(g.netGEX / 1e9).toFixed(2)}B — dealers are ${g.dealerPositioning}`;
+      if (g.gexFlipLevel != null) {
+        prompt += ` | GEX flip level: $${g.gexFlipLevel} (below this, dealers amplify moves instead of damping them)`;
+      }
+      if (g.topConcentrations.length > 0) {
+        prompt += `\n- Top GEX strikes: ${g.topConcentrations
+          .slice(0, 3)
+          .map((c) => `$${c.strike} (${(c.gex / 1e9).toFixed(2)}B)`)
+          .join(", ")}`;
+      }
+    }
   }
 
   if (sectorRotationContext) {
     prompt += `\n\n${sectorRotationContext}`;
   }
 
-  if (indicatorReport) {
+  // Multi-timeframe indicator signals (Story 39.7)
+  const tfReports = indicatorReportsByTimeframe
+    ? Object.entries(indicatorReportsByTimeframe)
+    : [];
+  const hasMultiTf = tfReports.length > 1;
+
+  if (hasMultiTf) {
+    prompt += `\n\nTechnical Indicator Signals (Multi-Timeframe):`;
+    for (const [tf, report] of tfReports) {
+      if (!report) continue;
+      const label =
+        tf === "1W"
+          ? "Short-term (1W)"
+          : tf === "1M"
+            ? "Medium-term (1M)"
+            : `Macro (${tf})`;
+      prompt += `\n\n${label}: ${report.aggregateSignal.summary}`;
+      const topPatterns = report.patterns.slice(0, 4);
+      if (topPatterns.length > 0) {
+        prompt += `\n  Patterns: ${topPatterns
+          .map(
+            (p) => `${p.name} [${p.signal}] ${Math.round(p.confidence * 100)}%`,
+          )
+          .join("; ")}`;
+      }
+    }
+    prompt += `\n\nUse multi-timeframe alignment for confidence: if short-term and macro signals agree, increase confidence. If they conflict, reduce confidence or prefer defined-risk structures.`;
+  } else if (indicatorReport) {
     const topPatterns = indicatorReport.patterns.slice(0, 6);
     const topCombinations = indicatorReport.combinations.slice(0, 4);
     prompt += `\n\nTechnical Indicator Signals:\n- Aggregate: ${indicatorReport.aggregateSignal.summary}`;

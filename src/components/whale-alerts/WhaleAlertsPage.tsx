@@ -7,6 +7,9 @@ import {
   Minus,
   ExternalLink,
   HelpCircle,
+  Shield,
+  Zap,
+  Building2,
 } from "lucide-react";
 import {
   Tooltip,
@@ -261,10 +264,37 @@ const sentimentConfig: Record<
   },
 };
 
-const intentLabels: Record<string, string> = {
-  speculative: "Spec",
-  institutional: "Inst",
-  hedge: "Hedge",
+const intentConfig: Record<
+  string,
+  {
+    label: string;
+    color: string;
+    bg: string;
+    icon: React.ReactNode;
+    tip: string;
+  }
+> = {
+  speculative: {
+    label: "Speculative",
+    color: "text-violet-400",
+    bg: "bg-violet-500/10 border-violet-500/20",
+    icon: <Zap className="h-2.5 w-2.5" aria-hidden="true" />,
+    tip: "Far OTM + high volume vs. open interest — aggressive directional bet, not a hedge. Follow this signal more closely.",
+  },
+  institutional: {
+    label: "Institutional",
+    color: "text-blue-400",
+    bg: "bg-blue-500/10 border-blue-500/20",
+    icon: <Building2 className="h-2.5 w-2.5" aria-hidden="true" />,
+    tip: "Large premium placed near the current stock price. A confident, measured entry by a large institution — not a speculative long shot.",
+  },
+  hedge: {
+    label: "Hedge",
+    color: "text-amber-400",
+    bg: "bg-amber-500/10 border-amber-500/20",
+    icon: <Shield className="h-2.5 w-2.5" aria-hidden="true" />,
+    tip: "Deep ITM or high-delta contract. Likely protecting an existing short position, not a directional bet. Treat this signal with caution.",
+  },
 };
 
 function SentimentBadge({ alert }: { alert: WhaleAlert }) {
@@ -285,17 +315,34 @@ function SentimentBadge({ alert }: { alert: WhaleAlert }) {
     icon: Minus,
   };
   const Icon = config.icon;
-  const intent =
+  const intentCfg =
     alert.intentHint && alert.intentHint !== "unknown"
-      ? (intentLabels[alert.intentHint] ?? alert.intentHint)
+      ? intentConfig[alert.intentHint]
       : null;
 
   return (
-    <div className="flex items-center gap-1">
-      <Icon className={`h-3 w-3 ${config.color}`} />
-      <span className={`text-xs ${config.color}`}>{config.label}</span>
-      {intent && (
-        <span className="text-[10px] text-muted-foreground/60">({intent})</span>
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1">
+        <Icon className={`h-3 w-3 ${config.color}`} />
+        <span className={`text-xs ${config.color}`}>{config.label}</span>
+      </div>
+      {intentCfg && (
+        <TooltipProvider delay={200}>
+          <Tooltip>
+            <TooltipTrigger className="cursor-help">
+              <div
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-medium w-fit ${intentCfg.color} ${intentCfg.bg}`}
+                aria-label={`Intent: ${intentCfg.label}`}
+              >
+                {intentCfg.icon}
+                {intentCfg.label}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-56 text-xs">
+              {intentCfg.tip}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )}
     </div>
   );

@@ -81,7 +81,9 @@ function toIsoDate(time: string | number): string {
     return Number.isNaN(parsed.getTime()) ? time : parsed.toISOString();
   }
 
-  const parsed = new Date(time);
+  // Candle timestamps may be unix seconds (from intraday data) — convert to ms
+  const ms = time < 1e12 ? time * 1000 : time;
+  const parsed = new Date(ms);
   return Number.isNaN(parsed.getTime()) ? String(time) : parsed.toISOString();
 }
 
@@ -1356,6 +1358,9 @@ export function detectCombinationPatterns(
     const averageConfidence =
       matches.reduce((sum, pattern) => sum + pattern.confidence, 0) /
       matches.length;
+    const maxDetectedAt = Math.max(
+      ...matches.map((pattern) => pattern.detectedAt),
+    );
     combinations.push({
       patternId: rule.patternId,
       name: rule.name,
@@ -1364,10 +1369,39 @@ export function detectCombinationPatterns(
       description: rule.educationalNote,
       constituentPatternIds: rule.requiredPatterns,
       educationalNote: rule.educationalNote,
+      _maxDetectedAt: maxDetectedAt,
     });
   }
 
-  return combinations;
+  // When opposing signals of the same family fire (e.g. bullish AND bearish
+  // BB Squeeze + MACD Crossover), keep only the most recent one.
+  const grouped = new Map<
+    string,
+    (CombinationPattern & { _maxDetectedAt: number })[]
+  >();
+  for (const combo of combinations) {
+    const group = grouped.get(combo.name) ?? [];
+    group.push(combo as CombinationPattern & { _maxDetectedAt: number });
+    grouped.set(combo.name, group);
+  }
+
+  const deduped: CombinationPattern[] = [];
+  for (const group of grouped.values()) {
+    if (group.length <= 1) {
+      deduped.push(...group);
+    } else {
+      // Keep only the combination whose differentiating pattern was most recent
+      group.sort((a, b) => b._maxDetectedAt - a._maxDetectedAt);
+      deduped.push(group[0]);
+    }
+  }
+
+  // Clean up internal bookkeeping field
+  for (const combo of deduped) {
+    delete (combo as Record<string, unknown>)._maxDetectedAt;
+  }
+
+  return deduped;
 }
 
 function computeAggregateSignal(

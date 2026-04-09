@@ -9,6 +9,7 @@ import {
   crossReferenceAnalysis,
   generateRecommendation,
   generateDeepDive,
+  buildRichOptionsChainSummary,
 } from "@/lib/services/llm-analyzer";
 import {
   fetchMarketData,
@@ -354,16 +355,43 @@ export async function runAnalysisPipeline(): Promise<number> {
           // Fetch fresh market data for the ticker
           const [marketData] = await fetchMarketData([ticker]);
           const chain = await fetchOptionsChain(ticker);
+          const [candles1W, candles1M, candles3M] = await Promise.all([
+            fetchHistoricalData(ticker, "1wk"),
+            fetchHistoricalData(ticker, "1mo"),
+            fetchHistoricalData(ticker, "3mo"),
+          ]);
 
-          // Compute IV-RV spread for options pricing context
-          let realizedVol: number | null = null;
-          let ivRvSpread: number | null = null;
-          let atmIV: number | null = null;
+          // Compute multi-timeframe indicator reports (Story 39.7)
           const indicatorReport = detectAllIndicatorPatterns(
             candles3M,
             ticker,
             "3M",
           );
+          const indicatorReportsByTimeframe: Partial<
+            Record<string, ReturnType<typeof detectAllIndicatorPatterns>>
+          > = {
+            "1W":
+              candles1W.length > 0
+                ? detectAllIndicatorPatterns(candles1W, ticker, "1W")
+                : undefined,
+            "1M":
+              candles1M.length > 0
+                ? detectAllIndicatorPatterns(candles1M, ticker, "1M")
+                : undefined,
+            "3M": indicatorReport,
+          };
+          // Remove empty timeframes
+          for (const tf of Object.keys(
+            indicatorReportsByTimeframe,
+          ) as string[]) {
+            if (!indicatorReportsByTimeframe[tf])
+              delete indicatorReportsByTimeframe[tf];
+          }
+
+          // Compute IV-RV spread for options pricing context
+          let realizedVol: number | null = null;
+          let ivRvSpread: number | null = null;
+          let atmIV: number | null = null;
           if (chain && marketData) {
             const allContracts = [
               ...chain.nearestExpiry.calls,
@@ -378,8 +406,7 @@ export async function runAnalysisPipeline(): Promise<number> {
               atmIV =
                 atmContracts.reduce((s, c) => s + c.iv, 0) /
                 atmContracts.length;
-              const candles = await fetchHistoricalData(ticker, "3mo");
-              realizedVol = computeRealizedVol(candles);
+              realizedVol = computeRealizedVol(candles3M);
               if (realizedVol != null && atmIV != null) {
                 ivRvSpread = atmIV - realizedVol;
               }
@@ -395,11 +422,11 @@ export async function runAnalysisPipeline(): Promise<number> {
 
           const recommendation = await generateRecommendation(correlation, {
             price: marketData?.price ?? 0,
-            ivRank: undefined,
+            ivRank: atmIV != null ? Math.round(atmIV * 100) : undefined,
             avgVolume: marketData?.volume ?? 0,
             todayVolume: marketData?.volume ?? 0,
             optionsChainSummary: chain
-              ? `${chain.expirations.length} expirations, nearest: ${chain.nearestExpiry.date} (${chain.nearestExpiry.calls.length} calls, ${chain.nearestExpiry.puts.length} puts)`
+              ? buildRichOptionsChainSummary(chain, marketData?.price ?? 0)
               : "No options chain data available",
             macroContext: {
               ...macroBase,
@@ -417,6 +444,9 @@ export async function runAnalysisPipeline(): Promise<number> {
               : undefined,
             sectorRotationContext: sectorRotationPrompt,
             indicatorReport,
+            indicatorReportsByTimeframe,
+            whaleIntentHint:
+              recentWhales.find((w) => w.ticker === ticker)?.intentHint ?? null,
           });
 
           // Store latest market snapshot
@@ -542,6 +572,11 @@ export async function runAnalysisPipeline(): Promise<number> {
 
             const [marketData] = await fetchMarketData([ticker]);
             const chain = await fetchOptionsChain(ticker);
+            const [candles1W, candles1M, candles3M] = await Promise.all([
+              fetchHistoricalData(ticker, "1wk"),
+              fetchHistoricalData(ticker, "1mo"),
+              fetchHistoricalData(ticker, "3mo"),
+            ]);
 
             let realizedVol: number | null = null;
             let ivRvSpread: number | null = null;
@@ -551,6 +586,25 @@ export async function runAnalysisPipeline(): Promise<number> {
               ticker,
               "3M",
             );
+            const indicatorReportsByTimeframe: Partial<
+              Record<string, ReturnType<typeof detectAllIndicatorPatterns>>
+            > = {
+              "1W":
+                candles1W.length > 0
+                  ? detectAllIndicatorPatterns(candles1W, ticker, "1W")
+                  : undefined,
+              "1M":
+                candles1M.length > 0
+                  ? detectAllIndicatorPatterns(candles1M, ticker, "1M")
+                  : undefined,
+              "3M": indicatorReport,
+            };
+            for (const tf of Object.keys(
+              indicatorReportsByTimeframe,
+            ) as string[]) {
+              if (!indicatorReportsByTimeframe[tf])
+                delete indicatorReportsByTimeframe[tf];
+            }
             if (chain && marketData) {
               const allContracts = [
                 ...chain.nearestExpiry.calls,
@@ -565,8 +619,7 @@ export async function runAnalysisPipeline(): Promise<number> {
                 atmIV =
                   atmContracts.reduce((s, c) => s + c.iv, 0) /
                   atmContracts.length;
-                const candles = await fetchHistoricalData(ticker, "3mo");
-                realizedVol = computeRealizedVol(candles);
+                realizedVol = computeRealizedVol(candles3M);
                 if (realizedVol != null && atmIV != null) {
                   ivRvSpread = atmIV - realizedVol;
                 }
@@ -583,11 +636,11 @@ export async function runAnalysisPipeline(): Promise<number> {
               syntheticCorrelation,
               {
                 price: marketData?.price ?? 0,
-                ivRank: undefined,
+                ivRank: atmIV != null ? Math.round(atmIV * 100) : undefined,
                 avgVolume: marketData?.volume ?? 0,
                 todayVolume: marketData?.volume ?? 0,
                 optionsChainSummary: chain
-                  ? `${chain.expirations.length} expirations, nearest: ${chain.nearestExpiry.date} (${chain.nearestExpiry.calls.length} calls, ${chain.nearestExpiry.puts.length} puts)`
+                  ? buildRichOptionsChainSummary(chain, marketData?.price ?? 0)
                   : "No options chain data available",
                 macroContext: {
                   ...macroBase,
@@ -605,6 +658,8 @@ export async function runAnalysisPipeline(): Promise<number> {
                   : undefined,
                 sectorRotationContext: sectorRotationPrompt,
                 indicatorReport,
+                indicatorReportsByTimeframe,
+                whaleIntentHint: whaleRow?.intentHint ?? null,
               },
             );
 

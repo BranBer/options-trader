@@ -554,6 +554,40 @@ export async function crossReferenceAnalysis(
 // Story 3.2 — Trade Recommendation Generator
 // ============================================================
 
+// Story 39.5 — Shared rich options chain summary builder (used by deep dive and recommendations)
+export function buildRichOptionsChainSummary(
+  chain: OptionsChainSummary,
+  currentPrice: number,
+): string {
+  const allCalls = chain.nearestExpiry.calls;
+  const allPuts = chain.nearestExpiry.puts;
+  const totalCallVol = allCalls.reduce((s, c) => s + c.volume, 0);
+  const totalPutVol = allPuts.reduce((s, c) => s + c.volume, 0);
+  const totalCallOI = allCalls.reduce((s, c) => s + c.openInterest, 0);
+  const totalPutOI = allPuts.reduce((s, c) => s + c.openInterest, 0);
+  const pcRatio =
+    totalCallVol > 0 ? (totalPutVol / totalCallVol).toFixed(2) : "N/A";
+
+  const atmCalls = allCalls.filter(
+    (c) => Math.abs(c.strike - currentPrice) / currentPrice < 0.05,
+  );
+  const atmPuts = allPuts.filter(
+    (c) => Math.abs(c.strike - currentPrice) / currentPrice < 0.05,
+  );
+  const avgIV = [...atmCalls, ...atmPuts]
+    .filter((c) => c.iv > 0)
+    .reduce((s, c, _, a) => s + c.iv / a.length, 0);
+
+  return `Nearest expiry: ${chain.nearestExpiry.date}
+Expirations available: ${chain.expirations.length}
+Total call volume: ${totalCallVol} | Total put volume: ${totalPutVol}
+Put/Call ratio: ${pcRatio}
+Total call OI: ${totalCallOI} | Total put OI: ${totalPutOI}
+ATM avg IV: ${(avgIV * 100).toFixed(1)}%
+ATM calls: ${atmCalls.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.volume} OI:${c.openInterest} IV:${(c.iv * 100).toFixed(1)}%)`).join(", ") || "none"}
+ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.volume} OI:${c.openInterest} IV:${(c.iv * 100).toFixed(1)}%)`).join(", ") || "none"}`;
+}
+
 interface MarketDataForRecommendation {
   price: number;
   ivRank?: number;
@@ -585,6 +619,8 @@ interface MarketDataForRecommendation {
   };
   sectorRotationContext?: string;
   indicatorReport?: IndicatorPatternReport;
+  indicatorReportsByTimeframe?: Partial<Record<string, IndicatorPatternReport>>;
+  whaleIntentHint?: string | null;
 }
 
 export async function generateRecommendation(
@@ -607,6 +643,8 @@ export async function generateRecommendation(
     marketData.optionsAnalytics,
     marketData.sectorRotationContext,
     marketData.indicatorReport,
+    marketData.whaleIntentHint,
+    marketData.indicatorReportsByTimeframe,
   );
 
   const result = await callLLMWithRetry(
@@ -995,40 +1033,13 @@ export async function generateDeepDive(
     }),
   ) as Partial<Record<AnalysisTimeframe, IndicatorPatternReport>>;
 
-  // Build options chain summary
+  // Build options chain summary (Story 39.5 — uses shared helper)
   let chainSummary = "No options chain data available.";
   if (input.optionsChain) {
-    const chain = input.optionsChain;
-    const allCalls = chain.nearestExpiry.calls;
-    const allPuts = chain.nearestExpiry.puts;
-    const totalCallVol = allCalls.reduce((s, c) => s + c.volume, 0);
-    const totalPutVol = allPuts.reduce((s, c) => s + c.volume, 0);
-    const totalCallOI = allCalls.reduce((s, c) => s + c.openInterest, 0);
-    const totalPutOI = allPuts.reduce((s, c) => s + c.openInterest, 0);
-    const pcRatio =
-      totalCallVol > 0 ? (totalPutVol / totalCallVol).toFixed(2) : "N/A";
-
-    // ATM options (within 5% of price)
-    const atmCalls = allCalls.filter(
-      (c) =>
-        Math.abs(c.strike - input.currentPrice) / input.currentPrice < 0.05,
+    chainSummary = buildRichOptionsChainSummary(
+      input.optionsChain,
+      input.currentPrice,
     );
-    const atmPuts = allPuts.filter(
-      (c) =>
-        Math.abs(c.strike - input.currentPrice) / input.currentPrice < 0.05,
-    );
-    const avgIV = [...atmCalls, ...atmPuts]
-      .filter((c) => c.iv > 0)
-      .reduce((s, c, _, a) => s + c.iv / a.length, 0);
-
-    chainSummary = `Nearest expiry: ${chain.nearestExpiry.date}
-Expirations available: ${chain.expirations.length}
-Total call volume: ${totalCallVol} | Total put volume: ${totalPutVol}
-Put/Call ratio: ${pcRatio}
-Total call OI: ${totalCallOI} | Total put OI: ${totalPutOI}
-ATM avg IV: ${(avgIV * 100).toFixed(1)}%
-ATM calls: ${atmCalls.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.volume} OI:${c.openInterest} IV:${(c.iv * 100).toFixed(1)}%)`).join(", ") || "none"}
-ATM puts: ${atmPuts.map((c) => `$${c.strike} (bid:${c.bid} ask:${c.ask} vol:${c.volume} OI:${c.openInterest} IV:${(c.iv * 100).toFixed(1)}%)`).join(", ") || "none"}`;
   }
 
   const prompt = buildDeepDivePrompt({

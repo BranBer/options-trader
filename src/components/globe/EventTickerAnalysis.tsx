@@ -7,7 +7,11 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import TechnicalChart from "@/components/shared/TechnicalChart";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
-import { formatCurrency, formatNumber } from "@/lib/utils/formatters";
+import {
+  formatCurrency,
+  formatNumber,
+  formatPremium,
+} from "@/lib/utils/formatters";
 import type { EventTickerAnalysis } from "@/types/analysis";
 
 export default function EventTickerAnalysisPanel({
