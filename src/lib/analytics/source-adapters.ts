@@ -348,7 +348,7 @@ export async function fetchVolatilityContext(
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Polygon ${res.status}`);
       const json = await res.json();
-      const results = json.results ?? [];
+      const results: Record<string, unknown>[] = json.results ?? [];
 
       // Compute IV percentile from available option contracts
       const ivValues: number[] = results

@@ -42,6 +42,7 @@ import type {
   BenchmarkBaseline,
   AlertDecisionTrace,
   AlertDiagnosticsOutcome,
+  AlertDiagnosticsReasonCluster,
   PortfolioDiagnosticsPayload,
   LearningPolicyBaselineResult,
   LearningPolicyEvaluationHarness,

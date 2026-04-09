@@ -31,7 +31,7 @@ function findNearestEvaluation(
     const exact = evaluations.find(
       (evaluation) =>
         evaluation.primaryWhaleId === whale.id ||
-        evaluation.whaleIds?.includes(whale.id) === true,
+        evaluation.whaleIds?.includes(whale.id!) === true,
     );
     if (exact) return exact;
   }

@@ -648,7 +648,7 @@ async function analyzeSingleTicker(args: {
       ivCrushRisk: earningsContext.ivCrushRisk,
     },
     optionsAnalytics: optionsData.optionsAnalytics,
-    indicatorReport,
+    computedIndicators: { "3M": indicatorReport },
   });
 
   const eventAnalysis: EventTickerAnalysis = {

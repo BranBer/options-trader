@@ -11,6 +11,8 @@ import {
 } from "@/lib/utils/chart-timeframes";
 import { getTechnicalPatternsForTimeframe } from "@/lib/utils/deep-dive-patterns";
 import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
+import type { IndicatorPattern } from "@/lib/utils/indicator-patterns";
+import type { Candle } from "@/lib/utils/technical-indicators";
 import PriceChart, {
   type IndicatorConfig,
 } from "@/components/charts/PriceChart";
@@ -21,6 +23,37 @@ import {
   InfoTooltip,
 } from "@/components/charts/IndicatorExplainers";
 import IndicatorPatternSummary from "@/components/charts/IndicatorPatternSummary";
+
+/** Convert client-side indicator patterns into TechnicalPattern[] for chart overlays. */
+function indicatorPatternsToOverlays(
+  patterns: IndicatorPattern[],
+  candles: Candle[],
+): TechnicalPattern[] {
+  return patterns
+    .filter(
+      (p) => p.isRecent && p.detectedAt >= 0 && p.detectedAt < candles.length,
+    )
+    .map((p) => {
+      const candle = candles[p.detectedAt];
+      const time =
+        typeof candle.time === "number" ? String(candle.time) : candle.time;
+      return {
+        name: p.name,
+        type: p.signal,
+        description: p.description,
+        confidence: p.confidence,
+        timeframe: null,
+        price_target: null,
+        drawing_type: "marker" as const,
+        start_time: time,
+        end_time: time,
+        start_price: p.signal === "bearish" ? candle.high : candle.low,
+        end_price: p.signal === "bearish" ? candle.high : candle.low,
+        secondary_start_price: null,
+        secondary_end_price: null,
+      };
+    });
+}
 
 const INDICATOR_OPTIONS: {
   key: keyof IndicatorConfig;
@@ -98,12 +131,6 @@ export default function TechnicalChart({
       }),
     [activeTimeframe, technicalPatterns, technicalPatternsByTimeframe],
   );
-  const hasAnyPatterns =
-    activePatterns.length > 0 ||
-    (technicalPatterns?.length ?? 0) > 0 ||
-    Object.values(technicalPatternsByTimeframe ?? {}).some(
-      (patterns) => (patterns?.length ?? 0) > 0,
-    );
 
   const handleTimeframeChange = useCallback(
     (nextTimeframe: ChartHistoryPeriod) => {
@@ -131,6 +158,26 @@ export default function TechnicalChart({
         : null,
     [activeTimeframe, candles, ticker],
   );
+
+  const indicatorOverlays = useMemo(
+    () =>
+      indicatorPatternReport
+        ? indicatorPatternsToOverlays(indicatorPatternReport.patterns, candles)
+        : [],
+    [indicatorPatternReport, candles],
+  );
+
+  const mergedPatterns = useMemo(
+    () => [...activePatterns, ...indicatorOverlays],
+    [activePatterns, indicatorOverlays],
+  );
+
+  const hasAnyPatterns =
+    mergedPatterns.length > 0 ||
+    (technicalPatterns?.length ?? 0) > 0 ||
+    Object.values(technicalPatternsByTimeframe ?? {}).some(
+      (patterns) => (patterns?.length ?? 0) > 0,
+    );
 
   const handleHover = useCallback(
     (idx: number | null) => onHoveredPattern?.(idx),
@@ -233,7 +280,7 @@ export default function TechnicalChart({
           <PriceChart
             candles={candles}
             supportResistance={supportResistance}
-            technicalPatterns={activePatterns}
+            technicalPatterns={mergedPatterns}
             showPatterns={showPatterns}
             highlightedPatternIndex={hoveredPatternIndex}
             onHoveredPattern={handleHover}
@@ -245,7 +292,7 @@ export default function TechnicalChart({
           />
           <ChartLegend
             supportResistance={supportResistance}
-            technicalPatterns={activePatterns}
+            technicalPatterns={mergedPatterns}
             showPatterns={showPatterns}
           />
           <IndicatorPatternSummary report={indicatorPatternReport} />

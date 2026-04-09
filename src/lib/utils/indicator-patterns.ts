@@ -1343,7 +1343,7 @@ export function detectCombinationPatterns(
     },
   ];
 
-  const combinations: CombinationPattern[] = [];
+  const combinations: (CombinationPattern & { _maxDetectedAt: number })[] = [];
   for (const rule of rules) {
     const matches = rule.requiredPatterns
       .map((patternId) => byId.get(patternId))
@@ -1381,7 +1381,7 @@ export function detectCombinationPatterns(
   >();
   for (const combo of combinations) {
     const group = grouped.get(combo.name) ?? [];
-    group.push(combo as CombinationPattern & { _maxDetectedAt: number });
+    group.push(combo);
     grouped.set(combo.name, group);
   }
 
@@ -1398,7 +1398,7 @@ export function detectCombinationPatterns(
 
   // Clean up internal bookkeeping field
   for (const combo of deduped) {
-    delete (combo as Record<string, unknown>)._maxDetectedAt;
+    delete (combo as unknown as Record<string, unknown>)._maxDetectedAt;
   }
 
   return deduped;
@@ -1461,7 +1461,7 @@ function computeAggregateSignal(
     ).length +
     combinations.filter((combination) => combination.signal === "neutral")
       .length;
-  const direction =
+  const direction: IndicatorSignal =
     signed > 0.08 ? "bullish" : signed < -0.08 ? "bearish" : "neutral";
 
   return {

@@ -121,11 +121,11 @@ function normalizeRecommendationLegs(value: unknown): LearningAction["legs"] {
     .map((leg) => {
       if (!leg || typeof leg !== "object") return null;
       const candidate = leg as Record<string, unknown>;
-      const action =
+      const action: "buy" | "sell" | null =
         candidate.action === "buy" || candidate.action === "sell"
           ? candidate.action
           : null;
-      const type =
+      const type: "call" | "put" | null =
         candidate.type === "call" || candidate.type === "put"
           ? candidate.type
           : null;
@@ -879,12 +879,13 @@ export function buildLearningRecords(args: {
       trades,
       decisionTimestamp,
     );
+    const outputStrategy = (
+      signal.analysis.output as Record<string, unknown> | null
+    )?.primary_strategy as Record<string, unknown> | undefined;
     const firstLeg = recommendation.strategyName
       ? (parseTradeDecisionLegs(evaluation?.legs) ??
-        (Array.isArray(signal.analysis.output?.primary_strategy?.legs)
-          ? normalizeRecommendationLegs(
-              signal.analysis.output?.primary_strategy?.legs,
-            )
+        (Array.isArray(outputStrategy?.legs)
+          ? normalizeRecommendationLegs(outputStrategy.legs)
           : null))
       : null;
     const primaryLeg = firstLeg?.[0] ?? null;
@@ -918,9 +919,7 @@ export function buildLearningRecords(args: {
         expiry:
           typeof primaryLeg?.expiry === "string" ? primaryLeg.expiry : null,
         premium:
-          typeof primaryLeg?.estimated_premium === "number"
-            ? primaryLeg.estimated_premium
-            : null,
+          typeof primaryLeg?.premium === "number" ? primaryLeg.premium : null,
         volume: null,
         openInterest: null,
         underlyingPrice: null,

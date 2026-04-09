@@ -358,7 +358,7 @@ export default function GlobePage() {
   const selectedEventAnalysis = selectedEvent
     ? eventAnalyses[selectedEvent.id]
     : null;
-  const selectedAnalysisState = selectedEvent
+  const selectedAnalysisState: AnalysisState = selectedEvent
     ? (analysisStateByEvent[selectedEvent.id] ?? {
         status: "idle",
         cached: false,

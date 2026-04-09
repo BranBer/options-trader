@@ -217,7 +217,7 @@ function ChartInner({
 
       const withinHoverRadius = nearestDistance <= 24;
       const exactIndex = useRecordIndexAxis
-        ? Math.round(x0)
+        ? Math.round(x0 as number)
         : data.findIndex((d) => d.date >= x0);
       const d = withinHoverRadius
         ? data[nearestIndex]

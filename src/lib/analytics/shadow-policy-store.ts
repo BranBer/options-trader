@@ -1,8 +1,8 @@
 import { db } from "@/lib/db/client";
 import { policyShadowDecisions, policyShadowFeedback } from "@/lib/db/schema";
 import { desc, inArray } from "drizzle-orm";
+import type { ShadowPolicyDecision } from "@/lib/analytics/shadow-policy";
 import type {
-  ShadowPolicyDecision,
   ShadowPolicyDecisionRecord,
   ShadowPolicyFeedbackVerdict,
   ShadowPolicyReviewSummary,
