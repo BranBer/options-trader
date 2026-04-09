@@ -57,6 +57,13 @@
       "when": 1775426400000,
       "tag": "0007_event_ticker_source",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1775766211053,
+      "tag": "0008_whole_iron_monger",
+      "breakpoints": true
     }
   ]
 }

@@ -74,7 +74,7 @@ const INTENT_CONFIG: Record<
     explanation:
       "Deep in-the-money options or high-delta contracts are a classic way for large institutions to hedge short stock exposure. Buying calls while short stock caps the upside risk — it is not necessarily a bullish bet on the company.",
     takeaway:
-      "⚠️ Don't blindly follow this signal. The whale may be managing risk, not predicting a rally. Check if short interest in this name is elevated.",
+      "⚠️ Don't blindly follow this signal. The whale may be managing risk, not predicting a rally. See the short interest data below for context.",
   },
   speculative: {
     label: "Speculative Bet",
@@ -156,6 +156,140 @@ function IntentSignalPanel({
       <p className={`text-xs font-medium ${cfg.colorClass} leading-relaxed`}>
         {cfg.takeaway}
       </p>
+    </div>
+  );
+}
+
+function ShortInterestPanel({
+  shortPercentOfFloat,
+  shortRatio,
+  squeezePressure,
+  sentiment,
+  intentHint,
+}: {
+  shortPercentOfFloat: number | null;
+  shortRatio: number | null;
+  squeezePressure: string | null;
+  sentiment: string | null;
+  intentHint: string | null;
+}) {
+  if (shortPercentOfFloat == null && squeezePressure == null) {
+    return (
+      <p className="text-xs text-muted-foreground italic">
+        Short interest data unavailable for this ticker.
+      </p>
+    );
+  }
+
+  const siPct = shortPercentOfFloat != null ? shortPercentOfFloat * 100 : null;
+  const pressure = squeezePressure ?? "low";
+
+  const pressureColor =
+    pressure === "extreme"
+      ? "text-red-400"
+      : pressure === "high"
+        ? "text-amber-400"
+        : pressure === "moderate"
+          ? "text-yellow-400"
+          : "text-emerald-400";
+
+  const gaugeColor =
+    pressure === "extreme"
+      ? "bg-red-500"
+      : pressure === "high"
+        ? "bg-amber-500"
+        : pressure === "moderate"
+          ? "bg-yellow-500"
+          : "bg-emerald-500";
+
+  const isHedge = intentHint === "hedge";
+  const isBullish = sentiment === "bullish";
+
+  let interpretation = "";
+  if (siPct != null) {
+    if (isHedge && siPct > 10) {
+      interpretation =
+        "Elevated short interest validates the hedge — large holders are protecting against short pressure in this name.";
+    } else if (pressure === "extreme" || pressure === "high") {
+      interpretation = isBullish
+        ? "Crowded short — if the stock moves up, shorts may be forced to cover, amplifying upward moves. Adds squeeze fuel to the bullish signal."
+        : "Heavy short positioning aligns with the bearish thesis. Shorts agree with the directional bet.";
+    } else if (pressure === "moderate") {
+      interpretation =
+        "Moderate short interest — noteworthy but not at squeeze-risk levels. A secondary consideration for your thesis.";
+    } else {
+      interpretation =
+        "Low short interest — short covering is unlikely to materially amplify moves in either direction.";
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-border/50 bg-muted/20 p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-foreground/80">
+          Short Interest
+        </span>
+        <Badge
+          variant="outline"
+          className={`text-xs font-bold uppercase ${pressureColor} border-current`}
+        >
+          {pressure} pressure
+        </Badge>
+      </div>
+
+      {siPct != null && (
+        <>
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>{siPct.toFixed(1)}% of float</span>
+              <span>
+                {siPct < 5
+                  ? "Low"
+                  : siPct < 10
+                    ? "Moderate"
+                    : siPct < 20
+                      ? "High"
+                      : "Extreme"}
+              </span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${gaugeColor}`}
+                style={{ width: `${Math.min(100, siPct * 5)}%` }}
+                role="progressbar"
+                aria-valuenow={siPct}
+                aria-valuemin={0}
+                aria-valuemax={20}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground/60">
+              <span>0%</span>
+              <span>5%</span>
+              <span>10%</span>
+              <span>20%+</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <p className="text-muted-foreground">Days to Cover</p>
+              <p className="font-medium">
+                {shortRatio != null ? shortRatio.toFixed(1) : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">SI % of Float</p>
+              <p className="font-medium">{siPct.toFixed(1)}%</p>
+            </div>
+          </div>
+        </>
+      )}
+
+      {interpretation && (
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          {interpretation}
+        </p>
+      )}
     </div>
   );
 }
@@ -283,6 +417,22 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
             </div>
           </>
         )}
+
+        {/* Short Interest Panel */}
+        <Separator />
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground font-medium flex items-center gap-1">
+            Short Interest
+            <InfoTip text="Short interest measures how much of the float is being sold short. High short interest (>10%) can create squeeze conditions — if the stock moves up, shorts are forced to buy back shares, amplifying the move. Days to cover = shares short ÷ average daily volume." />
+          </p>
+          <ShortInterestPanel
+            shortPercentOfFloat={alert.shortPercentOfFloat}
+            shortRatio={alert.shortRatio}
+            squeezePressure={alert.squeezePressure}
+            sentiment={alert.sentiment}
+            intentHint={alert.intentHint}
+          />
+        </div>
 
         <Separator />
 

@@ -600,6 +600,9 @@ interface MarketDataForRecommendation {
   indicatorReport?: IndicatorPatternReport;
   indicatorReportsByTimeframe?: Partial<Record<string, IndicatorPatternReport>>;
   whaleIntentHint?: string | null;
+  shortInterest?:
+    | import("@/lib/services/market-fetcher").ShortInterestData
+    | null;
 }
 
 export async function generateRecommendation(
@@ -624,6 +627,7 @@ export async function generateRecommendation(
     marketData.indicatorReport,
     marketData.whaleIntentHint,
     marketData.indicatorReportsByTimeframe,
+    marketData.shortInterest,
   );
 
   const result = await callLLMWithRetry(
@@ -697,6 +701,9 @@ interface DeepDiveInput {
   computedIndicators?: Partial<
     Record<AnalysisTimeframe, IndicatorPatternReport>
   >;
+  shortInterest?:
+    | import("@/lib/services/market-fetcher").ShortInterestData
+    | null;
 }
 
 const DEEP_DIVE_TIMEFRAME_CONFIG: Array<{
@@ -1038,6 +1045,7 @@ export async function generateDeepDive(
     macroContext: input.macroContext,
     optionsAnalytics: input.optionsAnalytics,
     computedIndicators,
+    shortInterest: input.shortInterest,
   });
 
   const result = await callLLMWithRetry(

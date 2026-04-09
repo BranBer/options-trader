@@ -56,6 +56,17 @@ sqlite.exec(`
     created_at text DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS idx_policy_shadow_feedback_decision ON policy_shadow_feedback (shadow_decision_id);
+  CREATE TABLE IF NOT EXISTS short_interest (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    ticker text NOT NULL UNIQUE,
+    shares_short real,
+    short_ratio real,
+    short_percent_of_float real,
+    squeeze_pressure text NOT NULL,
+    date_short_interest text,
+    fetched_at text NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_short_interest_ticker ON short_interest (ticker);
 `);
 
 const analysisColumns = sqlite

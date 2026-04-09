@@ -38,7 +38,7 @@ describe("Whale Quality with Technical Indicators", () => {
     });
 
     // With bullish technical data
-    const withTech = scoreWhaleQuality(bullishWhale, 190, {
+    const withTech = scoreWhaleQuality(bullishWhale, 190, null, {
       price: 190,
       sma20: 185, // Price above SMA = bullish
       rsi: 60, // RSI > 50 = bullish momentum
@@ -60,7 +60,7 @@ describe("Whale Quality with Technical Indicators", () => {
     });
 
     // With bearish technical data (price below SMA)
-    const withBearishTech = scoreWhaleQuality(bullishWhale, 190, {
+    const withBearishTech = scoreWhaleQuality(bullishWhale, 190, null, {
       price: 190,
       sma20: 195, // Price below SMA = bearish
       rsi: 40, // RSI < 50 = bearish momentum
@@ -83,7 +83,7 @@ describe("Whale Quality with Technical Indicators", () => {
 
   it("handles empty support/resistance arrays", () => {
     const whale = createMockWhale();
-    const score = scoreWhaleQuality(whale, 190, {
+    const score = scoreWhaleQuality(whale, 190, null, {
       price: 190,
       sma20: 185,
       rsi: 60,
@@ -96,7 +96,7 @@ describe("Whale Quality with Technical Indicators", () => {
 
   it("handles null SMA and RSI values", () => {
     const whale = createMockWhale();
-    const score = scoreWhaleQuality(whale, 190, {
+    const score = scoreWhaleQuality(whale, 190, null, {
       price: 190,
       sma20: null,
       rsi: null,

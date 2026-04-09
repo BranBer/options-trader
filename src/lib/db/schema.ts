@@ -104,6 +104,21 @@ export const analyses = sqliteTable(
   ],
 );
 
+export const shortInterest = sqliteTable(
+  "short_interest",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ticker: text("ticker").notNull(),
+    sharesShort: real("shares_short"),
+    shortRatio: real("short_ratio"), // days to cover
+    shortPercentOfFloat: real("short_percent_of_float"), // 0-1
+    squeezePressure: text("squeeze_pressure").notNull(), // 'extreme'|'high'|'moderate'|'low'
+    dateShortInterest: text("date_short_interest"),
+    fetchedAt: text("fetched_at").notNull(),
+  },
+  (table) => [uniqueIndex("idx_short_interest_ticker").on(table.ticker)],
+);
+
 export const pipelineRuns = sqliteTable(
   "pipeline_runs",
   {

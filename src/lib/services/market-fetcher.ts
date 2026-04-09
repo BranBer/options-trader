@@ -10,6 +10,9 @@ import {
   SECTOR_ETFS,
   type SectorPerformance,
 } from "@/lib/utils/sector-rotation";
+import { db } from "@/lib/db/client";
+import { shortInterest as shortInterestTable } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 // yahoo-finance2 v3 class API — types export `never` but methods exist at runtime
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -459,4 +462,93 @@ export async function fetchShortInterest(
     );
     return null;
   }
+}
+
+const SHORT_INTEREST_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Returns cached short interest data for a ticker if fresher than 24 hours,
+ * otherwise fetches from Yahoo Finance, persists to DB, and returns the result.
+ * Falls back to stale cache on fetch failure; returns null if nothing is available.
+ */
+export async function getOrFetchShortInterest(
+  ticker: string,
+): Promise<ShortInterestData | null> {
+  const cached = await db
+    .select()
+    .from(shortInterestTable)
+    .where(eq(shortInterestTable.ticker, ticker))
+    .limit(1);
+
+  const row = cached[0] ?? null;
+
+  if (row) {
+    const age = Date.now() - new Date(row.fetchedAt).getTime();
+    if (age < SHORT_INTEREST_TTL_MS) {
+      return {
+        ticker: row.ticker,
+        sharesShort: row.sharesShort,
+        shortRatio: row.shortRatio,
+        shortPercentOfFloat: row.shortPercentOfFloat,
+        dateShortInterest: row.dateShortInterest
+          ? new Date(row.dateShortInterest)
+          : null,
+        squeezePressure:
+          row.squeezePressure as ShortInterestData["squeezePressure"],
+      };
+    }
+  }
+
+  const fresh = await fetchShortInterest(ticker);
+
+  if (fresh) {
+    const fetchedAt = new Date().toISOString();
+    await db
+      .insert(shortInterestTable)
+      .values({
+        ticker: fresh.ticker,
+        sharesShort: fresh.sharesShort,
+        shortRatio: fresh.shortRatio,
+        shortPercentOfFloat: fresh.shortPercentOfFloat,
+        squeezePressure: fresh.squeezePressure,
+        dateShortInterest: fresh.dateShortInterest
+          ? fresh.dateShortInterest.toISOString()
+          : null,
+        fetchedAt,
+      })
+      .onConflictDoUpdate({
+        target: shortInterestTable.ticker,
+        set: {
+          sharesShort: fresh.sharesShort,
+          shortRatio: fresh.shortRatio,
+          shortPercentOfFloat: fresh.shortPercentOfFloat,
+          squeezePressure: fresh.squeezePressure,
+          dateShortInterest: fresh.dateShortInterest
+            ? fresh.dateShortInterest.toISOString()
+            : null,
+          fetchedAt,
+        },
+      });
+    return fresh;
+  }
+
+  // Fetch failed — return stale cache if available
+  if (row) {
+    console.warn(
+      `[market-fetcher] Using stale short interest cache for ${ticker}`,
+    );
+    return {
+      ticker: row.ticker,
+      sharesShort: row.sharesShort,
+      shortRatio: row.shortRatio,
+      shortPercentOfFloat: row.shortPercentOfFloat,
+      dateShortInterest: row.dateShortInterest
+        ? new Date(row.dateShortInterest)
+        : null,
+      squeezePressure:
+        row.squeezePressure as ShortInterestData["squeezePressure"],
+    };
+  }
+
+  return null;
 }

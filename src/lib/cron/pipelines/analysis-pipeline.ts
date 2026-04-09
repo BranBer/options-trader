@@ -18,6 +18,7 @@ import {
   fetchVIX,
   fetchEarningsDate,
   computeRealizedVol,
+  getOrFetchShortInterest,
 } from "@/lib/services/market-fetcher";
 import { desc, gte, eq, and } from "drizzle-orm";
 import * as progress from "@/lib/cron/pipeline-progress";
@@ -420,6 +421,11 @@ export async function runAnalysisPipeline(): Promise<number> {
             correlation.whale_trade.expiry,
           );
 
+          // Fetch short interest (24h cached)
+          const siData = await getOrFetchShortInterest(ticker).catch(
+            () => null,
+          );
+
           const recommendation = await generateRecommendation(correlation, {
             price: marketData?.price ?? 0,
             ivRank: atmIV != null ? Math.round(atmIV * 100) : undefined,
@@ -447,6 +453,7 @@ export async function runAnalysisPipeline(): Promise<number> {
             indicatorReportsByTimeframe,
             whaleIntentHint:
               recentWhales.find((w) => w.ticker === ticker)?.intentHint ?? null,
+            shortInterest: siData,
           });
 
           // Store latest market snapshot
@@ -953,6 +960,9 @@ export async function runAnalysisPipeline(): Promise<number> {
                   gex: chain.gex ?? null,
                 }
               : undefined,
+            shortInterest: await getOrFetchShortInterest(item.ticker).catch(
+              () => null,
+            ),
           });
 
           await db.insert(analyses).values({
@@ -1103,6 +1113,10 @@ export async function runAnalysisPipeline(): Promise<number> {
           insiderSentiment: insiderSentimentMap.get(ticker) ?? null,
           direction: recOutput.direction,
           sectorRotation: sectorRotationCtx,
+          whaleIntentHint: whaleRow?.intentHint ?? null,
+          shortInterestPctOfFloat: await getOrFetchShortInterest(ticker)
+            .then((si) => si?.shortPercentOfFloat ?? null)
+            .catch(() => null),
         });
 
         await db

@@ -1,19 +1,22 @@
 import type { WhaleAlert } from "@/types/whale";
+import type { ShortInterestData } from "@/lib/services/market-fetcher";
 
 /**
  * Score a whale trade's quality/conviction from 0-100.
  *
  * Factors:
- *   Volume/OI ratio      (25.5%) — >1 suggests new position opening
- *   OTM aggressiveness   (21.25%) — further OTM = more conviction
- *   Premium size         (17%) — logarithmic: $100K=20, $500K=50, $1M+=80
- *   Expiry timing        (12.75%) — weeklies (<7 DTE) = unusual conviction
- *   Sweep likelihood     (8.5%) — high volume relative to typical size
- *   Technical alignment  (15%) — patterns confirming whale direction
+ *   Volume/OI ratio      (23.5%) — >1 suggests new position opening
+ *   OTM aggressiveness   (19.5%) — further OTM = more conviction
+ *   Premium size         (15.6%) — logarithmic: $100K=20, $500K=50, $1M+=80
+ *   Expiry timing        (11.7%) — weeklies (<7 DTE) = unusual conviction
+ *   Sweep likelihood     (7.8%) — high volume relative to typical size
+ *   Technical alignment  (13.9%) — patterns confirming whale direction
+ *   Short interest       (8.0%) — squeeze potential / thesis confirmation
  */
 export function scoreWhaleQuality(
   alert: WhaleAlert,
   underlyingPrice?: number,
+  shortInterestData?: ShortInterestData | null,
   technicalData?: {
     price: number;
     sma20: number | null;
@@ -153,14 +156,42 @@ export function scoreWhaleQuality(
     technicalScore = factors > 0 ? (score / factors) * 100 : 50;
   }
 
-  // Weighted composite (rebalanced for 6 factors)
+  // 7. Short interest signal (8%) — direction-aware squeeze / confirmation factor
+  let siScore: number | null = null;
+  if (shortInterestData) {
+    const siPct = shortInterestData.shortPercentOfFloat; // 0-1
+    if (siPct != null) {
+      const isBullish = alert.sentiment === "bullish";
+      if (siPct > 0.2) {
+        // Extreme short interest
+        siScore = isBullish ? 95 : 85;
+      } else if (siPct > 0.1) {
+        // High short interest
+        siScore = isBullish ? 75 : 70;
+      } else if (siPct > 0.05) {
+        siScore = 50; // Moderate — noteworthy but not decisive
+      } else {
+        siScore = 30; // Low — no meaningful squeeze potential
+      }
+    }
+  }
+
+  // Weighted composite — if SI data is unavailable, fall back to original 6-factor weights
   const composite =
-    voiScore * 0.255 +
-    otmScore * 0.2125 +
-    premiumScore * 0.17 +
-    expiryScore * 0.1275 +
-    sweepScore * 0.085 +
-    technicalScore * 0.15;
+    siScore != null
+      ? voiScore * 0.235 +
+        otmScore * 0.195 +
+        premiumScore * 0.156 +
+        expiryScore * 0.117 +
+        sweepScore * 0.078 +
+        technicalScore * 0.139 +
+        siScore * 0.08
+      : voiScore * 0.255 +
+        otmScore * 0.2125 +
+        premiumScore * 0.17 +
+        expiryScore * 0.1275 +
+        sweepScore * 0.085 +
+        technicalScore * 0.15;
 
   return Math.round(Math.max(0, Math.min(100, composite)));
 }

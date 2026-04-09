@@ -12,7 +12,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useInfiniteAnalyses, type Analysis } from "@/hooks/useApiData";
+import {
+  useInfiniteAnalyses,
+  useWhaleAlerts,
+  type Analysis,
+} from "@/hooks/useApiData";
 import {
   formatPremium,
   formatCurrency,
@@ -56,6 +60,20 @@ export default function AnalysisPage() {
     fetchNextPage: recFetchNext,
   } = useInfiniteAnalyses("trade_recommendation");
 
+  const { data: alertsData } = useWhaleAlerts({ limit: 200 });
+  const siByTicker = new Map(
+    (alertsData?.alerts ?? [])
+      .filter((a) => a.shortPercentOfFloat != null)
+      .map((a) => [
+        a.ticker,
+        {
+          shortPercentOfFloat: a.shortPercentOfFloat,
+          shortRatio: a.shortRatio,
+          squeezePressure: a.squeezePressure,
+        },
+      ]),
+  );
+
   const crossRefs = xrefData?.pages.flatMap((p) => p.analyses) ?? [];
   const recommendations = recData?.pages.flatMap((p) => p.analyses) ?? [];
 
@@ -96,7 +114,9 @@ export default function AnalysisPage() {
           ) : (
             <VirtualizedAnalysisList
               items={crossRefs}
-              renderItem={(a) => <CrossReferenceCard analysis={a} />}
+              renderItem={(a) => (
+                <CrossReferenceCard analysis={a} siByTicker={siByTicker} />
+              )}
               footer={
                 <InfiniteScrollTrigger
                   onLoadMore={xrefFetchNext}
@@ -122,7 +142,9 @@ export default function AnalysisPage() {
           ) : (
             <VirtualizedAnalysisList
               items={recommendations}
-              renderItem={(a) => <RecommendationCard analysis={a} />}
+              renderItem={(a) => (
+                <RecommendationCard analysis={a} siByTicker={siByTicker} />
+              )}
               footer={
                 <InfiniteScrollTrigger
                   onLoadMore={recFetchNext}
@@ -267,7 +289,22 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
-function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
+type SiByTicker = Map<
+  string,
+  {
+    shortPercentOfFloat: number | null;
+    shortRatio: number | null;
+    squeezePressure: string | null;
+  }
+>;
+
+function CrossReferenceCard({
+  analysis,
+  siByTicker,
+}: {
+  analysis: Analysis;
+  siByTicker?: SiByTicker;
+}) {
   const output =
     analysis.output as unknown as Partial<CrossReferenceAnalysis> | null;
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
@@ -389,11 +426,40 @@ function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
                           buy options to protect existing short positions — a
                           big call purchase isn&apos;t always a bullish signal.
                         </p>
-                        <p className="text-xs text-amber-400 font-medium">
-                          ⚠️ Reduce confidence in this signal. Verify short
-                          interest data for {c.whale_trade.ticker} before
-                          acting.
-                        </p>
+                        {(() => {
+                          const si = siByTicker?.get(c.whale_trade.ticker);
+                          if (si?.shortPercentOfFloat != null) {
+                            const siPct = (
+                              si.shortPercentOfFloat * 100
+                            ).toFixed(1);
+                            const pressure = si.squeezePressure ?? "low";
+                            const pressureColor =
+                              pressure === "extreme" || pressure === "high"
+                                ? "text-red-400"
+                                : pressure === "moderate"
+                                  ? "text-amber-400"
+                                  : "text-emerald-400";
+                            return (
+                              <p
+                                className={`text-xs font-medium ${pressureColor}`}
+                              >
+                                ⚠️ Short interest for {c.whale_trade.ticker} is{" "}
+                                {siPct}% of float ({pressure.toUpperCase()}{" "}
+                                squeeze pressure)
+                                {pressure === "extreme" || pressure === "high"
+                                  ? " — elevated short interest validates the hedge."
+                                  : " — low short interest; hedge may be driven by other factors."}
+                              </p>
+                            );
+                          }
+                          return (
+                            <p className="text-xs text-amber-400 font-medium">
+                              ⚠️ Reduce confidence in this signal. Short
+                              interest data unavailable for{" "}
+                              {c.whale_trade.ticker}.
+                            </p>
+                          );
+                        })()}
                       </div>
                     )}
                     <WhaleDeepDive ticker={c.whale_trade.ticker} />
@@ -449,7 +515,13 @@ function CrossReferenceCard({ analysis }: { analysis: Analysis }) {
   );
 }
 
-function RecommendationCard({ analysis }: { analysis: Analysis }) {
+function RecommendationCard({
+  analysis,
+  siByTicker,
+}: {
+  analysis: Analysis;
+  siByTicker?: SiByTicker;
+}) {
   const raw = analysis.output as unknown as TradeRecommendation | null;
   if (!raw || !raw.ticker || !raw.primary_strategy) return null;
   const output = raw;
@@ -497,6 +569,46 @@ function RecommendationCard({ analysis }: { analysis: Analysis }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm">{output.thesis}</p>
+
+        {/* Short Interest Inline */}
+        {(() => {
+          const si = siByTicker?.get(output.ticker);
+          if (!si || si.shortPercentOfFloat == null) return null;
+          const pct = (si.shortPercentOfFloat * 100).toFixed(1);
+          const pressure = si.squeezePressure ?? "low";
+          const color =
+            pressure === "extreme" || pressure === "high"
+              ? "text-red-400"
+              : pressure === "moderate"
+                ? "text-amber-400"
+                : "text-emerald-400";
+          const interpretation =
+            pressure === "extreme" || pressure === "high"
+              ? output.direction === "bullish"
+                ? "Elevated short interest could amplify upside via a squeeze."
+                : "Heavy short interest supports bearish thesis."
+              : pressure === "moderate"
+                ? "Moderate short interest — monitor for squeeze risk."
+                : "Low short interest — no significant squeeze catalyst.";
+          return (
+            <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2 flex items-center gap-3 text-xs">
+              <span className="text-muted-foreground shrink-0">
+                Short Interest
+              </span>
+              <span className={`font-mono font-semibold ${color}`}>
+                {pct}% of float
+              </span>
+              {si.shortRatio != null && (
+                <span className="text-muted-foreground">
+                  {si.shortRatio.toFixed(1)}d to cover
+                </span>
+              )}
+              <span className="text-muted-foreground hidden md:inline">
+                {interpretation}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Confidence Breakdown */}
         {analysis.confidenceBreakdown && (

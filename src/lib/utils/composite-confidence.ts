@@ -35,6 +35,10 @@ interface CompositeInputs {
   sectorRotation?: SectorRotationContext | null;
   /** Ticker sector ETF ticker (e.g., "XLK" for tech stocks) — for sector alignment */
   tickerSector?: string | null;
+  /** Short interest as a fraction of float (0-1) */
+  shortInterestPctOfFloat?: number | null;
+  /** Whale intent hint for hedge detection */
+  whaleIntentHint?: string | null;
 }
 
 /**
@@ -42,14 +46,15 @@ interface CompositeInputs {
  * If a factor is unavailable, its weight is redistributed proportionally.
  */
 const FACTOR_WEIGHTS = {
-  geminiCorrelationConf: 0.2, // AI Correlation
-  whaleQualityScore: 0.15,
-  technicalAlignment: 0.15,
-  ivRegime: 0.1,
-  vixRegime: 0.1,
-  earningsRisk: 0.1,
-  insiderAlignment: 0.1,
-  sectorMomentum: 0.1,
+  geminiCorrelationConf: 0.18, // AI Correlation
+  whaleQualityScore: 0.14,
+  technicalAlignment: 0.14,
+  ivRegime: 0.09,
+  vixRegime: 0.09,
+  earningsRisk: 0.09,
+  insiderAlignment: 0.09,
+  sectorMomentum: 0.09,
+  shortInterest: 0.09,
 } as const;
 
 /**
@@ -260,6 +265,46 @@ export function computeCompositeConfidence(
       key: "sectorMomentum",
       value: null,
       description: "Sector rotation data not available",
+    });
+  }
+
+  // Factor 9: Short interest signal (direction-aware squeeze / confirmation)
+  if (inputs.shortInterestPctOfFloat != null) {
+    const siPct = inputs.shortInterestPctOfFloat; // 0-1
+    const dir = inputs.direction ?? "neutral";
+    const isHedge = inputs.whaleIntentHint === "hedge";
+    let score = 0.45; // default: low SI, neutral
+    let label = "low";
+
+    if (isHedge && siPct > 0.1) {
+      score = 0.3;
+      label = "high SI validates hedge — reduces aggressiveness";
+    } else if (siPct > 0.2) {
+      score = dir === "bullish" ? 0.85 : 0.8;
+      label = `extreme SI ${dir === "bullish" ? "— squeeze fuel" : "— strong confirmation"}`;
+    } else if (siPct > 0.1) {
+      score = dir === "bullish" ? 0.7 : 0.7;
+      label = `high SI ${dir === "bullish" ? "— moderate squeeze potential" : "— confirms bearish thesis"}`;
+    } else if (siPct > 0.05) {
+      score = 0.55;
+      label = "moderate SI — noteworthy";
+    } else {
+      score = 0.45;
+      label = "low SI — no squeeze potential";
+    }
+
+    rawFactors.push({
+      name: "Short Interest",
+      key: "shortInterest",
+      value: score,
+      description: `SI: ${(siPct * 100).toFixed(1)}% of float — ${label}`,
+    });
+  } else {
+    rawFactors.push({
+      name: "Short Interest",
+      key: "shortInterest",
+      value: null,
+      description: "Short interest data not available",
     });
   }
 

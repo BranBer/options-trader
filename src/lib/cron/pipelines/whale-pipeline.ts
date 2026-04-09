@@ -4,14 +4,20 @@ import {
   enrichWithIV,
   fetchVIX,
   fetchSectorPerformance,
+  getOrFetchShortInterest,
 } from "@/lib/services/market-fetcher";
 import { db } from "@/lib/db/client";
-import { whaleAlerts, marketSnapshots } from "@/lib/db/schema";
+import {
+  whaleAlerts,
+  marketSnapshots,
+  shortInterest as shortInterestTable,
+} from "@/lib/db/schema";
+import { gte, sql } from "drizzle-orm";
 import { scoreWhaleQuality } from "@/lib/utils/whale-quality";
+import type { ShortInterestData } from "@/lib/services/market-fetcher";
 import { inferSentiment } from "@/lib/utils/sentiment-inference";
 import { classifyRotation } from "@/lib/utils/sector-rotation";
 import type { SectorRotationContext } from "@/lib/utils/sector-rotation";
-import { sql } from "drizzle-orm";
 
 /**
  * Whale Pipeline: Fetch whale alerts → Enrich with market data → Store
@@ -48,6 +54,20 @@ export async function runWhalePipeline(): Promise<number> {
 
   // Build a lookup map for quick enrichment
   const marketMap = new Map(enrichedMarket.map((m) => [m.ticker, m]));
+
+  // Step 3b: Fetch short interest for all unique tickers (24h cached)
+  const siResults = await Promise.allSettled(
+    uniqueTickers.map((ticker) => getOrFetchShortInterest(ticker)),
+  );
+  const siMap = new Map<string, ShortInterestData | null>();
+  uniqueTickers.forEach((ticker, i) => {
+    const result = siResults[i];
+    siMap.set(ticker, result.status === "fulfilled" ? result.value : null);
+  });
+  const siHits = [...siMap.values()].filter(Boolean).length;
+  console.log(
+    `[WhalePipeline] Short interest: ${siHits}/${uniqueTickers.length} tickers fetched/cached`,
+  );
 
   // Step 4: Store market snapshots
   for (const snap of enrichedMarket) {
@@ -121,7 +141,8 @@ export async function runWhalePipeline(): Promise<number> {
   let stored = 0;
   for (const alert of alerts) {
     const market = marketMap.get(alert.ticker);
-    const quality = scoreWhaleQuality(alert, market?.price);
+    const si = siMap.get(alert.ticker) ?? null;
+    const quality = scoreWhaleQuality(alert, market?.price, si);
     const sentimentResult = inferSentiment(alert, market?.price);
     const dedupDate = alert.detectedAt
       ? alert.detectedAt.slice(0, 10)
@@ -191,5 +212,35 @@ export async function runWhalePipeline(): Promise<number> {
   console.log(
     `[WhalePipeline] Complete: ${stored} whale alerts stored, ${enrichedMarket.length} market snapshots`,
   );
+
+  // Step 6: Backfill SI for any tickers in the 24h window that are still missing
+  try {
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const recentRows = await db
+      .selectDistinct({ ticker: whaleAlerts.ticker })
+      .from(whaleAlerts)
+      .where(gte(whaleAlerts.detectedAt, since24h));
+    const recentTickers = recentRows.map((r) => r.ticker);
+
+    if (recentTickers.length > 0) {
+      const cachedRows = await db
+        .select({ ticker: shortInterestTable.ticker })
+        .from(shortInterestTable);
+      const cachedSet = new Set(cachedRows.map((r) => r.ticker));
+      const missing = recentTickers.filter((t) => !cachedSet.has(t));
+
+      if (missing.length > 0) {
+        console.log(
+          `[WhalePipeline] SI backfill: fetching ${missing.length} uncached tickers`,
+        );
+        await Promise.allSettled(
+          missing.map((t) => getOrFetchShortInterest(t)),
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("[WhalePipeline] SI backfill failed (non-critical):", err);
+  }
+
   return stored;
 }

@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db/client";
-import { whaleAlerts, marketSnapshots } from "@/lib/db/schema";
+import {
+  whaleAlerts,
+  marketSnapshots,
+  shortInterest as shortInterestTable,
+} from "@/lib/db/schema";
 import { desc, gte, eq, and } from "drizzle-orm";
 import { computeMarketPulse } from "@/lib/utils/sentiment-inference";
 
@@ -34,6 +38,14 @@ export async function GET(req: NextRequest) {
     string,
     { price: number | null; dayChangePct: number | null }
   >();
+  const siMap = new Map<
+    string,
+    {
+      shortPercentOfFloat: number | null;
+      shortRatio: number | null;
+      squeezePressure: string | null;
+    }
+  >();
   for (const t of uniqueTickers) {
     const [snap] = await db
       .select()
@@ -43,12 +55,27 @@ export async function GET(req: NextRequest) {
       .limit(1);
     if (snap)
       marketMap.set(t, { price: snap.price, dayChangePct: snap.dayChangePct });
+
+    const [siRow] = await db
+      .select()
+      .from(shortInterestTable)
+      .where(eq(shortInterestTable.ticker, t))
+      .limit(1);
+    if (siRow)
+      siMap.set(t, {
+        shortPercentOfFloat: siRow.shortPercentOfFloat,
+        shortRatio: siRow.shortRatio,
+        squeezePressure: siRow.squeezePressure,
+      });
   }
 
   const enriched = alerts.map((a) => ({
     ...a,
     currentPrice: marketMap.get(a.ticker)?.price ?? a.underlyingPrice,
     dayChangePct: marketMap.get(a.ticker)?.dayChangePct ?? null,
+    shortPercentOfFloat: siMap.get(a.ticker)?.shortPercentOfFloat ?? null,
+    shortRatio: siMap.get(a.ticker)?.shortRatio ?? null,
+    squeezePressure: siMap.get(a.ticker)?.squeezePressure ?? null,
   }));
 
   // Compute market pulse from all alerts in window (not just limited/filtered)

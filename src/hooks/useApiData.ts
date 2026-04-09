@@ -45,6 +45,10 @@ export interface WhaleAlert {
   inferredSentiment: string | null;
   sentimentConfidence: string | null;
   intentHint: string | null;
+  // Epic 41 — Short interest
+  shortPercentOfFloat: number | null;
+  shortRatio: number | null;
+  squeezePressure: string | null;
 }
 
 export interface MarketPulse {

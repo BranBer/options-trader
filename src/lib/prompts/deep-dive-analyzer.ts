@@ -1,6 +1,7 @@
 import type { AnalysisTimeframe } from "@/lib/utils/chart-timeframes";
 import { ANALYSIS_TIMEFRAMES } from "@/lib/utils/chart-timeframes";
 import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
+import type { ShortInterestData } from "@/lib/services/market-fetcher";
 
 // ---------- System Instruction ----------
 
@@ -82,6 +83,7 @@ interface DeepDivePromptInput {
   computedIndicators?: Partial<
     Record<AnalysisTimeframe, IndicatorPatternReport>
   >;
+  shortInterest?: ShortInterestData | null;
 }
 
 function renderIndicatorReport(report: IndicatorPatternReport): string {
@@ -213,7 +215,25 @@ ${input.newsContextJson}`;
       }
     }
   }
-
+  if (input.shortInterest) {
+    const si = input.shortInterest;
+    const siPct = si.shortPercentOfFloat;
+    if (siPct != null) {
+      const siPctStr = (siPct * 100).toFixed(1);
+      const dtc = si.shortRatio != null ? si.shortRatio.toFixed(1) : "N/A";
+      const pressure = si.squeezePressure;
+      prompt += `\n\n## Short Interest Context`;
+      prompt += `\n- Short Interest: ${siPctStr}% of float (${pressure.toUpperCase()} squeeze pressure)`;
+      prompt += `\n- Days to Cover: ${dtc} (how many days of average volume needed for all shorts to cover)`;
+      if (pressure === "extreme" || pressure === "high") {
+        prompt += `\n- Interpretation: A significant portion of this stock's float is held short. If positive catalysts emerge, shorts may be forced to buy back shares rapidly, creating a short squeeze that amplifies upside moves. This also increases overall volatility risk.`;
+      } else if (pressure === "moderate") {
+        prompt += `\n- Interpretation: Moderate short interest. Noteworthy but not at squeeze-risk levels. Factor into risk assessment as a potential volatility amplifier.`;
+      } else {
+        prompt += `\n- Interpretation: Low short interest. Short covering is unlikely to materially amplify moves. SI is not a significant factor for this trade.`;
+      }
+    }
+  }
   if (input.computedIndicators) {
     const indicatorSections = (
       Object.entries(input.computedIndicators) as Array<

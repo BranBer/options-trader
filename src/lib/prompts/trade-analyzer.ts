@@ -1,4 +1,5 @@
 import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
+import type { ShortInterestData } from "@/lib/services/market-fetcher";
 
 // ---------- System Instruction ----------
 
@@ -63,6 +64,7 @@ export function buildTradeAnalyzerPrompt(
   indicatorReport?: IndicatorPatternReport,
   whaleIntentHint?: string | null,
   indicatorReportsByTimeframe?: Partial<Record<string, IndicatorPatternReport>>,
+  shortInterest?: ShortInterestData | null,
 ): string {
   const todayStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/New_York",
@@ -111,6 +113,36 @@ Market Data for ${ticker}:
 
   if (whaleIntentHint) {
     prompt += `\n- Whale Intent Classification: ${whaleIntentHint} (ML-derived signal from broker order flow analysis)`;
+  }
+
+  if (shortInterest) {
+    const siPct = shortInterest.shortPercentOfFloat;
+    if (siPct != null) {
+      const siPctStr = (siPct * 100).toFixed(1);
+      const dtc =
+        shortInterest.shortRatio != null
+          ? shortInterest.shortRatio.toFixed(1)
+          : "N/A";
+      const pressure = shortInterest.squeezePressure;
+      let siInterpretation = "";
+      if (pressure === "extreme" || pressure === "high") {
+        siInterpretation =
+          whaleIntentHint === "hedge"
+            ? "Heavy short positioning validates the hedge — institution is protecting against a crowded short. Treat this signal with caution."
+            : siPct > 0.1
+              ? "Crowded short — opposing traders face significant covering pressure if price rises. Adds squeeze fuel to any bullish catalyst."
+              : "High short interest — bearish crowd is elevated.";
+      } else if (pressure === "moderate") {
+        siInterpretation =
+          "Moderate short interest — noteworthy but not at squeeze-risk levels.";
+      } else {
+        siInterpretation =
+          "Low short interest — no meaningful squeeze potential from short covering.";
+      }
+      prompt += `\n- Short Interest: ${siPctStr}% of float (${pressure.toUpperCase()} squeeze pressure)`;
+      prompt += `\n- Days to Cover: ${dtc}`;
+      prompt += `\n- SI Context: ${siInterpretation}`;
+    }
   }
 
   if (macroContext) {
