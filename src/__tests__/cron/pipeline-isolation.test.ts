@@ -5,8 +5,6 @@ const mockFetchAllNews = vi.fn();
 const mockClassifyAndStoreNews = vi.fn();
 const mockRunWhalePipeline = vi.fn();
 const mockRunAnalysisPipeline = vi.fn();
-const mockRunSimPipeline = vi.fn();
-const mockRunExitMonitor = vi.fn();
 const mockRecordPipelineRunStart = vi.fn(() => 101);
 const mockRecordPipelineRunCompletion = vi.fn(() => "2026-04-02T12:30:00.000Z");
 const mockGetLastCompletedPipelineRefreshAt = vi.fn(() => null);
@@ -26,16 +24,6 @@ vi.mock("@/lib/cron/pipelines/whale-pipeline", () => ({
 
 vi.mock("@/lib/cron/pipelines/analysis-pipeline", () => ({
   runAnalysisPipeline: (...args: unknown[]) => mockRunAnalysisPipeline(...args),
-}));
-
-vi.mock("@/lib/cron/pipelines/sim-pipeline", () => ({
-  runSimPipeline: (...args: unknown[]) => mockRunSimPipeline(...args),
-  getLastRunRejections: vi.fn(() => []),
-}));
-
-vi.mock("@/lib/cron/exit-monitor", () => ({
-  runExitMonitor: (...args: unknown[]) => mockRunExitMonitor(...args),
-  getExitMonitorStatus: vi.fn(),
 }));
 
 vi.mock("node-cron", () => ({
@@ -62,13 +50,12 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
     mockRunWhalePipeline.mockResolvedValue(0);
     mockClassifyAndStoreNews.mockResolvedValue(0);
     mockRunAnalysisPipeline.mockResolvedValue(0);
-    mockRunSimPipeline.mockResolvedValue(0);
     mockRecordPipelineRunStart.mockReturnValue(101);
     mockRecordPipelineRunCompletion.mockReturnValue("2026-04-02T12:30:00.000Z");
     mockGetLastCompletedPipelineRefreshAt.mockReturnValue(null);
   });
 
-  it("continues to sim pipeline when analysis throws", async () => {
+  it("continues to later stages when analysis throws", async () => {
     mockRunAnalysisPipeline.mockRejectedValue(
       new Error("LLM cross-reference failed"),
     );
@@ -77,11 +64,9 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
 
     expect(result.status).toBe("partial");
     expect(result.stages.analysis).toBe("error");
-    expect(result.stages.sim).toBe("ok");
-    expect(mockRunSimPipeline).toHaveBeenCalledOnce();
   });
 
-  it("continues to classify + analysis + sim when fetch throws", async () => {
+  it("continues to classify + analysis when fetch throws", async () => {
     mockFetchAllNews.mockRejectedValue(new Error("Network timeout"));
 
     const result = await runPipeline();
@@ -90,7 +75,6 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
     // classify still runs (with empty articles)
     expect(mockClassifyAndStoreNews).toHaveBeenCalledOnce();
     expect(mockRunAnalysisPipeline).toHaveBeenCalledOnce();
-    expect(mockRunSimPipeline).toHaveBeenCalledOnce();
   });
 
   it("returns per-stage status when all succeed", async () => {
@@ -101,13 +85,11 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
       fetch: "ok",
       classify: "ok",
       analysis: "ok",
-      sim: "ok",
     });
   });
 
   it("marks multiple stage errors independently", async () => {
     mockRunAnalysisPipeline.mockRejectedValue(new Error("Analysis fail"));
-    mockRunSimPipeline.mockRejectedValue(new Error("Sim fail"));
 
     const result = await runPipeline();
 
@@ -115,7 +97,6 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
     expect(result.stages.fetch).toBe("ok");
     expect(result.stages.classify).toBe("ok");
     expect(result.stages.analysis).toBe("error");
-    expect(result.stages.sim).toBe("error");
   });
 
   it("sets lastError on pipeline-progress when a stage fails", async () => {
@@ -151,47 +132,6 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
       fetch: "ok",
       classify: "ok",
       analysis: "error",
-      sim: "ok",
     });
-  });
-});
-
-describe("Story 17.3 — Sim Pipeline Prior-Cycle Independence", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockFetchAllNews.mockResolvedValue([]);
-    mockRunWhalePipeline.mockResolvedValue(0);
-    mockClassifyAndStoreNews.mockResolvedValue(0);
-    mockRunSimPipeline.mockResolvedValue(0);
-  });
-
-  it("sim pipeline runs when analysis pipeline throws", async () => {
-    mockRunAnalysisPipeline.mockRejectedValue(new Error("LLM quota exceeded"));
-
-    const result = await runPipeline();
-
-    expect(mockRunSimPipeline).toHaveBeenCalledOnce();
-    expect(result.stages.sim).toBe("ok");
-    expect(result.stages.analysis).toBe("error");
-  });
-
-  it("sim pipeline runs when both fetch and analysis throw", async () => {
-    mockFetchAllNews.mockRejectedValue(new Error("DNS failure"));
-    mockRunAnalysisPipeline.mockRejectedValue(new Error("No data"));
-
-    const result = await runPipeline();
-
-    expect(mockRunSimPipeline).toHaveBeenCalledOnce();
-    expect(result.stages.sim).toBe("ok");
-  });
-
-  it("sim pipeline runs and returns actions when analysis fails", async () => {
-    mockRunAnalysisPipeline.mockRejectedValue(new Error("fail"));
-    mockRunSimPipeline.mockResolvedValue(3); // 3 actions from prior-cycle recs
-
-    const result = await runPipeline();
-
-    expect(mockRunSimPipeline).toHaveBeenCalledOnce();
-    expect(result.stages.sim).toBe("ok");
   });
 });

@@ -14,7 +14,6 @@ import {
   Check,
   Loader2,
   Circle,
-  Briefcase,
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -44,7 +43,6 @@ interface PipelineStatus {
     fetch: string;
     classify: string;
     analysis: string;
-    sim: string;
   } | null;
   pipelineHealth?: {
     isStale: boolean;
@@ -58,7 +56,6 @@ const navLinks = [
   { href: "/whale-alerts", label: "Whale Alerts", icon: Activity },
   { href: "/globe", label: "Globe", icon: Globe },
   { href: "/analysis", label: "Analysis", icon: BarChart3 },
-  { href: "/portfolio", label: "Portfolio", icon: Briefcase },
 ];
 
 function NavItems({
@@ -135,11 +132,6 @@ export default function Navbar() {
   const activeStep = pipeline?.steps.find((s) => s.status === "active");
   const progressPct = pipeline?.active ? calcProgressPct(pipeline.steps) : 0;
   const pipelineHealth = pipeline?.pipelineHealth;
-  const pipelineHealthHref = pipelineHealth
-    ? pipelineHealth.status === "stale" || pipelineHealth.status === "never_run"
-      ? "/portfolio?tab=diagnostics&reasonCluster=pipeline_gap&outcome=not_evaluated"
-      : "/portfolio?tab=diagnostics"
-    : "/portfolio?tab=diagnostics";
 
   // Poll pipeline status
   useEffect(() => {
@@ -264,7 +256,7 @@ export default function Navbar() {
                     : {pipeline.lastError.message}
                   </p>
                   <p className="text-[10px] text-muted-foreground/60 mt-1">
-                    Sim portfolio ran on prior-cycle data
+                    Subsequent stages used prior-cycle data
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -276,7 +268,7 @@ export default function Navbar() {
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <Link href={pipelineHealthHref} className="inline-flex">
+                    <span className="inline-flex">
                       <Badge
                         variant="outline"
                         className={`text-[10px] uppercase tracking-wide ${
@@ -287,7 +279,7 @@ export default function Navbar() {
                               : "text-muted-foreground"
                         }`}
                       />
-                    </Link>
+                    </span>
                   }
                 >
                   {pipelineHealth.status}
@@ -304,10 +296,10 @@ export default function Navbar() {
                           : "The pipeline is currently running."}
                   </p>
                   <p className="text-[10px] text-muted-foreground/60 mt-1">
-                    Open diagnostics
+                    View analysis
                     {pipelineHealth.status === "stale" ||
                     pipelineHealth.status === "never_run"
-                      ? " with pipeline-gap filters"
+                      ? " — pipeline freshness degraded"
                       : " for recent alert traces"}
                   </p>
                 </TooltipContent>

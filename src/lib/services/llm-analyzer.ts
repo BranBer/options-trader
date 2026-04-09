@@ -43,12 +43,6 @@ import {
   DEEP_DIVE_RESPONSE_SCHEMA,
   buildDeepDivePrompt,
 } from "@/lib/prompts/deep-dive-analyzer";
-import {
-  SIM_TRADE_EVALUATOR_SYSTEM_INSTRUCTION,
-  SIM_TRADE_EVALUATOR_RESPONSE_SCHEMA,
-  buildSimTradeEvalPrompt,
-} from "@/lib/prompts/sim-trade-evaluator";
-import { type TradeDecision, tradeDecisionSchema } from "@/types/portfolio";
 import type { CandleData, OptionsChainSummary } from "@/types/market";
 
 // --- OpenRouter Client Singleton (OpenAI-compatible) ---
@@ -143,21 +137,6 @@ function getClassifyNewsModel(): string {
   return isPreviewModel(defaultModel)
     ? DEFAULT_OPEN_ROUTER_MODEL
     : defaultModel;
-}
-
-function getSimTradeEvalModel(): string {
-  const override = getStableModelOverride(
-    process.env.OPEN_ROUTER_SIM_TRADE_MODEL,
-    "sim trade model",
-  );
-  if (override) return override;
-
-  const defaultModel = getModel();
-  if (isPreviewModel(defaultModel)) {
-    return DEFAULT_OPEN_ROUTER_MODEL;
-  }
-
-  return defaultModel;
 }
 
 /** @internal Reset client singleton — for tests only */
@@ -1084,80 +1063,4 @@ export async function generateDeepDive(
   );
 
   return normalized;
-}
-
-// ============================================================
-// Epic 12 — Sim Trade Evaluator
-// ============================================================
-
-interface SimTradeEvalInput {
-  ticker: string;
-  currentPrice: number;
-  recommendation: {
-    thesis: string;
-    direction: string;
-    confidence: number;
-    strategy: {
-      name: string;
-      legs: Array<{
-        action: string;
-        type: string;
-        strike: number;
-        expiry: string;
-        estimated_premium: number;
-      }>;
-      max_loss: string;
-      max_profit: string;
-      risk_reward_ratio: string;
-    };
-    risk_factors: string[];
-  };
-  deepDive?: {
-    market_narrative: string;
-    risk_level: string;
-    entry_exit?: {
-      profit_target: string;
-      stop_loss: string;
-      position_sizing: string;
-    };
-  };
-  compositeConfidence?: number;
-  whaleQualityScore?: number;
-  portfolioBalance: number;
-  openPositions: Array<{
-    ticker: string;
-    direction: string;
-    entryPrice: number;
-    currentPnlPct: number;
-  }>;
-}
-
-export async function evaluateTradeForSim(
-  input: SimTradeEvalInput,
-): Promise<TradeDecision> {
-  console.log(
-    `[LLM] Evaluating ${input.ticker} for sim portfolio (balance: $${input.portfolioBalance.toFixed(2)})`,
-  );
-
-  const prompt = buildSimTradeEvalPrompt(input);
-
-  const result = await callLLMWithRetry(
-    SIM_TRADE_EVALUATOR_SYSTEM_INSTRUCTION,
-    prompt,
-    SIM_TRADE_EVALUATOR_RESPONSE_SCHEMA,
-    tradeDecisionSchema,
-    {
-      callType: "simTradeEval",
-      model: getSimTradeEvalModel(),
-      temperature: 0.2,
-      maxOutputTokens: 12288,
-    },
-  );
-
-  console.log(
-    `[LLM] Sim eval for ${input.ticker}: ${result.should_enter ? "ENTER" : "SKIP"} ` +
-      `(size: $${result.position_size_dollars}, strategy: ${result.adjusted_entry.strategy_name})`,
-  );
-
-  return result;
 }

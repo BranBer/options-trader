@@ -16,7 +16,6 @@ export interface StageResults {
   fetch: "ok" | "error" | "pending";
   classify: "ok" | "error" | "pending";
   analysis: "ok" | "error" | "pending";
-  sim: "ok" | "error" | "pending";
 }
 
 export interface PipelineProgress {

@@ -3,8 +3,6 @@ import { fetchAllNews } from "@/lib/services/news-fetcher";
 import { classifyAndStoreNews } from "@/lib/cron/pipelines/news-pipeline";
 import { runWhalePipeline } from "@/lib/cron/pipelines/whale-pipeline";
 import { runAnalysisPipeline } from "@/lib/cron/pipelines/analysis-pipeline";
-import { runSimPipeline } from "@/lib/cron/pipelines/sim-pipeline";
-import { runExitMonitor } from "@/lib/cron/exit-monitor";
 import * as progress from "./pipeline-progress";
 import type { StageResults } from "./pipeline-progress";
 import {
@@ -29,7 +27,7 @@ export async function runPipeline(
 ): Promise<{
   status: string;
   timestamp: string;
-  stages: { fetch: string; classify: string; analysis: string; sim: string };
+  stages: { fetch: string; classify: string; analysis: string };
 }> {
   if (isRunning) {
     console.log("[Pipeline] Already running, skipping...");
@@ -40,7 +38,6 @@ export async function runPipeline(
         fetch: "skipped",
         classify: "skipped",
         analysis: "skipped",
-        sim: "skipped",
       },
     };
   }
@@ -50,7 +47,7 @@ export async function runPipeline(
   const startTime = new Date();
   console.log(`[Pipeline] Starting cycle at ${startTime.toISOString()}`);
 
-  const stages = { fetch: "ok", classify: "ok", analysis: "ok", sim: "ok" };
+  const stages = { fetch: "ok", classify: "ok", analysis: "ok" };
   let hadError = false;
 
   progress.init([
@@ -59,7 +56,6 @@ export async function runPipeline(
     "Cross-referencing",
     "Generating recommendations",
     "Deep dive analysis",
-    "Sim portfolio",
   ]);
 
   // Clear previous error on new cycle start
@@ -129,21 +125,6 @@ export async function runPipeline(
     );
   }
 
-  try {
-    // Stage 6: Sim portfolio — ALWAYS runs even if analysis failed
-    const simActions = await runSimPipeline();
-    console.log(`[Pipeline] Phase 3 sim: ${simActions} actions`);
-  } catch (error) {
-    console.error("[Pipeline] Stage sim failed:", error);
-    stages.sim = "error";
-    hadError = true;
-    progress.fail(5);
-    progress.setLastError(
-      "sim",
-      error instanceof Error ? error.message : "Sim pipeline failed",
-    );
-  }
-
   lastRefreshAt = recordPipelineRunCompletion({
     runId,
     status: hadError ? "partial" : "ok",
@@ -177,7 +158,7 @@ export function getLastRefreshAt(): string | null {
 }
 
 /**
- * Start the 10-minute cron job and 5-minute exit monitor.
+ * Start the 10-minute cron job.
  * Should be called once during server initialization.
  */
 export function startScheduler() {
@@ -187,24 +168,6 @@ export function startScheduler() {
     console.log("[Scheduler] Cron trigger");
     await runPipeline("schedule");
   });
-
-  // Exit monitor: configurable interval, defaults to 5 minutes
-  const interval = parseInt(
-    process.env.EXIT_MONITOR_INTERVAL_MINUTES ?? "5",
-    10,
-  );
-  const enabled = process.env.EXIT_MONITOR_ENABLED !== "false";
-
-  if (enabled) {
-    console.log(`[Scheduler] Starting exit monitor (every ${interval}min)...`);
-    cron.schedule(`*/${interval} * * * *`, async () => {
-      await runExitMonitor();
-    });
-  } else {
-    console.log(
-      "[Scheduler] Exit monitor disabled via EXIT_MONITOR_ENABLED=false",
-    );
-  }
 
   // Run immediately on startup
   runPipeline("startup").catch(console.error);

@@ -75,10 +75,6 @@ export default function DashboardHome() {
   const bearishWhales = whales.filter((w) => w.sentiment === "bearish").length;
   const highImpactNews = news.filter((n) => (n.impactScore ?? 0) >= 7).length;
   const totalPremium = whales.reduce((sum, w) => sum + (w.premium ?? 0), 0);
-  const diagnosticsHref =
-    pipelineHealth?.status === "stale" || pipelineHealth?.status === "never_run"
-      ? "/portfolio?tab=diagnostics&reasonCluster=pipeline_gap&outcome=not_evaluated"
-      : "/portfolio?tab=diagnostics";
 
   useEffect(() => {
     let active = true;
@@ -192,7 +188,7 @@ export default function DashboardHome() {
               ) : (
                 <ShieldAlert className="h-4 w-4 text-amber-400" />
               )}
-              <span className="text-sm font-medium">Diagnostics Console</span>
+              <span className="text-sm font-medium">Pipeline Health</span>
               {pipelineHealth ? (
                 <Badge variant="outline" className="text-[10px] uppercase">
                   {pipelineHealth.status.replace(/_/g, " ")}
@@ -201,29 +197,29 @@ export default function DashboardHome() {
             </div>
             <p className="text-sm text-muted-foreground">
               {pipelineHealth == null
-                ? "Open the diagnostics console to inspect recent alert traces and pipeline health."
+                ? "Pipeline status loading..."
                 : pipelineHealth.status === "healthy"
-                  ? "Recent alert traces are available. Use diagnostics for side-by-side comparison and export during sprint review."
+                  ? "Pipeline is running normally. Check the analysis page for the latest AI insights."
                   : pipelineHealth.status === "running"
-                    ? "The pipeline is currently running. Diagnostics will update as soon as the latest refresh completes."
+                    ? "The pipeline is currently running. Results will update as soon as the latest refresh completes."
                     : pipelineHealth.status === "never_run"
                       ? "No completed refresh has been recorded in the database yet. In local development this usually means the pipeline has not finished a full cycle since the current database was created."
-                      : `Pipeline freshness is degraded${pipelineHealth.minutesSinceRefresh != null ? ` (${pipelineHealth.minutesSinceRefresh} minute(s) since the last completed refresh)` : ""}. In local development this often means the dev server was idle or restarted, not that a stage failed.`}
+                      : `Pipeline freshness is degraded${pipelineHealth.minutesSinceRefresh != null ? ` (${pipelineHealth.minutesSinceRefresh} minute(s) since the last completed refresh)` : ""}. In local development this often means the dev server was idle or restarted.`}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <Link
-              href={diagnosticsHref}
+              href="/analysis"
               className="inline-flex items-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
-              Open Diagnostics
+              View Analysis
             </Link>
             <Link
-              href="/portfolio?tab=diagnostics&outcome=entered"
+              href="/whale-alerts"
               className="inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium hover:bg-background"
             >
-              Review Captured Alerts
+              View Whale Alerts
             </Link>
           </div>
         </CardContent>
@@ -236,12 +232,6 @@ export default function DashboardHome() {
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-base">Recent Whale Alerts</CardTitle>
             <div className="flex items-center gap-3">
-              <Link
-                href={diagnosticsHref}
-                className="text-xs text-primary hover:underline"
-              >
-                Diagnostics →
-              </Link>
               <Link
                 href="/whale-alerts"
                 className="text-xs text-primary hover:underline"
@@ -263,12 +253,6 @@ export default function DashboardHome() {
               ) : whales.length === 0 ? (
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <p>No whale alerts yet. Run a pipeline refresh.</p>
-                  <Link
-                    href={diagnosticsHref}
-                    className="text-primary hover:underline"
-                  >
-                    Open diagnostics →
-                  </Link>
                 </div>
               ) : (
                 <div className="space-y-3 pr-3">
@@ -372,12 +356,6 @@ export default function DashboardHome() {
             <CardTitle className="text-base">Latest AI Analysis</CardTitle>
             <div className="flex items-center gap-3">
               <Link
-                href={diagnosticsHref}
-                className="text-xs text-primary hover:underline"
-              >
-                Diagnostics →
-              </Link>
-              <Link
                 href="/analysis"
                 className="text-xs text-primary hover:underline"
               >
@@ -400,12 +378,6 @@ export default function DashboardHome() {
                   No analyses yet. Run a pipeline refresh to generate
                   cross-references and recommendations.
                 </p>
-                <Link
-                  href={diagnosticsHref}
-                  className="text-primary hover:underline"
-                >
-                  Inspect diagnostics →
-                </Link>
               </div>
             ) : (
               <div className="space-y-4">

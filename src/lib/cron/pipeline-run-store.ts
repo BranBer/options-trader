@@ -27,7 +27,7 @@ export function recordPipelineRunStart(trigger: PipelineRunTrigger): number {
 export function recordPipelineRunCompletion(args: {
   runId: number;
   status: Exclude<PipelineRunStatus, "running">;
-  stages: { fetch: string; classify: string; analysis: string; sim: string };
+  stages: { fetch: string; classify: string; analysis: string };
   errorMessage?: string | null;
 }): string {
   const completedAt = new Date().toISOString();

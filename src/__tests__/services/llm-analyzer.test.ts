@@ -4,7 +4,6 @@ import { newsClassificationSchema } from "@/types/news";
 import { crossReferenceAnalysisSchema } from "@/types/analysis";
 import { tradeRecommendationSchema } from "@/types/analysis";
 import { deepDiveAnalysisSchema } from "@/types/analysis";
-import { tradeDecisionSchema } from "@/types/portfolio";
 import type { Correlation } from "@/types/analysis";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +29,6 @@ import {
   crossReferenceAnalysis,
   generateRecommendation,
   generateDeepDive,
-  evaluateTradeForSim,
   getTokenUsageStats,
 } from "@/lib/services/llm-analyzer";
 
@@ -280,42 +278,6 @@ const VALID_DEEP_DIVE_RESPONSE = {
   disclaimer: "Educational analysis only. Not financial advice.",
 };
 
-const VALID_TRADE_DECISION_RESPONSE = {
-  should_enter: true,
-  reasoning: "Strong whale signal with moderate confidence and manageable risk",
-  position_size_dollars: 250,
-  adjusted_entry: {
-    strategy_name: "Bull Call Spread",
-    legs: [
-      {
-        action: "buy",
-        type: "call",
-        strike: 195,
-        expiry: "2026-04-18",
-        premium: 8.5,
-        quantity: 1,
-      },
-      {
-        action: "sell",
-        type: "call",
-        strike: 205,
-        expiry: "2026-04-18",
-        premium: 3.2,
-        quantity: 1,
-      },
-    ],
-    net_premium: 5.3,
-  },
-  exit_plan: {
-    profit_target_pct: 50,
-    stop_loss_pct: 50,
-    time_exit_days: 14,
-  },
-  risk_notes: ["Elevated IV may compress", "Earnings in 3 weeks"],
-  educational_summary:
-    "This trade uses a bull call spread to bet on AAPL rising to $205 within 18 days, risking $530 to potentially gain $470.",
-};
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -362,7 +324,6 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OPEN_ROUTER_API_KEY;
   delete process.env.OPEN_ROUTER_MODEL;
-  delete process.env.OPEN_ROUTER_SIM_TRADE_MODEL;
   delete process.env.OPEN_ROUTER_NEWS_MODEL;
   delete process.env.OPEN_ROUTER_NEWS_CONCURRENCY;
 });
@@ -754,25 +715,6 @@ describe("Zod schema validation — deepDiveAnalysisSchema", () => {
     const bad = structuredClone(VALID_DEEP_DIVE_RESPONSE);
     (bad.risk_assessment as Record<string, unknown>).overall_risk = "extreme";
     expect(() => deepDiveAnalysisSchema.parse(bad)).toThrow();
-  });
-});
-
-describe("Zod schema validation — tradeDecisionSchema", () => {
-  it("accepts valid trade decision response", () => {
-    expect(() =>
-      tradeDecisionSchema.parse(VALID_TRADE_DECISION_RESPONSE),
-    ).not.toThrow();
-  });
-
-  it("rejects should_enter as string instead of boolean", () => {
-    const bad = { ...VALID_TRADE_DECISION_RESPONSE, should_enter: "true" };
-    expect(() => tradeDecisionSchema.parse(bad)).toThrow();
-  });
-
-  it("rejects missing exit_plan", () => {
-    const { exit_plan, ...rest } = VALID_TRADE_DECISION_RESPONSE;
-    void exit_plan;
-    expect(() => tradeDecisionSchema.parse(rest)).toThrow();
   });
 });
 
@@ -1212,103 +1154,6 @@ describe("generateDeepDive", () => {
     expect(
       result.technical_patterns.map((pattern) => pattern.timeframe),
     ).toEqual(expect.arrayContaining(["6M", "1Y"]));
-  });
-});
-
-// ============================================================
-// Story 25.5g — evaluateTradeForSim behavior
-// ============================================================
-
-describe("evaluateTradeForSim", () => {
-  const mockSimInput = {
-    ticker: "AAPL",
-    currentPrice: 196,
-    recommendation: {
-      thesis: "Bullish on AAPL",
-      direction: "bullish",
-      confidence: 0.65,
-      strategy: {
-        name: "Bull Call Spread",
-        legs: [
-          {
-            action: "buy",
-            type: "call",
-            strike: 195,
-            expiry: "2026-04-18",
-            estimated_premium: 8.5,
-          },
-          {
-            action: "sell",
-            type: "call",
-            strike: 205,
-            expiry: "2026-04-18",
-            estimated_premium: 3.2,
-          },
-        ],
-        max_loss: "$530",
-        max_profit: "$470",
-        risk_reward_ratio: "1:0.89",
-      },
-      risk_factors: ["Rate hike pressure"],
-    },
-    portfolioBalance: 5000,
-    openPositions: [],
-  };
-
-  it("calls LLM and returns parsed trade decision", async () => {
-    mockLLMResponse(VALID_TRADE_DECISION_RESPONSE, 500);
-
-    const result = await evaluateTradeForSim(mockSimInput);
-    expect(result.should_enter).toBe(true);
-    expect(result.position_size_dollars).toBe(250);
-    expect(result.adjusted_entry.legs).toHaveLength(2);
-    expect(result.exit_plan.profit_target_pct).toBe(50);
-  });
-
-  it("handles REJECT decision", async () => {
-    const rejectResponse = {
-      ...VALID_TRADE_DECISION_RESPONSE,
-      should_enter: false,
-      reasoning: "Risk too high relative to portfolio size",
-      position_size_dollars: 0,
-    };
-    mockLLMResponse(rejectResponse, 300);
-
-    const result = await evaluateTradeForSim(mockSimInput);
-    expect(result.should_enter).toBe(false);
-    expect(result.reasoning).toContain("Risk too high");
-  });
-
-  it("uses a non-preview model when the global model is preview-only", async () => {
-    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
-    mockLLMResponse(VALID_TRADE_DECISION_RESPONSE, 500);
-
-    await evaluateTradeForSim(mockSimInput);
-
-    const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
-  });
-
-  it("prefers OPEN_ROUTER_SIM_TRADE_MODEL when provided", async () => {
-    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
-    process.env.OPEN_ROUTER_SIM_TRADE_MODEL = "openai/gpt-4.1-mini";
-    mockLLMResponse(VALID_TRADE_DECISION_RESPONSE, 500);
-
-    await evaluateTradeForSim(mockSimInput);
-
-    const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toBe("openai/gpt-4.1-mini");
-  });
-
-  it("ignores a preview sim trade model override and uses the stable fallback", async () => {
-    process.env.OPEN_ROUTER_MODEL = "qwen/qwen3.6-plus-preview:free";
-    process.env.OPEN_ROUTER_SIM_TRADE_MODEL = "qwen/qwen3.6-plus-preview:free";
-    mockLLMResponse(VALID_TRADE_DECISION_RESPONSE, 500);
-
-    await evaluateTradeForSim(mockSimInput);
-
-    const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
   });
 });
 

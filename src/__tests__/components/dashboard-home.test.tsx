@@ -59,12 +59,12 @@ vi.mock("@/components/ui/scroll-area", () => ({
   ),
 }));
 
-describe("DashboardHome diagnostics navigation", () => {
+describe("DashboardHome navigation", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("routes dashboard diagnostics links to the default diagnostics window when pipeline health is healthy", async () => {
+  it("renders pipeline health status and navigation links when pipeline is healthy", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -86,26 +86,16 @@ describe("DashboardHome diagnostics navigation", () => {
     });
 
     expect(
-      screen
-        .getByRole("link", { name: "Open Diagnostics" })
-        .getAttribute("href"),
-    ).toBe("/portfolio?tab=diagnostics");
+      screen.getByRole("link", { name: "View Analysis" }).getAttribute("href"),
+    ).toBe("/analysis");
     expect(
       screen
-        .getByRole("link", { name: "Review Captured Alerts" })
+        .getByRole("link", { name: "View Whale Alerts" })
         .getAttribute("href"),
-    ).toBe("/portfolio?tab=diagnostics&outcome=entered");
-
-    const diagnosticsLinks = screen.getAllByRole("link", {
-      name: "Diagnostics →",
-    });
-    expect(diagnosticsLinks).toHaveLength(2);
-    for (const link of diagnosticsLinks) {
-      expect(link.getAttribute("href")).toBe("/portfolio?tab=diagnostics");
-    }
+    ).toBe("/whale-alerts");
   });
 
-  it("routes dashboard diagnostics links to the pipeline-gap window when pipeline health is stale", async () => {
+  it("renders stale pipeline status badge", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -125,23 +115,5 @@ describe("DashboardHome diagnostics navigation", () => {
     await waitFor(() => {
       expect(screen.getByText("stale")).toBeTruthy();
     });
-
-    expect(
-      screen
-        .getByRole("link", { name: "Open Diagnostics" })
-        .getAttribute("href"),
-    ).toBe(
-      "/portfolio?tab=diagnostics&reasonCluster=pipeline_gap&outcome=not_evaluated",
-    );
-
-    const diagnosticsLinks = screen.getAllByRole("link", {
-      name: "Diagnostics →",
-    });
-    expect(diagnosticsLinks).toHaveLength(2);
-    for (const link of diagnosticsLinks) {
-      expect(link.getAttribute("href")).toBe(
-        "/portfolio?tab=diagnostics&reasonCluster=pipeline_gap&outcome=not_evaluated",
-      );
-    }
   });
 });

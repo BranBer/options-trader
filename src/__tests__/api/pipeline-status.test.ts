@@ -25,29 +25,11 @@ vi.mock("@/lib/cron/pipeline-run-store", () => ({
   getLatestPipelineRun: mockGetLatestPipelineRun,
 }));
 
-vi.mock("@/lib/cron/exit-monitor", () => ({
-  getExitMonitorStatus: vi.fn(() => ({
-    lastRunAt: "2026-03-29T12:25:00Z",
-    lastRunResult: {
-      timestamp: "2026-03-29T12:25:00Z",
-      skipped: false,
-      positionsChecked: 3,
-      positionsClosed: 1,
-      closedTrades: [{ tradeId: 1, ticker: "AAPL", reason: "profit_target" }],
-    },
-    isRunning: false,
-  })),
-}));
-
 vi.mock("@/lib/utils/api-budget", () => ({
   getBudgetSummary: vi.fn(() => ({
     yahoo: { used: 150, budget: 1800, pct: 8 },
     finnhub: { used: 10, budget: 250, pct: 4 },
   })),
-}));
-
-vi.mock("@/lib/cron/pipelines/sim-pipeline", () => ({
-  getLastRunRejections: vi.fn(() => []),
 }));
 
 vi.mock("@/lib/services/llm-analyzer", () => ({
@@ -80,17 +62,6 @@ describe("GET /api/pipeline-status", () => {
     expect(data).toHaveProperty("steps");
     expect(data).toHaveProperty("startedAt");
     expect(data).toHaveProperty("lastRefreshAt");
-  });
-
-  it("includes exitMonitor status", async () => {
-    const response = await GET();
-    const data = (response as any).data;
-
-    expect(data).toHaveProperty("exitMonitor");
-    expect(data.exitMonitor).toHaveProperty("lastRunAt");
-    expect(data.exitMonitor).toHaveProperty("lastRunResult");
-    expect(data.exitMonitor).toHaveProperty("isRunning");
-    expect(data.exitMonitor.isRunning).toBe(false);
   });
 
   it("includes apiBudget summary", async () => {
