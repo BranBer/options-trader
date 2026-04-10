@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import {
-  X,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -10,9 +9,7 @@ import {
   Zap,
   Building2,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -323,20 +320,17 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
     : null;
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <span className="font-mono">{alert.ticker}</span>
-          <Badge variant={alert.callPut === "C" ? "default" : "destructive"}>
-            {alert.callPut === "C" ? "CALL" : "PUT"}
-          </Badge>
-        </CardTitle>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <span className="sr-only">Close detail panel</span>
-          <X className="h-4 w-4" />
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-2 border-b px-4 py-3">
+        <span className="font-mono font-semibold text-base">
+          {alert.ticker}
+        </span>
+        <Badge variant={alert.callPut === "C" ? "default" : "destructive"}>
+          {alert.callPut === "C" ? "CALL" : "PUT"}
+        </Badge>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {/* Sentiment */}
         <div className="flex items-center gap-2">
           {alert.sentiment === "bullish" ? (
@@ -566,7 +560,7 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
             <p>Detected: {formatDateTime(alert.detectedAt)}</p>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

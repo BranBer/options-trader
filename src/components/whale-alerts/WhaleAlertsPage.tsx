@@ -5,7 +5,6 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  ExternalLink,
   HelpCircle,
   Shield,
   Zap,
@@ -29,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useWhaleAlerts, type WhaleAlert } from "@/hooks/useApiData";
 import {
   formatPremium,
@@ -77,154 +77,157 @@ export default function WhaleAlertsPage() {
 
       {marketPulse && <MarketPulseBar pulse={marketPulse} />}
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Table */}
-        <Card className={selected ? "lg:col-span-2" : "lg:col-span-3"}>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">
-              {isLoading ? "Loading..." : `${alerts.length} alerts`}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-[600px]">
-              <div className="pr-3">
-                <Table>
-                  <caption className="sr-only">
-                    Whale alerts table. Select a row to view detailed options
-                    flow information.
-                  </caption>
-                  <TableHeader>
+      {/* Table — always full width */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">
+            {isLoading ? "Loading..." : `${alerts.length} alerts`}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <ScrollArea className="h-[600px]">
+            <div className="pr-3">
+              <Table>
+                <caption className="sr-only">
+                  Whale alerts table. Select a row to view detailed options flow
+                  information.
+                </caption>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Ticker</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Strike</TableHead>
+                    <TableHead>Expiry</TableHead>
+                    <TableHead className="text-right">Premium</TableHead>
+                    <TableHead className="text-right">Volume</TableHead>
+                    <TableHead className="text-right">OI</TableHead>
+                    <TableHead>Sentiment</TableHead>
+                    <TableHead className="text-center">
+                      <span className="flex items-center justify-center gap-1">
+                        Quality
+                        <TooltipProvider delay={200}>
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent
+                              side="top"
+                              className="max-w-60 text-xs"
+                            >
+                              Trade quality score (0â€“100) based on Volume/OI
+                              ratio, OTM distance, premium size, expiry timing,
+                              and sweep likelihood. Higher = stronger conviction
+                              signal.
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </span>
+                    </TableHead>
+                    <TableHead>Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {alerts.length === 0 && !isLoading ? (
                     <TableRow>
-                      <TableHead>Ticker</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Strike</TableHead>
-                      <TableHead>Expiry</TableHead>
-                      <TableHead className="text-right">Premium</TableHead>
-                      <TableHead className="text-right">Volume</TableHead>
-                      <TableHead className="text-right">OI</TableHead>
-                      <TableHead>Sentiment</TableHead>
-                      <TableHead className="text-center">
-                        <span className="flex items-center justify-center gap-1">
-                          Quality
-                          <TooltipProvider delay={200}>
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help" />
-                              </TooltipTrigger>
-                              <TooltipContent
-                                side="top"
-                                className="max-w-60 text-xs"
-                              >
-                                Trade quality score (0â€“100) based on Volume/OI
-                                ratio, OTM distance, premium size, expiry
-                                timing, and sweep likelihood. Higher = stronger
-                                conviction signal.
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </span>
-                      </TableHead>
-                      <TableHead>Time</TableHead>
+                      <TableCell
+                        colSpan={10}
+                        className="text-center text-muted-foreground py-8"
+                      >
+                        No whale alerts found. Run a pipeline refresh or adjust
+                        filters.
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {alerts.length === 0 && !isLoading ? (
-                      <TableRow>
+                  ) : (
+                    alerts.map((alert) => (
+                      <TableRow
+                        key={alert.id}
+                        className={`cursor-pointer transition-colors ${
+                          selected?.id === alert.id
+                            ? "bg-muted"
+                            : "hover:bg-muted/50"
+                        }`}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`View details for ${alert.ticker} ${alert.callPut === "C" ? "call" : "put"} option`}
+                        onClick={() => setSelected(alert)}
+                        onKeyDown={(event) => handleRowKeyDown(event, alert)}
+                      >
+                        <TableCell className="font-mono font-medium">
+                          {alert.ticker}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              alert.callPut === "C" ? "default" : "destructive"
+                            }
+                            className="text-xs"
+                          >
+                            {alert.callPut === "C" ? "CALL" : "PUT"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {alert.strike ? formatCurrency(alert.strike) : "â€”"}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {alert.expiry ?? "â€”"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {alert.premium ? formatPremium(alert.premium) : "â€”"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {alert.volume ? formatNumber(alert.volume) : "â€”"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {alert.openInterest
+                            ? formatNumber(alert.openInterest)
+                            : "â€”"}
+                        </TableCell>
+                        <TableCell>
+                          <SentimentBadge alert={alert} />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {alert.qualityScore != null ? (
+                            <QualityBadge score={alert.qualityScore} />
+                          ) : (
+                            "â€”"
+                          )}
+                        </TableCell>
                         <TableCell
-                          colSpan={10}
-                          className="text-center text-muted-foreground py-8"
+                          className="text-xs text-muted-foreground"
+                          suppressHydrationWarning
                         >
-                          No whale alerts found. Run a pipeline refresh or
-                          adjust filters.
+                          {alert.detectedAt ? timeAgo(alert.detectedAt) : "â€”"}
                         </TableCell>
                       </TableRow>
-                    ) : (
-                      alerts.map((alert) => (
-                        <TableRow
-                          key={alert.id}
-                          className={`cursor-pointer transition-colors ${
-                            selected?.id === alert.id
-                              ? "bg-muted"
-                              : "hover:bg-muted/50"
-                          }`}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`View details for ${alert.ticker} ${alert.callPut === "C" ? "call" : "put"} option`}
-                          onClick={() => setSelected(alert)}
-                          onKeyDown={(event) => handleRowKeyDown(event, alert)}
-                        >
-                          <TableCell className="font-mono font-medium">
-                            {alert.ticker}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={
-                                alert.callPut === "C"
-                                  ? "default"
-                                  : "destructive"
-                              }
-                              className="text-xs"
-                            >
-                              {alert.callPut === "C" ? "CALL" : "PUT"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {alert.strike
-                              ? formatCurrency(alert.strike)
-                              : "â€”"}
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            {alert.expiry ?? "â€”"}
-                          </TableCell>
-                          <TableCell className="text-right font-medium">
-                            {alert.premium
-                              ? formatPremium(alert.premium)
-                              : "â€”"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {alert.volume ? formatNumber(alert.volume) : "â€”"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {alert.openInterest
-                              ? formatNumber(alert.openInterest)
-                              : "â€”"}
-                          </TableCell>
-                          <TableCell>
-                            <SentimentBadge alert={alert} />
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {alert.qualityScore != null ? (
-                              <QualityBadge score={alert.qualityScore} />
-                            ) : (
-                              "â€”"
-                            )}
-                          </TableCell>
-                          <TableCell
-                            className="text-xs text-muted-foreground"
-                            suppressHydrationWarning
-                          >
-                            {alert.detectedAt
-                              ? timeAgo(alert.detectedAt)
-                              : "â€”"}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
 
-        {/* Detail panel */}
-        {selected && (
-          <WhaleAlertDetail
-            alert={selected}
-            onClose={() => setSelected(null)}
-          />
-        )}
-      </div>
+      {/* Detail — sliding sidebar sheet */}
+      <Sheet
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
+      >
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className="w-full sm:max-w-lg overflow-y-auto p-0"
+        >
+          {selected && (
+            <WhaleAlertDetail
+              alert={selected}
+              onClose={() => setSelected(null)}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
