@@ -45,6 +45,13 @@ import {
 } from "@/lib/prompts/deep-dive-analyzer";
 import type { CandleData, OptionsChainSummary } from "@/types/market";
 
+export interface ClassifyNewsConfig {
+  systemInstruction?: string;
+  responseSchema?: object;
+  promptBuilder?: (articles: RawNewsArticle[]) => string;
+  minImpact?: number;
+}
+
 // --- OpenRouter Client Singleton (OpenAI-compatible) ---
 
 let client: OpenAI | null = null;
@@ -366,6 +373,7 @@ function getClassifyConcurrency(): number {
 export async function classifyNews(
   articles: RawNewsArticle[],
   onBatchProgress?: (done: number, total: number) => void,
+  config?: ClassifyNewsConfig,
 ): Promise<NewsClassification> {
   if (articles.length === 0) {
     return {
@@ -387,6 +395,12 @@ export async function classifyNews(
 
   const concurrency = getClassifyConcurrency();
   const model = getClassifyNewsModel();
+  const systemInstruction =
+    config?.systemInstruction ?? NEWS_CLASSIFIER_SYSTEM_INSTRUCTION;
+  const responseSchema =
+    config?.responseSchema ?? NEWS_CLASSIFIER_RESPONSE_SCHEMA;
+  const promptBuilder = config?.promptBuilder ?? buildNewsClassifierPrompt;
+  const minImpact = config?.minImpact ?? 3;
 
   console.log(
     `[LLM] Classifying ${articles.length} articles in ${batches.length} batch(es), concurrency=${concurrency}, model=${model}`,
@@ -401,11 +415,11 @@ export async function classifyNews(
     const chunk = batches.slice(i, i + concurrency);
     const results = await Promise.allSettled(
       chunk.map((batch) => {
-        const prompt = buildNewsClassifierPrompt(batch);
+        const prompt = promptBuilder(batch);
         return callLLMWithRetry(
-          NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
+          systemInstruction,
           prompt,
-          NEWS_CLASSIFIER_RESPONSE_SCHEMA,
+          responseSchema,
           newsClassificationSchema,
           {
             callType: "classifyNews",
@@ -435,11 +449,11 @@ export async function classifyNews(
 
   // Filter: only keep articles with impact_score >= 3
   const relevant = allClassified.filter(
-    (a) => a.is_market_relevant && a.impact_score >= 3,
+    (a) => a.is_market_relevant && a.impact_score >= minImpact,
   );
 
   console.log(
-    `[LLM] Classification complete: ${totalInput} input, ${relevant.length} relevant (impact >= 3)`,
+    `[LLM] Classification complete: ${totalInput} input, ${relevant.length} relevant (impact >= ${minImpact})`,
   );
 
   return {

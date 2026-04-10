@@ -64,6 +64,13 @@
       "when": 1775766211053,
       "tag": "0008_whole_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1775841474497,
+      "tag": "0009_sad_golden_guardian",
+      "breakpoints": true
     }
   ]
 }

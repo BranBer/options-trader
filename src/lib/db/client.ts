@@ -69,6 +69,21 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_short_interest_ticker ON short_interest (ticker);
 `);
 
+const newsEventColumns = sqlite
+  .prepare("PRAGMA table_info(news_events)")
+  .all() as Array<{ name: string }>;
+
+if (newsEventColumns.some((column) => column.name === "category")) {
+  sqlite.exec(
+    "CREATE INDEX IF NOT EXISTS idx_news_events_category_impact_created ON news_events (category, impact_score, created_at);",
+  );
+} else if (newsEventColumns.length > 0) {
+  sqlite.exec(`
+    ALTER TABLE news_events ADD COLUMN category text NOT NULL DEFAULT 'general';
+    CREATE INDEX IF NOT EXISTS idx_news_events_category_impact_created ON news_events (category, impact_score, created_at);
+  `);
+}
+
 const analysisColumns = sqlite
   .prepare("PRAGMA table_info(analyses)")
   .all() as Array<{ name: string }>;

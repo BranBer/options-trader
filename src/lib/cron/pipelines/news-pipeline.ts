@@ -1,10 +1,25 @@
 import { fetchAllNews } from "@/lib/services/news-fetcher";
-import { classifyNews } from "@/lib/services/llm-analyzer";
+import {
+  classifyNews,
+  type ClassifyNewsConfig,
+} from "@/lib/services/llm-analyzer";
 import { db } from "@/lib/db/client";
 import { newsEvents } from "@/lib/db/schema";
 import { desc, eq, inArray } from "drizzle-orm";
 import { autoTriggerEventAnalysis } from "@/lib/services/event-ticker-analyzer";
 import type { RawNewsArticle } from "@/types/news";
+import { fetchAllTechNews } from "@/lib/services/tech-news-fetcher";
+import {
+  TECH_NEWS_CLASSIFIER_RESPONSE_SCHEMA,
+  TECH_NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
+  buildTechNewsClassifierPrompt,
+} from "@/lib/prompts/tech-news-classifier";
+
+interface ClassifyAndStoreNewsOptions {
+  category?: "general" | "tech";
+  classifierConfig?: ClassifyNewsConfig;
+  autoTriggerMinImpact?: number;
+}
 
 /**
  * Classify raw articles and store in DB.
@@ -13,9 +28,12 @@ import type { RawNewsArticle } from "@/types/news";
 export async function classifyAndStoreNews(
   rawArticles: RawNewsArticle[],
   onBatchProgress?: (done: number, total: number) => void,
+  options?: ClassifyAndStoreNewsOptions,
 ): Promise<number> {
+  const category = options?.category ?? "general";
+
   if (rawArticles.length === 0) {
-    console.log("[NewsPipeline] No articles to classify");
+    console.log(`[NewsPipeline:${category}] No articles to classify`);
     return 0;
   }
 
@@ -35,27 +53,32 @@ export async function classifyAndStoreNews(
 
   if (newArticles.length < rawArticles.length) {
     console.log(
-      `[NewsPipeline] Dedup: ${rawArticles.length} fetched → ${newArticles.length} new (${rawArticles.length - newArticles.length} already classified)`,
+      `[NewsPipeline:${category}] Dedup: ${rawArticles.length} fetched → ${newArticles.length} new (${rawArticles.length - newArticles.length} already classified)`,
     );
   }
 
   if (newArticles.length === 0) {
     console.log(
-      "[NewsPipeline] All articles already classified, skipping LLM call",
+      `[NewsPipeline:${category}] All articles already classified, skipping LLM call`,
     );
     return 0;
   }
 
   // Classify with LLM (only new articles)
-  const classification = await classifyNews(newArticles, onBatchProgress);
+  const classification = await classifyNews(
+    newArticles,
+    onBatchProgress,
+    options?.classifierConfig,
+  );
   if (classification.articles.length === 0) {
-    console.log("[NewsPipeline] No market-relevant articles found");
+    console.log(`[NewsPipeline:${category}] No market-relevant articles found`);
     return 0;
   }
 
   // Store classified articles in DB
   const rows = classification.articles.map((article) => ({
     headline: article.original_headline,
+    category,
     source: article.source,
     url: article.url ?? null,
     publishedAt: article.published_at,
@@ -112,19 +135,24 @@ export async function classifyAndStoreNews(
 
   if (insertedEvents.length > 0) {
     try {
-      const triggered = await autoTriggerEventAnalysis(insertedEvents);
+      const triggered = await autoTriggerEventAnalysis(insertedEvents, {
+        minImpact: options?.autoTriggerMinImpact ?? 8,
+      });
       if (triggered > 0) {
         console.log(
-          `[NewsPipeline] Auto-triggered event-ticker analysis for ${triggered} event(s)`,
+          `[NewsPipeline:${category}] Auto-triggered event-ticker analysis for ${triggered} event(s)`,
         );
       }
     } catch (error) {
-      console.warn("[NewsPipeline] Event auto-trigger failed", error);
+      console.warn(
+        `[NewsPipeline:${category}] Event auto-trigger failed`,
+        error,
+      );
     }
   }
 
   console.log(
-    `[NewsPipeline] Classified & stored: ${rawArticles.length} fetched → ${newArticles.length} new → ${classification.articles.length} classified → ${stored} stored`,
+    `[NewsPipeline:${category}] Classified & stored: ${rawArticles.length} fetched → ${newArticles.length} new → ${classification.articles.length} classified → ${stored} stored`,
   );
   return stored;
 }
@@ -137,4 +165,19 @@ export async function runNewsPipeline(): Promise<number> {
   console.log("[NewsPipeline] Starting...");
   const rawArticles = await fetchAllNews();
   return classifyAndStoreNews(rawArticles);
+}
+
+export async function runTechNewsPipeline(): Promise<number> {
+  console.log("[TechNewsPipeline] Starting...");
+  const rawArticles = await fetchAllTechNews();
+  return classifyAndStoreNews(rawArticles, undefined, {
+    category: "tech",
+    autoTriggerMinImpact: 7,
+    classifierConfig: {
+      systemInstruction: TECH_NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
+      responseSchema: TECH_NEWS_CLASSIFIER_RESPONSE_SCHEMA,
+      promptBuilder: buildTechNewsClassifierPrompt,
+      minImpact: 3,
+    },
+  });
 }

@@ -90,10 +90,13 @@ type EligibleEvent = NewsEventRow & { parsedTickers: string[] };
 
 async function triggerEligibleEventAnalyses(
   events: NewsEventRow[],
-  options?: { respectEnv?: boolean; maxEvents?: number },
+  options?: { respectEnv?: boolean; maxEvents?: number; minImpact?: number },
 ): Promise<number> {
-  const { respectEnv = true, maxEvents = AUTO_TRIGGER_MAX_EVENTS } =
-    options ?? {};
+  const {
+    respectEnv = true,
+    maxEvents = AUTO_TRIGGER_MAX_EVENTS,
+    minImpact = 8,
+  } = options ?? {};
 
   if (respectEnv && process.env.EVENT_ANALYSIS_AUTO_TRIGGER !== "true") {
     return 0;
@@ -106,7 +109,7 @@ async function triggerEligibleEventAnalyses(
     }))
     .filter(
       (event) =>
-        (event.impactScore ?? 0) >= 8 && event.parsedTickers.length > 0,
+        (event.impactScore ?? 0) >= minImpact && event.parsedTickers.length > 0,
     )
     .sort((left, right) => (right.impactScore ?? 0) - (left.impactScore ?? 0))
     .slice(0, maxEvents);
@@ -728,10 +731,12 @@ export async function analyzeEventTickers(
 
 export async function autoTriggerEventAnalysis(
   events: NewsEventRow[],
+  options?: { minImpact?: number },
 ): Promise<number> {
   return triggerEligibleEventAnalyses(events, {
     respectEnv: true,
     maxEvents: AUTO_TRIGGER_MAX_EVENTS,
+    minImpact: options?.minImpact ?? 8,
   });
 }
 

@@ -1,9 +1,43 @@
 import { z } from "zod";
 
+export const newsCategorySchema = z.enum(["general", "tech"]);
+
+export const rawNewsSourceSchema = z.enum([
+  "finnhub",
+  "gdelt",
+  "marketaux",
+  "hackernews",
+  "newsapi",
+]);
+
+export const newsEventTypeSchema = z.enum([
+  "geopolitical",
+  "economic",
+  "regulatory",
+  "earnings",
+  "supply_chain",
+  "technology",
+  "natural_disaster",
+  "central_bank",
+  "other",
+  "ai_ml",
+  "semiconductors",
+  "cloud_saas",
+  "cybersecurity",
+  "fintech",
+  "hardware",
+  "open_source",
+  "social_media",
+  "regulatory_tech",
+  "biotech_health_tech",
+  "ev_cleantech",
+  "other_tech",
+]);
+
 // --- Raw article from any news source (pre-Gemini) ---
 export const rawNewsArticleSchema = z.object({
   headline: z.string(),
-  source: z.enum(["finnhub", "gdelt", "marketaux"]),
+  source: rawNewsSourceSchema,
   url: z.string().url().optional(),
   publishedAt: z.string(),
   countryCode: z.string().optional(),
@@ -31,17 +65,7 @@ export const classifiedArticleSchema = z.object({
   market_sentiment: z.enum(["bullish", "bearish", "neutral"]),
   affected_sectors: z.array(z.string()),
   affected_tickers: z.array(z.string()),
-  event_type: z.enum([
-    "geopolitical",
-    "economic",
-    "regulatory",
-    "earnings",
-    "supply_chain",
-    "technology",
-    "natural_disaster",
-    "central_bank",
-    "other",
-  ]),
+  event_type: newsEventTypeSchema,
   country_code: z.string(),
   region: z.string(),
   one_line_summary: z.string(),
@@ -67,6 +91,7 @@ export type NewsClassification = z.infer<typeof newsClassificationSchema>;
 export interface NewsEventRow {
   id: number;
   headline: string;
+  category: string;
   source: string | null;
   url: string | null;
   publishedAt: string | null;

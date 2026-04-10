@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, type KeyboardEvent } from "react";
+import { useState, useRef, useEffect, type KeyboardEvent } from "react";
 import {
   TrendingUp,
   TrendingDown,
@@ -43,16 +43,51 @@ import MarketPulseBar from "./MarketPulseBar";
 export default function WhaleAlertsPage() {
   const [filters, setFilters] = useState<WhaleFilters>({});
   const [selected, setSelected] = useState<WhaleAlert | null>(null);
+  const [newCount, setNewCount] = useState(0);
+  const seenMaxIdRef = useRef<number | null>(null);
 
-  const { data, isLoading } = useWhaleAlerts({
+  const { data, isLoading, refetch } = useWhaleAlerts({
     ticker: filters.ticker || undefined,
     sentiment: filters.sentiment || undefined,
     minPremium: filters.minPremium || undefined,
     limit: 100,
+    refetchInterval: 60_000,
   });
 
   const alerts = data?.alerts ?? [];
   const marketPulse = data?.marketPulse;
+
+  // Reset baseline whenever filters change so we don't compare across different result sets
+  useEffect(() => {
+    seenMaxIdRef.current = null;
+    setNewCount(0);
+  }, [filters]);
+
+  // Detect new trades on each poll result
+  useEffect(() => {
+    if (alerts.length === 0) return;
+    const maxId = Math.max(...alerts.map((a) => a.id));
+    if (seenMaxIdRef.current === null) {
+      // First load — establish baseline silently
+      seenMaxIdRef.current = maxId;
+    } else if (maxId > seenMaxIdRef.current) {
+      const incoming = alerts.filter((a) => a.id > seenMaxIdRef.current!);
+      setNewCount(incoming.length);
+    }
+  }, [alerts]);
+
+  const applyBaseline = (currentAlerts: typeof alerts) => {
+    if (currentAlerts.length === 0) return;
+    seenMaxIdRef.current = Math.max(...currentAlerts.map((a) => a.id));
+    setNewCount(0);
+  };
+
+  const handleDismissNew = () => applyBaseline(alerts);
+
+  const handleRefreshNow = async () => {
+    const result = await refetch();
+    applyBaseline(result.data?.alerts ?? alerts);
+  };
 
   const handleRowKeyDown = (
     event: KeyboardEvent<HTMLTableRowElement>,
@@ -76,6 +111,36 @@ export default function WhaleAlertsPage() {
       <WhaleAlertFilters filters={filters} onChange={setFilters} />
 
       {marketPulse && <MarketPulseBar pulse={marketPulse} />}
+
+      {/* New trades notification banner */}
+      {newCount > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5">
+          <div className="flex items-center gap-2 text-sm text-emerald-400">
+            <Zap className="h-4 w-4 shrink-0" />
+            <span>
+              {newCount} new whale trade{newCount === 1 ? "" : "s"} detected
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 text-xs"
+              onClick={() => void handleRefreshNow()}
+            >
+              Refresh now
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs text-muted-foreground"
+              onClick={handleDismissNew}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Table — always full width */}
       <Card>

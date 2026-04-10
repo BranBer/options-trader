@@ -13,6 +13,7 @@ export const newsEvents = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     headline: text("headline").notNull(),
+    category: text("category").notNull().default("general"),
     source: text("source"),
     url: text("url"),
     publishedAt: text("published_at"),
@@ -28,7 +29,14 @@ export const newsEvents = sqliteTable(
     geminiAnalysis: text("gemini_analysis"), // full LLM output JSON
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [index("idx_news_events_url").on(table.url)],
+  (table) => [
+    index("idx_news_events_url").on(table.url),
+    index("idx_news_events_category_impact_created").on(
+      table.category,
+      table.impactScore,
+      table.createdAt,
+    ),
+  ],
 );
 
 export const whaleAlerts = sqliteTable(

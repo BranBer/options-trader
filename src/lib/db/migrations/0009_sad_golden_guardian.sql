@@ -1,0 +1,2 @@
+ALTER TABLE `news_events` ADD `category` text DEFAULT 'general' NOT NULL;--> statement-breakpoint
+CREATE INDEX `idx_news_events_category_impact_created` ON `news_events` (`category`,`impact_score`,`created_at`);

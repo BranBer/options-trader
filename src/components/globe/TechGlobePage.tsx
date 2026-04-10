@@ -14,6 +14,7 @@ import {
   type AnalyzedEventsResponse,
   parseStringArray,
   getAnalyzableTickers,
+  techImpactColor,
 } from "@/components/globe/shared/globe-utils";
 
 type EventTickerResponse = {
@@ -22,8 +23,8 @@ type EventTickerResponse = {
   error?: string;
 };
 
-export default function GlobePage() {
-  const { data, isLoading } = useNews(5, 200);
+export default function TechGlobePage() {
+  const { data, isLoading } = useNews(5, 200, "tech");
   const [selectedEvent, setSelectedEvent] = useState<NewsEvent | null>(null);
   const [eventAnalyses, setEventAnalyses] = useState<
     Record<number, EventTickerAnalysis[]>
@@ -69,19 +70,7 @@ export default function GlobePage() {
       }
     };
 
-    const ensureHighImpactAnalyses = async () => {
-      try {
-        await fetch("/api/analysis/event-tickers/high-impact", {
-          method: "POST",
-        });
-        await loadAnalyzedEvents();
-      } catch {
-        // Best-effort backfill only
-      }
-    };
-
     void loadAnalyzedEvents();
-    void ensureHighImpactAnalyses();
     return () => {
       active = false;
     };
@@ -266,7 +255,7 @@ export default function GlobePage() {
           return { ...current, [event.id]: [...merged, ...payload.analyses] };
         });
       } catch {
-        // Non-critical � the stale data remains visible
+        // Non-critical — the stale data remains visible
       }
     },
     [selectedEvent],
@@ -274,12 +263,14 @@ export default function GlobePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Global News Globe</h1>
-        <p className="text-muted-foreground text-sm">
-          Geospatial visualization of market-moving events. Click a point to see
-          details.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Tech News Globe</h1>
+          <p className="text-muted-foreground text-sm">
+            AI, semiconductors, cybersecurity, and tech sector events worldwide.
+            Pipeline runs every 10 minutes.
+          </p>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -288,12 +279,13 @@ export default function GlobePage() {
           isLoading={isLoading}
           analyzedEventIds={analyzedEventIds}
           onEventSelect={setSelectedEvent}
+          colorFn={techImpactColor}
         />
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">
-              {selectedEvent ? "Event Details" : "Events Feed"}
+              {selectedEvent ? "Event Details" : "Tech Events Feed"}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -317,6 +309,7 @@ export default function GlobePage() {
                   onSelect={setSelectedEvent}
                   analyzedEventIds={analyzedEventIds}
                   recentAnalyses={recentAnalyses}
+                  emptyMessage="No tech news events in the last 24 hours. Pipeline runs every 10 minutes."
                 />
               )}
             </ScrollArea>
@@ -337,10 +330,10 @@ export default function GlobePage() {
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
         <span>Impact:</span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-cyan-400" /> High (8-10)
+          <span className="w-2 h-2 rounded-full bg-emerald-500" /> High (8-10)
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-blue-500" /> Medium (6-7)
+          <span className="w-2 h-2 rounded-full bg-cyan-500" /> Medium (6-7)
         </span>
         <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-full bg-indigo-500" /> Low (4-5)

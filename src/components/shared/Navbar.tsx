@@ -15,6 +15,7 @@ import {
   Loader2,
   Circle,
   AlertTriangle,
+  Cpu,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +56,7 @@ const navLinks = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/whale-alerts", label: "Whale Alerts", icon: Activity },
   { href: "/globe", label: "Globe", icon: Globe },
+  { href: "/tech-globe", label: "Tech Globe", icon: Cpu },
   { href: "/analysis", label: "Analysis", icon: BarChart3 },
 ];
 

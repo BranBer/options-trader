@@ -1,6 +1,10 @@
 import cron from "node-cron";
 import { fetchAllNews } from "@/lib/services/news-fetcher";
-import { classifyAndStoreNews } from "@/lib/cron/pipelines/news-pipeline";
+import { fetchAllTechNews } from "@/lib/services/tech-news-fetcher";
+import {
+  classifyAndStoreNews,
+  runTechNewsPipeline,
+} from "@/lib/cron/pipelines/news-pipeline";
 import { runWhalePipeline } from "@/lib/cron/pipelines/whale-pipeline";
 import { runAnalysisPipeline } from "@/lib/cron/pipelines/analysis-pipeline";
 import * as progress from "./pipeline-progress";
@@ -62,18 +66,21 @@ export async function runPipeline(
   progress.clearLastError();
 
   let rawArticles: Awaited<ReturnType<typeof fetchAllNews>> = [];
+  let rawTechArticles: Awaited<ReturnType<typeof fetchAllTechNews>> = [];
 
   try {
     // Stage 1: Fetch data (news + whale in parallel)
     progress.activate(0);
-    const [articles, whaleCount] = await Promise.all([
+    const [articles, techArticles, whaleCount] = await Promise.all([
       fetchAllNews(),
+      fetchAllTechNews(),
       runWhalePipeline(),
     ]);
     rawArticles = articles;
+    rawTechArticles = techArticles;
     progress.complete(0);
     console.log(
-      `[Pipeline] Phase 1 fetch: ${rawArticles.length} articles, ${whaleCount} whale alerts`,
+      `[Pipeline] Phase 1 fetch: ${rawArticles.length} general articles, ${rawTechArticles.length} tech articles, ${whaleCount} whale alerts`,
     );
   } catch (error) {
     console.error("[Pipeline] Stage fetch failed:", error);
@@ -92,8 +99,11 @@ export async function runPipeline(
     const newsCount = await classifyAndStoreNews(rawArticles, (done, total) => {
       progress.updateDetail(1, `${done}/${total} batches`);
     });
+    const techNewsCount = await runTechNewsPipelineFromRaw(rawTechArticles);
     progress.complete(1);
-    console.log(`[Pipeline] Phase 1 classify: ${newsCount} news events stored`);
+    console.log(
+      `[Pipeline] Phase 1 classify: ${newsCount} general news events stored, ${techNewsCount} tech news events stored`,
+    );
   } catch (error) {
     console.error("[Pipeline] Stage classify failed:", error);
     stages.classify = "error";
@@ -171,4 +181,26 @@ export function startScheduler() {
 
   // Run immediately on startup
   runPipeline("startup").catch(console.error);
+}
+
+async function runTechNewsPipelineFromRaw(
+  rawArticles: Awaited<ReturnType<typeof fetchAllTechNews>>,
+): Promise<number> {
+  if (rawArticles.length === 0) return 0;
+  const {
+    TECH_NEWS_CLASSIFIER_RESPONSE_SCHEMA,
+    TECH_NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
+    buildTechNewsClassifierPrompt,
+  } = await import("@/lib/prompts/tech-news-classifier");
+
+  return classifyAndStoreNews(rawArticles, undefined, {
+    category: "tech",
+    autoTriggerMinImpact: 7,
+    classifierConfig: {
+      systemInstruction: TECH_NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
+      responseSchema: TECH_NEWS_CLASSIFIER_RESPONSE_SCHEMA,
+      promptBuilder: buildTechNewsClassifierPrompt,
+      minImpact: 3,
+    },
+  });
 }

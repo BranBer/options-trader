@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
@@ -17,9 +20,11 @@ import type { EventTickerAnalysis } from "@/types/analysis";
 export default function EventTickerAnalysisPanel({
   analyses,
   eventHeadline,
+  onReloadTicker,
 }: {
   analyses: EventTickerAnalysis[];
   eventHeadline: string;
+  onReloadTicker?: (ticker: string) => Promise<void>;
 }) {
   if (analyses.length === 0) return null;
 
@@ -36,7 +41,14 @@ export default function EventTickerAnalysisPanel({
       </CardHeader>
       <CardContent>
         {analyses.length === 1 ? (
-          <TickerAnalysisCard analysis={analyses[0]} />
+          <TickerAnalysisCard
+            analysis={analyses[0]}
+            onReload={
+              onReloadTicker
+                ? () => onReloadTicker(analyses[0].ticker)
+                : undefined
+            }
+          />
         ) : (
           <Tabs defaultValue={analyses[0].ticker}>
             <TabsList className="mb-4 flex h-auto max-w-full flex-wrap justify-start gap-1 overflow-visible bg-muted/70 p-1">
@@ -52,7 +64,14 @@ export default function EventTickerAnalysisPanel({
             </TabsList>
             {analyses.map((analysis) => (
               <TabsContent key={analysis.ticker} value={analysis.ticker}>
-                <TickerAnalysisCard analysis={analysis} />
+                <TickerAnalysisCard
+                  analysis={analysis}
+                  onReload={
+                    onReloadTicker
+                      ? () => onReloadTicker(analysis.ticker)
+                      : undefined
+                  }
+                />
               </TabsContent>
             ))}
           </Tabs>
@@ -62,7 +81,24 @@ export default function EventTickerAnalysisPanel({
   );
 }
 
-function TickerAnalysisCard({ analysis }: { analysis: EventTickerAnalysis }) {
+function TickerAnalysisCard({
+  analysis,
+  onReload,
+}: {
+  analysis: EventTickerAnalysis;
+  onReload?: () => Promise<void>;
+}) {
+  const [reloading, setReloading] = useState(false);
+
+  const handleReload = async () => {
+    if (!onReload) return;
+    setReloading(true);
+    try {
+      await onReload();
+    } finally {
+      setReloading(false);
+    }
+  };
   const recommendation = analysis.recommendation;
   const deepDive = analysis.deepDive;
   const marketSnapshot = analysis.marketSnapshot;
@@ -80,6 +116,21 @@ function TickerAnalysisCard({ analysis }: { analysis: EventTickerAnalysis }) {
         <Badge variant="outline" className="font-mono">
           {analysis.ticker}
         </Badge>
+        {onReload && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs ml-auto"
+            disabled={reloading}
+            onClick={() => void handleReload()}
+            aria-label={`Reload analysis for ${analysis.ticker}`}
+          >
+            <RefreshCw
+              className={`h-3 w-3 mr-1 ${reloading ? "animate-spin" : ""}`}
+            />
+            {reloading ? "Reloading..." : "Reload"}
+          </Button>
+        )}
         <Badge variant={recommendationDirectionVariant}>
           {recommendation.direction}
         </Badge>

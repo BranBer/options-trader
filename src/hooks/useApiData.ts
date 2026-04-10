@@ -5,6 +5,7 @@ import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 export interface NewsEvent {
   id: number;
   headline: string;
+  category: string;
   source: string | null;
   url: string | null;
   publishedAt: string | null;
@@ -91,13 +92,20 @@ export interface Analysis {
   createdAt: string | null;
 }
 
-export function useNews(minImpact = 1, limit = 100) {
+export function useNews(
+  minImpact = 1,
+  limit = 100,
+  category: "general" | "tech" | "all" = "general",
+) {
   return useQuery<{ events: NewsEvent[]; count: number }>({
-    queryKey: ["news", minImpact, limit],
+    queryKey: ["news", minImpact, limit, category],
     queryFn: async () => {
-      const res = await fetch(
-        `/api/news?minImpact=${minImpact}&limit=${limit}`,
-      );
+      const sp = new URLSearchParams({
+        minImpact: String(minImpact),
+        limit: String(limit),
+      });
+      if (category) sp.set("category", category);
+      const res = await fetch(`/api/news?${sp.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch news");
       return res.json();
     },
@@ -109,20 +117,24 @@ export function useWhaleAlerts(params?: {
   minPremium?: number;
   sentiment?: string;
   limit?: number;
+  refetchInterval?: number;
 }) {
+  const { refetchInterval, ...queryParams } = params ?? {};
   const sp = new URLSearchParams();
-  if (params?.ticker) sp.set("ticker", params.ticker);
-  if (params?.minPremium) sp.set("minPremium", String(params.minPremium));
-  if (params?.sentiment) sp.set("sentiment", params.sentiment);
-  if (params?.limit) sp.set("limit", String(params.limit));
+  if (queryParams.ticker) sp.set("ticker", queryParams.ticker);
+  if (queryParams.minPremium)
+    sp.set("minPremium", String(queryParams.minPremium));
+  if (queryParams.sentiment) sp.set("sentiment", queryParams.sentiment);
+  if (queryParams.limit) sp.set("limit", String(queryParams.limit));
 
   return useQuery<{ alerts: WhaleAlert[]; marketPulse: MarketPulse }>({
-    queryKey: ["whaleAlerts", params],
+    queryKey: ["whaleAlerts", queryParams],
     queryFn: async () => {
       const res = await fetch(`/api/whales?${sp.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch whale alerts");
       return res.json();
     },
+    refetchInterval,
   });
 }
 
