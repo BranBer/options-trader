@@ -1,6 +1,8 @@
 "use client";
 
-import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import type { NexusDriftAnalysis } from "@/types/analysis";
+import type { ActiveCascadesResponse } from "@/app/api/analysis/active-cascades/route";
 
 export interface NewsEvent {
   id: number;
@@ -239,5 +241,38 @@ export function useHistoricalData(ticker?: string, period = "3mo") {
     refetchInterval: false, // historical data doesn't need periodic refetch
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev, // keep previous data while refetching
+  });
+}
+export function useNexusDriftAnalysis() {
+  return useMutation<NexusDriftAnalysis, Error>({
+    mutationKey: ["nexusDrift"],
+    mutationFn: async () => {
+      const res = await fetch("/api/analysis/nexus-drift", { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          body.error ?? `Nexus drift analysis failed (${res.status})`,
+        );
+      }
+      return res.json();
+    },
+  });
+}
+
+export function useActiveCascades() {
+  return useQuery<ActiveCascadesResponse>({
+    queryKey: ["activeCascades"],
+    queryFn: async () => {
+      const res = await fetch("/api/analysis/active-cascades");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          body.error ?? `Active cascades fetch failed (${res.status})`,
+        );
+      }
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000, // 5 min — cascade data changes infrequently
+    refetchInterval: 10 * 60 * 1000, // auto-refresh every 10 min
   });
 }

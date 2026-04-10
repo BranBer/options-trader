@@ -1,5 +1,6 @@
 import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
 import type { ShortInterestData } from "@/lib/services/market-fetcher";
+import type { CascadeContext } from "@/lib/utils/cascade-detector";
 
 // ---------- System Instruction ----------
 
@@ -24,6 +25,7 @@ Rules:
     - Medium-term whale (DTE 8-45): Recommend expiries in a similar window (±2 weeks of the whale's expiry). The whale expects a move within weeks, not months.
     - Long-term whale (DTE > 45): Recommend expiries 60-90+ days out. This whale has a longer-term thesis.
     - Always state the whale's DTE and what timeframe it implies in your thesis. If the whale's option has already expired or expires within 1 day, note this is an extremely aggressive short-term play and the recommended strategy should reflect that urgency.
+15. EARNINGS CASCADE: When upstream nexus companies (supply chain bellwethers) have recently reported earnings, a cascade context section will be provided. Use this to adjust your directional confidence (strong upstream beat = bullish tailwind), factor cascade timing into entry recommendation (immediate phase = stronger signal), and note cascade risk in risk factors (e.g. "upstream catalyst may already be priced in if >48h old"). Do NOT double-count cascade with earningsRisk — cascade is about UPSTREAM events, earningsRisk is about THIS ticker's own upcoming earnings.
 
 Always respond with the exact JSON schema provided.`;
 
@@ -65,6 +67,7 @@ export function buildTradeAnalyzerPrompt(
   whaleIntentHint?: string | null,
   indicatorReportsByTimeframe?: Partial<Record<string, IndicatorPatternReport>>,
   shortInterest?: ShortInterestData | null,
+  cascadeContext?: CascadeContext | null,
 ): string {
   const todayStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/New_York",
@@ -254,6 +257,12 @@ Market Data for ${ticker}:
         .join("; ")}`;
     }
     prompt += `\n\nUse these computed technical signals in your thesis. Include an optional indicator_analysis object in the response if it helps explain the recommendation.`;
+  }
+
+  if (cascadeContext && cascadeContext.signals.length > 0) {
+    prompt += `\n\n## Earnings Cascade Context`;
+    prompt += `\n${cascadeContext.promptSection}`;
+    prompt += `\nFactor this upstream earnings cascade into your thesis and confidence assessment. The cascade signal is ${cascadeContext.cascadeDirection} with strength ${cascadeContext.cascadeStrength.toFixed(2)}.`;
   }
 
   prompt += `\n\nGenerate a trade recommendation with risk analysis.`;

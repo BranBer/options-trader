@@ -17,6 +17,8 @@ export const FACTOR_TOOLTIPS: Record<string, string> = {
     "Quality score of the underlying whale trade — based on Volume/OI ratio, OTM aggressiveness, premium size, and timing.",
   "Technical Alignment":
     "Whether the price chart patterns (support/resistance, indicators) agree with the thesis direction.",
+  "Cascade Strength":
+    "Earnings cascade signal from upstream nexus companies. When a bellwether (e.g. TSMC, AMZN) reports, the surprise cascades to dependent tickers with time-decayed strength.",
   "IV Regime":
     "Whether implied volatility supports the recommended strategy. Extreme IV (high or low) is a stronger signal than mid-range.",
   "VIX Regime":

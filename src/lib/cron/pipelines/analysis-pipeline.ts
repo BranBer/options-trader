@@ -17,6 +17,7 @@ import {
   fetchHistoricalData,
   fetchVIX,
   fetchEarningsDate,
+  fetchEpsSurprise,
   computeRealizedVol,
   getOrFetchShortInterest,
 } from "@/lib/services/market-fetcher";
@@ -38,6 +39,11 @@ import { fetchSectorPerformance } from "@/lib/services/market-fetcher";
 import { computeCompositeConfidence } from "@/lib/utils/composite-confidence";
 import { isTimeframeAwareDeepDiveOutput } from "@/lib/utils/deep-dive-freshness";
 import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
+import {
+  detectCascade,
+  type NexusEarnings,
+} from "@/lib/utils/cascade-detector";
+import { NEXUS_COMPANIES } from "@/lib/data/nexus-companies";
 import type { InsiderSentiment } from "@/types/insider";
 import type { SectorRotationContext } from "@/lib/utils/sector-rotation";
 import type { DeepDiveAnalysis, TradeRecommendation } from "@/types/analysis";
@@ -161,6 +167,39 @@ export async function runAnalysisPipeline(): Promise<number> {
     `[AnalysisPipeline] Macro context: VIX=${vixCtx?.level?.toFixed(2) ?? "N/A"} (${vixCtx?.regime ?? "N/A"}), ` +
       `FOMC next=${fomcCtx.nextDate} (decision week: ${fomcCtx.isDecisionWeek})`,
   );
+
+  // Step 0b: Nexus earnings monitor — check which nexus companies recently reported
+  const recentNexusEarnings = new Map<string, NexusEarnings>();
+  const CASCADE_WINDOW_MS = 72 * 60 * 60 * 1000; // 72 hours
+  for (const nexus of NEXUS_COMPANIES) {
+    try {
+      const earningsDate = await fetchEarningsDate(nexus.ticker);
+      if (!earningsDate) continue;
+      const reportedMs = new Date(earningsDate).getTime();
+      const hoursSince = (Date.now() - reportedMs) / (1000 * 60 * 60);
+      // Earnings date is in the past and within 72h = recently reported
+      if (hoursSince >= 0 && hoursSince <= 72) {
+        // Fetch real EPS surprise data (Story 43.7)
+        const epsData = await fetchEpsSurprise(nexus.ticker);
+        recentNexusEarnings.set(nexus.ticker, {
+          reportedAt: earningsDate,
+          epsSurprisePct: epsData?.epsSurprisePct ?? 0,
+        });
+        if (epsData) {
+          console.log(
+            `[AnalysisPipeline] ${nexus.ticker} EPS surprise: ${epsData.epsSurprisePct.toFixed(1)}% (actual=${epsData.epsActual}, est=${epsData.epsEstimate})`,
+          );
+        }
+      }
+    } catch {
+      // Non-critical — skip this nexus company
+    }
+  }
+  if (recentNexusEarnings.size > 0) {
+    console.log(
+      `[AnalysisPipeline] Cascade monitor: ${recentNexusEarnings.size} nexus companies reported recently: ${[...recentNexusEarnings.keys()].join(", ")}`,
+    );
+  }
 
   // Step 1: Fetch recent high-impact news (last 24h, impact >= 5)
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -426,6 +465,13 @@ export async function runAnalysisPipeline(): Promise<number> {
             () => null,
           );
 
+          // Cascade detection for this ticker
+          const cascadeCtx = detectCascade(
+            ticker,
+            NEXUS_COMPANIES,
+            recentNexusEarnings,
+          );
+
           const recommendation = await generateRecommendation(correlation, {
             price: marketData?.price ?? 0,
             ivRank: atmIV != null ? Math.round(atmIV * 100) : undefined,
@@ -454,6 +500,7 @@ export async function runAnalysisPipeline(): Promise<number> {
             whaleIntentHint:
               recentWhales.find((w) => w.ticker === ticker)?.intentHint ?? null,
             shortInterest: siData,
+            cascadeContext: cascadeCtx,
           });
 
           // Store latest market snapshot
@@ -667,6 +714,11 @@ export async function runAnalysisPipeline(): Promise<number> {
                 indicatorReport,
                 indicatorReportsByTimeframe,
                 whaleIntentHint: whaleRow?.intentHint ?? null,
+                cascadeContext: detectCascade(
+                  ticker,
+                  NEXUS_COMPANIES,
+                  recentNexusEarnings,
+                ),
               },
             );
 
@@ -963,6 +1015,11 @@ export async function runAnalysisPipeline(): Promise<number> {
             shortInterest: await getOrFetchShortInterest(item.ticker).catch(
               () => null,
             ),
+            cascadeContext: detectCascade(
+              item.ticker,
+              NEXUS_COMPANIES,
+              recentNexusEarnings,
+            ),
           });
 
           await db.insert(analyses).values({
@@ -1028,7 +1085,9 @@ export async function runAnalysisPipeline(): Promise<number> {
         // Find matching recommendation by ticker
         const matchingRec = recentRecs.find((r) => {
           const refs = JSON.parse(r.inputRefs ?? "{}");
-          return refs.correlationTicker === diveTicker;
+          const refTicker =
+            refs.correlationTicker ?? refs.whaleSignalTicker ?? refs.ticker;
+          return refTicker === diveTicker;
         });
         if (!matchingRec) continue;
 
@@ -1072,7 +1131,10 @@ export async function runAnalysisPipeline(): Promise<number> {
     for (const recRow of updatedRecs) {
       try {
         const refs = JSON.parse(recRow.inputRefs ?? "{}");
-        const ticker = refs.correlationTicker as string;
+        const ticker = (refs.correlationTicker ??
+          refs.whaleSignalTicker ??
+          refs.ticker) as string | undefined;
+        if (!ticker) continue; // skip rows with no resolvable ticker
         const correlationConf = (refs.correlationConfidence as number) ?? 0.5;
         const recOutput = JSON.parse(
           recRow.output ?? "{}",
@@ -1117,6 +1179,9 @@ export async function runAnalysisPipeline(): Promise<number> {
           shortInterestPctOfFloat: await getOrFetchShortInterest(ticker)
             .then((si) => si?.shortPercentOfFloat ?? null)
             .catch(() => null),
+          cascadeStrength:
+            detectCascade(ticker, NEXUS_COMPANIES, recentNexusEarnings)
+              ?.cascadeStrength ?? null,
         });
 
         await db

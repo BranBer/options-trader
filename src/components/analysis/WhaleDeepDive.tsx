@@ -3,8 +3,10 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { useDeepDive } from "@/hooks/useApiData";
+import { useDeepDive, useActiveCascades } from "@/hooks/useApiData";
 import type { DeepDiveAnalysis } from "@/types/analysis";
+import { findUpstreamNexus } from "@/lib/data/nexus-companies";
+import type { ActiveCascadeEntry } from "@/app/api/analysis/active-cascades/route";
 import {
   CHART_HISTORY_LABELS,
   type ChartHistoryPeriod,
@@ -22,6 +24,7 @@ import {
   AlertTriangle,
   Globe,
   Clock,
+  Zap,
 } from "lucide-react";
 
 interface WhaleDeepDiveProps {
@@ -47,6 +50,18 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
   const [timeframe, setTimeframe] = useState<ChartHistoryPeriod>("3mo");
 
   const { data: deepDiveData, isLoading: ddLoading } = useDeepDive(ticker);
+  const { data: cascadeData } = useActiveCascades();
+
+  // Find active cascades that affect this ticker
+  const activeCascadesForTicker = useMemo(() => {
+    if (!cascadeData?.cascades.length) return [];
+    const upstreamTickers = new Set(
+      findUpstreamNexus(ticker).map((n) => n.ticker),
+    );
+    return cascadeData.cascades.filter((c) =>
+      upstreamTickers.has(c.nexusTicker),
+    );
+  }, [cascadeData, ticker]);
 
   const analysisRow = deepDiveData?.analyses?.[0];
   const deepDive = analysisRow?.output as DeepDiveAnalysis | undefined;
@@ -100,6 +115,11 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
         </div>
         <p className="text-sm mt-1">{deepDive.whale_trade_summary}</p>
       </div>
+
+      {/* Active Cascade Banner */}
+      {activeCascadesForTicker.length > 0 && (
+        <CascadeBanner ticker={ticker} cascades={activeCascadesForTicker} />
+      )}
 
       {/* Market Narrative */}
       <div>
@@ -374,6 +394,55 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
       <p className="text-xs text-muted-foreground italic border-l-2 border-muted pl-2">
         {deepDive.disclaimer}
       </p>
+    </div>
+  );
+}
+
+function CascadeBanner({
+  ticker,
+  cascades,
+}: {
+  ticker: string;
+  cascades: ActiveCascadeEntry[];
+}) {
+  return (
+    <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <Zap className="h-4 w-4 text-blue-400 shrink-0" />
+        <p className="text-sm font-medium">Active Earnings Cascade</p>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {ticker} is being influenced by upstream nexus earnings. The AI analysis
+        above incorporates these cascade signals in its risk assessment and
+        entry/exit timing.
+      </p>
+      <div className="space-y-1.5">
+        {cascades.map((c) => (
+          <div key={c.nexusTicker} className="flex items-center gap-2 text-xs">
+            <span className="font-mono font-semibold">{c.nexusTicker}</span>
+            <span className="text-muted-foreground">{c.nexusName}</span>
+            <Badge
+              variant={c.direction === "bullish" ? "default" : "destructive"}
+              className="text-xs"
+            >
+              {c.direction === "bullish" ? "Beat" : "Miss"}
+            </Badge>
+            <span
+              className={
+                c.epsSurprisePct >= 0
+                  ? "text-emerald-400 font-medium"
+                  : "text-red-400 font-medium"
+              }
+            >
+              {c.epsSurprisePct >= 0 ? "+" : ""}
+              {c.epsSurprisePct.toFixed(1)}%
+            </span>
+            <span className="text-muted-foreground">
+              {c.hoursSinceReport.toFixed(0)}h ago
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

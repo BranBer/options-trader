@@ -39,6 +39,8 @@ interface CompositeInputs {
   shortInterestPctOfFloat?: number | null;
   /** Whale intent hint for hedge detection */
   whaleIntentHint?: string | null;
+  /** Cascade strength from upstream nexus earnings (0-1) */
+  cascadeStrength?: number | null;
 }
 
 /**
@@ -46,15 +48,16 @@ interface CompositeInputs {
  * If a factor is unavailable, its weight is redistributed proportionally.
  */
 const FACTOR_WEIGHTS = {
-  geminiCorrelationConf: 0.18, // AI Correlation
-  whaleQualityScore: 0.14,
-  technicalAlignment: 0.14,
-  ivRegime: 0.09,
-  vixRegime: 0.09,
+  geminiCorrelationConf: 0.16, // AI Correlation
+  whaleQualityScore: 0.13,
+  technicalAlignment: 0.13,
+  cascadeStrength: 0.08,
+  ivRegime: 0.08,
+  vixRegime: 0.08,
   earningsRisk: 0.09,
-  insiderAlignment: 0.09,
+  insiderAlignment: 0.08,
   sectorMomentum: 0.09,
-  shortInterest: 0.09,
+  shortInterest: 0.08,
 } as const;
 
 /**
@@ -305,6 +308,23 @@ export function computeCompositeConfidence(
       key: "shortInterest",
       value: null,
       description: "Short interest data not available",
+    });
+  }
+
+  // Factor 10: Cascade strength (upstream nexus earnings signal, 0-1)
+  if (inputs.cascadeStrength != null) {
+    rawFactors.push({
+      name: "Cascade Strength",
+      key: "cascadeStrength",
+      value: inputs.cascadeStrength,
+      description: `Upstream nexus earnings cascade signal: ${(inputs.cascadeStrength * 100).toFixed(0)}%`,
+    });
+  } else {
+    rawFactors.push({
+      name: "Cascade Strength",
+      key: "cascadeStrength",
+      value: null,
+      description: "No active cascade signal",
     });
   }
 

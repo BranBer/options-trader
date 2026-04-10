@@ -2,6 +2,7 @@ import type { AnalysisTimeframe } from "@/lib/utils/chart-timeframes";
 import { ANALYSIS_TIMEFRAMES } from "@/lib/utils/chart-timeframes";
 import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
 import type { ShortInterestData } from "@/lib/services/market-fetcher";
+import type { CascadeContext } from "@/lib/utils/cascade-detector";
 
 // ---------- System Instruction ----------
 
@@ -41,6 +42,9 @@ Macro awareness rules:
 - If VIX context is provided, factor the volatility regime into position sizing and strategy selection. Elevated VIX (>25) means wider expected moves — tighten stops, prefer defined-risk.
 - If earnings proximity data is provided and the option expires AFTER earnings, prominently warn about IV crush risk. IV typically drops 30-60% post-earnings.
 - During FOMC decision week, expect elevated intraday volatility and potential trend reversals.
+
+Earnings cascade rules:
+- When upstream nexus companies (supply chain bellwethers) have recently reported earnings, a cascade context section will be provided. Incorporate this upstream catalyst in your risk assessment and entry/exit timing analysis. Do NOT double-count cascade with the ticker's own earningsRisk.
 
 Always respond with the exact JSON schema provided.`;
 
@@ -84,6 +88,7 @@ interface DeepDivePromptInput {
     Record<AnalysisTimeframe, IndicatorPatternReport>
   >;
   shortInterest?: ShortInterestData | null;
+  cascadeContext?: CascadeContext | null;
 }
 
 function renderIndicatorReport(report: IndicatorPatternReport): string {
@@ -250,6 +255,12 @@ ${input.newsContextJson}`;
     if (indicatorSections) {
       prompt += `\n\n## Pre-Computed Technical Indicator Analysis\n${indicatorSections}`;
     }
+  }
+
+  if (input.cascadeContext && input.cascadeContext.signals.length > 0) {
+    prompt += `\n\n## Earnings Cascade Context`;
+    prompt += `\n${input.cascadeContext.promptSection}`;
+    prompt += `\nIncorporate this upstream catalyst in your risk assessment and entry/exit timing analysis.`;
   }
 
   prompt += `

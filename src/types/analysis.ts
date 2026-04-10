@@ -247,6 +247,64 @@ export const deepDiveAnalysisSchema = z.object({
 
 export type DeepDiveAnalysis = z.infer<typeof deepDiveAnalysisSchema>;
 
+// --- Nexus Drift Analysis (Epic 43) ---
+export const nexusDriftRemovalSchema = z.object({
+  ticker: z.string(),
+  reason: z.string(),
+  confidence: z.number().min(0).max(1),
+  replacement_ticker: z.string().nullable().optional(),
+  replacement_rationale: z.string().nullable().optional(),
+});
+
+export const nexusDriftAdditionSchema = z.object({
+  ticker: z.string(),
+  name: z.string(),
+  sector: z.string(),
+  nexus_role: z.string(),
+  cascade_signal: z.string(),
+  key_dependents: z.array(z.string()),
+  confidence: z.number().min(0).max(1),
+  trigger_event: z.string(),
+});
+
+export const nexusDriftRelationshipChangeSchema = z.object({
+  nexus_ticker: z.string(),
+  change_type: z.enum([
+    "new_dependent",
+    "lost_dependent",
+    "role_shift",
+    "cascade_signal_change",
+  ]),
+  description: z.string(),
+  confidence: z.number().min(0).max(1),
+});
+
+export const nexusDriftRiskAlertSchema = z.object({
+  nexus_ticker: z.string(),
+  threat_type: z.enum([
+    "geopolitical",
+    "regulatory",
+    "technological_disruption",
+    "supply_chain",
+    "financial",
+  ]),
+  severity: z.enum(["watch", "elevated", "critical"]),
+  description: z.string(),
+  time_horizon: z.string(),
+});
+
+export const nexusDriftAnalysisSchema = z.object({
+  analysis_date: z.string(),
+  overall_assessment: z.enum(["stable", "minor_shifts", "major_disruption"]),
+  summary: z.string(),
+  removals: z.array(nexusDriftRemovalSchema),
+  additions: z.array(nexusDriftAdditionSchema),
+  relationship_changes: z.array(nexusDriftRelationshipChangeSchema),
+  risk_alerts: z.array(nexusDriftRiskAlertSchema),
+});
+
+export type NexusDriftAnalysis = z.infer<typeof nexusDriftAnalysisSchema>;
+
 // --- Composite Confidence Breakdown ---
 export type {
   CompositeConfidenceBreakdown,

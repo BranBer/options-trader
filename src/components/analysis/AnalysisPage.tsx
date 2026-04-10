@@ -28,6 +28,7 @@ import type {
   TradeRecommendation,
 } from "@/types/analysis";
 import WhaleDeepDive from "@/components/analysis/WhaleDeepDive";
+import NexusDriftPanel from "@/components/analysis/NexusDriftPanel";
 import { IndicatorGuide } from "@/components/charts/IndicatorExplainers";
 import { InfiniteScrollTrigger } from "@/components/shared/InfiniteScrollTrigger";
 import { VirtualizedAnalysisList } from "@/components/shared/VirtualizedAnalysisList";
@@ -37,11 +38,13 @@ import {
   ChevronUp,
   HelpCircle,
   BookOpen,
+  Network,
   Shield,
   TrendingUp,
   TrendingDown,
   AlertTriangle,
   CheckCircle,
+  Zap,
 } from "lucide-react";
 
 export default function AnalysisPage() {
@@ -97,6 +100,10 @@ export default function AnalysisPage() {
           <TabsTrigger value="guide">
             <BookOpen className="h-3.5 w-3.5 mr-1" />
             TA Guide
+          </TabsTrigger>
+          <TabsTrigger value="nexus">
+            <Network className="h-3.5 w-3.5 mr-1" />
+            Nexus Map
           </TabsTrigger>
         </TabsList>
 
@@ -273,6 +280,10 @@ export default function AnalysisPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="nexus" className="mt-4">
+          <NexusDriftPanel />
         </TabsContent>
       </Tabs>
     </div>
@@ -526,6 +537,11 @@ function RecommendationCard({
   if (!raw || !raw.ticker || !raw.primary_strategy) return null;
   const output = raw;
 
+  // Detect active cascade influence from confidence breakdown
+  const cascadeFactor = analysis.confidenceBreakdown?.factors.find(
+    (f) => f.name === "Cascade Strength" && f.value > 0,
+  );
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -543,6 +559,23 @@ function RecommendationCard({
             >
               {output.direction.toUpperCase()}
             </Badge>
+            {cascadeFactor && (
+              <TooltipProvider delay={200}>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <Zap className="h-3 w-3 text-blue-400" />
+                      Cascade {(cascadeFactor.value * 100).toFixed(0)}%
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-56 text-xs">
+                    This recommendation is influenced by an upstream nexus
+                    company&apos;s earnings report cascading through the supply
+                    chain.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </CardTitle>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1">

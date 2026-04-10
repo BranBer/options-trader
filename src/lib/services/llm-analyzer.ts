@@ -18,6 +18,10 @@ import {
   type AnalysisTimeframe,
   type TechnicalPattern,
 } from "@/types/analysis";
+import {
+  type NexusDriftAnalysis,
+  nexusDriftAnalysisSchema,
+} from "@/types/analysis";
 import type { Correlation } from "@/types/analysis";
 import {
   detectAllIndicatorPatterns,
@@ -43,6 +47,11 @@ import {
   DEEP_DIVE_RESPONSE_SCHEMA,
   buildDeepDivePrompt,
 } from "@/lib/prompts/deep-dive-analyzer";
+import {
+  NEXUS_DRIFT_SYSTEM_INSTRUCTION,
+  NEXUS_DRIFT_RESPONSE_SCHEMA,
+  buildNexusDriftPrompt,
+} from "@/lib/prompts/cascade-drift-analyzer";
 import type { CandleData, OptionsChainSummary } from "@/types/market";
 
 export interface ClassifyNewsConfig {
@@ -617,6 +626,7 @@ interface MarketDataForRecommendation {
   shortInterest?:
     | import("@/lib/services/market-fetcher").ShortInterestData
     | null;
+  cascadeContext?: import("@/lib/utils/cascade-detector").CascadeContext | null;
 }
 
 export async function generateRecommendation(
@@ -642,6 +652,7 @@ export async function generateRecommendation(
     marketData.whaleIntentHint,
     marketData.indicatorReportsByTimeframe,
     marketData.shortInterest,
+    marketData.cascadeContext,
   );
 
   const result = await callLLMWithRetry(
@@ -718,6 +729,7 @@ interface DeepDiveInput {
   shortInterest?:
     | import("@/lib/services/market-fetcher").ShortInterestData
     | null;
+  cascadeContext?: import("@/lib/utils/cascade-detector").CascadeContext | null;
 }
 
 const DEEP_DIVE_TIMEFRAME_CONFIG: Array<{
@@ -1060,6 +1072,7 @@ export async function generateDeepDive(
     optionsAnalytics: input.optionsAnalytics,
     computedIndicators,
     shortInterest: input.shortInterest,
+    cascadeContext: input.cascadeContext,
   });
 
   const result = await callLLMWithRetry(
@@ -1085,4 +1098,39 @@ export async function generateDeepDive(
   );
 
   return normalized;
+}
+
+// ============================================================
+// Epic 43 — Nexus Drift Analysis
+// ============================================================
+
+import type { NexusCompany } from "@/lib/data/nexus-companies";
+
+export async function analyzeNexusDrift(
+  nexusCompanies: NexusCompany[],
+  recentNewsContext: string,
+): Promise<NexusDriftAnalysis> {
+  console.log(
+    `[LLM] Analyzing nexus drift for ${nexusCompanies.length} companies`,
+  );
+
+  const prompt = buildNexusDriftPrompt(nexusCompanies, recentNewsContext);
+
+  const result = await callLLMWithRetry(
+    NEXUS_DRIFT_SYSTEM_INSTRUCTION,
+    prompt,
+    NEXUS_DRIFT_RESPONSE_SCHEMA,
+    nexusDriftAnalysisSchema,
+    {
+      callType: "nexusDrift",
+      temperature: 0.3,
+      maxOutputTokens: 8192,
+    },
+  );
+
+  console.log(
+    `[LLM] Nexus drift: ${result.overall_assessment} — ${result.removals.length} removals, ${result.additions.length} additions, ${result.risk_alerts.length} alerts`,
+  );
+
+  return result;
 }

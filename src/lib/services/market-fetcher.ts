@@ -51,6 +51,76 @@ export async function fetchEarningsDate(
   }
 }
 
+// ---------- EPS Surprise ----------
+
+export interface EpsSurpriseData {
+  epsActual: number;
+  epsEstimate: number;
+  epsSurprisePct: number; // e.g. 15.0 for 15% beat, -10.0 for 10% miss
+  quarter: string; // e.g. "2025-03-31"
+}
+
+/**
+ * Fetch EPS surprise data for the most recent earnings quarter using
+ * yahoo-finance2 quoteSummary earningsHistory module.
+ * Returns null if data is unavailable.
+ */
+export async function fetchEpsSurprise(
+  ticker: string,
+): Promise<EpsSurpriseData | null> {
+  try {
+    const result = await yf.quoteSummary(ticker, {
+      modules: ["earningsHistory"],
+    });
+    const history = result?.earningsHistory?.history;
+    if (!Array.isArray(history) || history.length === 0) return null;
+
+    // Most recent quarter is last in the array
+    const recent = history[history.length - 1];
+    const actual =
+      typeof recent.epsActual === "number"
+        ? recent.epsActual
+        : recent.epsActual?.raw;
+    const estimate =
+      typeof recent.epsEstimate === "number"
+        ? recent.epsEstimate
+        : recent.epsEstimate?.raw;
+
+    if (typeof actual !== "number" || typeof estimate !== "number") return null;
+
+    // Surprise % = ((actual - estimate) / |estimate|) * 100
+    // Guard against zero estimate to avoid infinity
+    const surprisePct =
+      Math.abs(estimate) > 0.0001
+        ? ((actual - estimate) / Math.abs(estimate)) * 100
+        : actual > estimate
+          ? 100
+          : actual < estimate
+            ? -100
+            : 0;
+
+    const quarter =
+      recent.quarter instanceof Date
+        ? recent.quarter.toISOString().split("T")[0]
+        : typeof recent.quarter === "string"
+          ? recent.quarter
+          : "unknown";
+
+    return {
+      epsActual: actual,
+      epsEstimate: estimate,
+      epsSurprisePct: Math.round(surprisePct * 100) / 100,
+      quarter,
+    };
+  } catch (err) {
+    console.warn(
+      `[market-fetcher] EPS surprise fetch failed for ${ticker}:`,
+      err,
+    );
+    return null;
+  }
+}
+
 // ---------- Market quotes ----------
 
 export async function fetchMarketData(
