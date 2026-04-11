@@ -53,6 +53,11 @@ import {
   buildNexusDriftPrompt,
 } from "@/lib/prompts/cascade-drift-analyzer";
 import type { CandleData, OptionsChainSummary } from "@/types/market";
+import { computeVolumeProfile } from "@/lib/utils/volume-profile";
+import { computeAlgoSR } from "@/lib/utils/algo-sr";
+import { computeIVSkew, computeOISummary } from "@/lib/utils/options-analytics";
+import { getUpcomingCatalysts } from "@/lib/utils/economic-calendar";
+import type { SignalHierarchyInput } from "@/lib/utils/signal-hierarchy";
 
 export interface ClassifyNewsConfig {
   systemInstruction?: string;
@@ -1055,6 +1060,54 @@ export async function generateDeepDive(
     );
   }
 
+  // Epic 46 — Compute enriched signal hierarchy data
+  const signalHierarchy: SignalHierarchyInput = {
+    currentPrice: input.currentPrice,
+    earningsDate: input.macroContext?.earningsDate,
+  };
+
+  // Volume profile from 3M candles (best balance of recency + depth)
+  const profileCandles =
+    input.historicalDataByTimeframe?.["3M"] ?? input.historicalData;
+  if (profileCandles.length >= 10) {
+    const vp = computeVolumeProfile(profileCandles);
+    signalHierarchy.volumeProfile = vp;
+
+    // Compute VWAP from 1D intraday candles for algo S/R
+    const intradayCandles = input.historicalDataByTimeframe?.["1D"] ?? [];
+    const { vwap: vwapFn } = await import("@/lib/utils/technical-indicators");
+    const vwapValues =
+      intradayCandles.length > 0 ? vwapFn(intradayCandles) : [];
+    const latestVwap =
+      vwapValues.length > 0 ? vwapValues[vwapValues.length - 1] : null;
+
+    // Algo S/R with multi-source confluence
+    signalHierarchy.algoSR = computeAlgoSR({
+      candles: profileCandles,
+      currentPrice: input.currentPrice,
+      volumeProfile: vp,
+      oiWalls: input.optionsAnalytics?.oiWalls ?? null,
+      maxPain: input.optionsAnalytics?.maxPain ?? null,
+      gex:
+        (input.optionsAnalytics?.gex as
+          | import("@/lib/utils/gex-calculator").GEXSummary
+          | null) ?? null,
+      vwap: latestVwap,
+    });
+  }
+
+  // Enhanced options context (IV skew + OI summary)
+  if (input.optionsChain) {
+    signalHierarchy.ivSkew = computeIVSkew(
+      input.optionsChain,
+      input.currentPrice,
+    );
+    signalHierarchy.oiSummary = computeOISummary(input.optionsChain);
+  }
+
+  // Economic catalyst calendar
+  signalHierarchy.catalysts = getUpcomingCatalysts(14);
+
   const prompt = buildDeepDivePrompt({
     ticker,
     whaleTradeJson: JSON.stringify(input.whaleTrade, null, 2),
@@ -1073,6 +1126,7 @@ export async function generateDeepDive(
     computedIndicators,
     shortInterest: input.shortInterest,
     cascadeContext: input.cascadeContext,
+    signalHierarchy,
   });
 
   const result = await callLLMWithRetry(

@@ -3,6 +3,8 @@ import { ANALYSIS_TIMEFRAMES } from "@/lib/utils/chart-timeframes";
 import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
 import type { ShortInterestData } from "@/lib/services/market-fetcher";
 import type { CascadeContext } from "@/lib/utils/cascade-detector";
+import type { SignalHierarchyInput } from "@/lib/utils/signal-hierarchy";
+import { buildSignalHierarchyPrompt } from "@/lib/utils/signal-hierarchy";
 
 // ---------- System Instruction ----------
 
@@ -89,6 +91,7 @@ interface DeepDivePromptInput {
   >;
   shortInterest?: ShortInterestData | null;
   cascadeContext?: CascadeContext | null;
+  signalHierarchy?: SignalHierarchyInput | null;
 }
 
 function renderIndicatorReport(report: IndicatorPatternReport): string {
@@ -145,6 +148,14 @@ ${input.historicalDataSummariesByTimeframe?.[timeframe]}`,
 
 ## Options Chain Context
 ${input.optionsChainSummary}`;
+
+  // Signal Hierarchy — tiered signal framing + enriched data (Epic 46)
+  if (input.signalHierarchy) {
+    const hierarchySection = buildSignalHierarchyPrompt(input.signalHierarchy);
+    if (hierarchySection) {
+      prompt += `\n\n${hierarchySection}`;
+    }
+  }
 
   if (input.correlatedEventJson) {
     prompt += `

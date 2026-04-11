@@ -11,6 +11,10 @@ import type {
   ChartHistoryPeriod,
 } from "@/lib/utils/chart-timeframes";
 import type { CompositeConfidenceBreakdown } from "@/lib/utils/composite-confidence";
+import type { VolumeProfile } from "@/lib/utils/volume-profile";
+import type { AlgoSRLevel } from "@/lib/utils/algo-sr";
+import type { IVSkew, OISummary } from "@/lib/utils/options-analytics";
+import type { CatalystSummary } from "@/lib/utils/economic-calendar";
 
 export interface TimeframeReportData {
   timeframe: AnalysisTimeframe;
@@ -18,6 +22,18 @@ export interface TimeframeReportData {
   candles: Candle[];
   patterns: TechnicalPattern[];
   indicatorPatterns: TechnicalPattern[];
+}
+
+/** Epic 46 — enriched market structure data for PDF report */
+export interface EnrichedMarketData {
+  volumeProfile: VolumeProfile | null;
+  algoSR: AlgoSRLevel[];
+  ivSkew: IVSkew | null;
+  oiSummary: OISummary | null;
+  catalysts: CatalystSummary;
+  currentPrice: number;
+  /** Next earnings date (ISO string) from Yahoo Finance */
+  earningsDate: string | null;
 }
 
 export interface ReportData {
@@ -31,4 +47,6 @@ export interface ReportData {
   whaleAlert: WhaleAlert | null;
   /** Populated after chart screenshot capture; timeframe label → data URL */
   chartScreenshots: Record<string, string>;
+  /** Epic 46 — enriched market structure data */
+  enrichedData: EnrichedMarketData;
 }

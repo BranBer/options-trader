@@ -4,6 +4,7 @@ import ReportCoverPage from "./ReportCoverPage";
 import ReportNarrativePage from "./ReportNarrativePage";
 import ReportChartPage from "./ReportChartPage";
 import ReportOptionsPage from "./ReportOptionsPage";
+import ReportMarketStructurePage from "./ReportMarketStructurePage";
 import ReportStrategyPage from "./ReportStrategyPage";
 import ReportFooterPage from "./ReportFooterPage";
 
@@ -44,7 +45,15 @@ export default function ReportDocument({ data }: ReportDocumentProps) {
         indicators={data.deepDive.indicators}
       />
 
-      {/* Page 10: Strategy + Risk */}
+      {/* Page 10: Market Structure (Volume Profile, Algo S/R, Options Positioning, Catalysts) */}
+      <ReportMarketStructurePage
+        ticker={data.ticker}
+        generatedAt={data.generatedAt}
+        enrichedData={data.enrichedData}
+        optionsContext={data.deepDive.options_context}
+      />
+
+      {/* Page 11: Strategy + Risk */}
       <ReportStrategyPage data={data} />
 
       {/* Page 11-12: Educational Notes + Disclaimer */}

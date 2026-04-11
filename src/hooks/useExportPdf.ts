@@ -8,6 +8,7 @@ import type { CompositeConfidenceBreakdown } from "@/lib/utils/composite-confide
 import type { ReportData } from "@/types/report";
 import {
   fetchAllTimeframeCandles,
+  fetchOptionsChainClient,
   aggregateReportData,
 } from "@/lib/services/report-data-aggregator";
 import { captureChartScreenshots } from "@/lib/services/chart-screenshot";
@@ -61,13 +62,18 @@ export function useExportPdf(ticker: string): UseExportPdfReturn {
       setError(null);
 
       try {
-        // Stage 1: Aggregate data
+        // Stage 1: Aggregate data (fetch candles + options chain in parallel)
         setProgress("aggregating");
-        const candlesByPeriod = await fetchAllTimeframeCandles(ticker);
+        const [candlesByPeriod, optionsResult] = await Promise.all([
+          fetchAllTimeframeCandles(ticker),
+          fetchOptionsChainClient(ticker),
+        ]);
         const reportData: ReportData = aggregateReportData({
           ticker,
           ...input,
           candlesByPeriod,
+          optionsChain: optionsResult.chain,
+          earningsDate: optionsResult.earningsDate,
         });
 
         // Stage 2: Capture chart screenshots

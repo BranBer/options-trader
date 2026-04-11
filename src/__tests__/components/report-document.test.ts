@@ -137,6 +137,15 @@ function makeReportData(overrides?: Partial<ReportData>): ReportData {
     cascadeContext: null,
     whaleAlert: null,
     chartScreenshots: {},
+    enrichedData: {
+      volumeProfile: null,
+      algoSR: [],
+      ivSkew: null,
+      oiSummary: null,
+      catalysts: { events: [], highImpactCount: 0, immediateRisk: false },
+      currentPrice: 0,
+      earningsDate: null,
+    },
     ...overrides,
   };
 }

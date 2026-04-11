@@ -229,71 +229,76 @@ export default function ReportOptionsPage({
       )}
 
       {/* Market Structure: Max Pain, OI Walls, GEX */}
-      <View style={baseStyles.section}>
-        <Text style={baseStyles.h2}>Market Structure</Text>
-        <View style={baseStyles.card}>
-          <View style={s.twoCol}>
-            <View style={s.halfCol}>
-              {ctx.max_pain != null && (
-                <KVRow label="Max Pain" value={`$${ctx.max_pain}`} />
-              )}
-              {ctx.gex_summary && (
-                <>
-                  <KVRow
-                    label="Net GEX"
-                    value={ctx.gex_summary.net_gex.toLocaleString()}
-                  />
-                  <KVRow
-                    label="Dealer Position"
-                    value={ctx.gex_summary.dealer_positioning.replace("_", " ")}
-                  />
-                  {ctx.gex_summary.gex_flip_level != null && (
+      {(ctx.max_pain != null || ctx.gex_summary || ctx.oi_walls) && (
+        <View style={baseStyles.section}>
+          <Text style={baseStyles.h2}>Market Structure</Text>
+          <View style={baseStyles.card}>
+            <View style={s.twoCol}>
+              <View style={s.halfCol}>
+                {ctx.max_pain != null && (
+                  <KVRow label="Max Pain" value={`$${ctx.max_pain}`} />
+                )}
+                {ctx.gex_summary && (
+                  <>
                     <KVRow
-                      label="GEX Flip"
-                      value={`$${ctx.gex_summary.gex_flip_level}`}
+                      label="Net GEX"
+                      value={ctx.gex_summary.net_gex.toLocaleString()}
                     />
-                  )}
-                </>
-              )}
+                    <KVRow
+                      label="Dealer Position"
+                      value={ctx.gex_summary.dealer_positioning.replace(
+                        "_",
+                        " ",
+                      )}
+                    />
+                    {ctx.gex_summary.gex_flip_level != null && (
+                      <KVRow
+                        label="GEX Flip"
+                        value={`$${ctx.gex_summary.gex_flip_level}`}
+                      />
+                    )}
+                  </>
+                )}
+              </View>
+              <View style={s.halfCol}>
+                {ctx.oi_walls && (
+                  <>
+                    <Text
+                      style={[
+                        baseStyles.caption,
+                        { fontFamily: "Helvetica-Bold", marginBottom: 3 },
+                      ]}
+                    >
+                      OI WALLS
+                    </Text>
+                    {ctx.oi_walls.call_walls.map((w, i) => (
+                      <View key={`c${i}`} style={s.wallRow}>
+                        <Text style={baseStyles.caption}>Call ${w.strike}</Text>
+                        <Text style={baseStyles.caption}>
+                          {w.oi.toLocaleString()} OI
+                        </Text>
+                      </View>
+                    ))}
+                    {ctx.oi_walls.put_walls.map((w, i) => (
+                      <View key={`p${i}`} style={s.wallRow}>
+                        <Text style={baseStyles.caption}>Put ${w.strike}</Text>
+                        <Text style={baseStyles.caption}>
+                          {w.oi.toLocaleString()} OI
+                        </Text>
+                      </View>
+                    ))}
+                  </>
+                )}
+              </View>
             </View>
-            <View style={s.halfCol}>
-              {ctx.oi_walls && (
-                <>
-                  <Text
-                    style={[
-                      baseStyles.caption,
-                      { fontFamily: "Helvetica-Bold", marginBottom: 3 },
-                    ]}
-                  >
-                    OI WALLS
-                  </Text>
-                  {ctx.oi_walls.call_walls.map((w, i) => (
-                    <View key={`c${i}`} style={s.wallRow}>
-                      <Text style={baseStyles.caption}>Call ${w.strike}</Text>
-                      <Text style={baseStyles.caption}>
-                        {w.oi.toLocaleString()} OI
-                      </Text>
-                    </View>
-                  ))}
-                  {ctx.oi_walls.put_walls.map((w, i) => (
-                    <View key={`p${i}`} style={s.wallRow}>
-                      <Text style={baseStyles.caption}>Put ${w.strike}</Text>
-                      <Text style={baseStyles.caption}>
-                        {w.oi.toLocaleString()} OI
-                      </Text>
-                    </View>
-                  ))}
-                </>
-              )}
-            </View>
+            {ctx.gex_summary?.interpretation && (
+              <Text style={[baseStyles.caption, { marginTop: 6 }]}>
+                {ctx.gex_summary.interpretation}
+              </Text>
+            )}
           </View>
-          {ctx.gex_summary?.interpretation && (
-            <Text style={[baseStyles.caption, { marginTop: 6 }]}>
-              {ctx.gex_summary.interpretation}
-            </Text>
-          )}
         </View>
-      </View>
+      )}
     </ReportPage>
   );
 }

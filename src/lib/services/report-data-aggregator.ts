@@ -1,4 +1,8 @@
-import type { ReportData, TimeframeReportData } from "@/types/report";
+import type {
+  ReportData,
+  TimeframeReportData,
+  EnrichedMarketData,
+} from "@/types/report";
 import type {
   DeepDiveAnalysis,
   TradeRecommendation,
@@ -18,6 +22,13 @@ import {
 } from "@/lib/utils/chart-timeframes";
 import { getTechnicalPatternsForTimeframe } from "@/lib/utils/deep-dive-patterns";
 import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
+import { computeVolumeProfile } from "@/lib/utils/volume-profile";
+import { computeAlgoSR } from "@/lib/utils/algo-sr";
+import { computeIVSkew, computeOISummary } from "@/lib/utils/options-analytics";
+import { getUpcomingCatalysts } from "@/lib/utils/economic-calendar";
+import type { OptionsChainSummary } from "@/types/market";
+import type { GEXSummary } from "@/lib/utils/gex-calculator";
+import { vwap } from "@/lib/utils/technical-indicators";
 
 /** Mapping from ChartHistoryPeriod to candle arrays, fetched externally. */
 export type CandlesByPeriod = Partial<Record<ChartHistoryPeriod, Candle[]>>;
@@ -134,6 +145,134 @@ export interface AggregateReportInput {
   whaleAlert: WhaleAlert | null;
   cascadeContext: ActiveCascadeEntry[] | null;
   candlesByPeriod: CandlesByPeriod;
+  optionsChain?: OptionsChainSummary | null;
+  earningsDate?: string | null;
+}
+
+/** Combined options data fetched from the API route */
+export interface OptionsChainResult {
+  chain: OptionsChainSummary | null;
+  earningsDate: string | null;
+}
+
+/**
+ * Fetch options chain + earnings date from the client-side API route.
+ * Fails silently — returns nulls if unavailable.
+ */
+export async function fetchOptionsChainClient(
+  ticker: string,
+): Promise<OptionsChainResult> {
+  try {
+    const res = await fetch(
+      `/api/market/options-chain?ticker=${encodeURIComponent(ticker)}`,
+    );
+    if (!res.ok) return { chain: null, earningsDate: null };
+    const data = await res.json();
+    return {
+      chain: data.chain ?? null,
+      earningsDate: data.earningsDate ?? null,
+    };
+  } catch {
+    return { chain: null, earningsDate: null };
+  }
+}
+
+/**
+ * Pick the best available candles for volume/S&R analysis.
+ * Prefers 3M, then 6M, then 1M, then 1W — whichever has ≥5 bars first.
+ */
+function pickBestCandles(candlesByPeriod: CandlesByPeriod): Candle[] {
+  const preferred: ChartHistoryPeriod[] = ["3mo", "6mo", "1mo", "1wk"];
+  for (const p of preferred) {
+    const c = candlesByPeriod[p] ?? [];
+    if (c.length >= 5) return c;
+  }
+  return [];
+}
+
+/**
+ * Compute enriched market structure data for the PDF report.
+ * Uses candles + options chain + existing deep dive data.
+ * Falls back through multiple candle timeframes so data is available
+ * even when one period fails to fetch.
+ *
+ * NEVER returns null — always returns at minimum catalyst calendar and
+ * whatever data is available. Individual sections may be null.
+ */
+function computeEnrichedData(
+  deepDive: DeepDiveAnalysis,
+  candlesByPeriod: CandlesByPeriod,
+  optionsChain: OptionsChainSummary | null,
+  earningsDate: string | null,
+): EnrichedMarketData {
+  const candles = pickBestCandles(candlesByPeriod);
+  const candles1D = candlesByPeriod["1d"] ?? [];
+
+  // Current price — try candles first, then fall back to deep dive S/R mid-point
+  let currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
+  if (currentPrice <= 0 && deepDive.support_resistance.length > 0) {
+    currentPrice = deepDive.support_resistance[0].price;
+  }
+
+  // Volume profile — needs candles; null if unavailable
+  const volumeProfile =
+    candles.length >= 5 ? computeVolumeProfile(candles) : null;
+
+  // VWAP from intraday candles
+  const vwapValues = candles1D.length > 0 ? vwap(candles1D) : [];
+  const latestVwap =
+    vwapValues.length > 0 ? vwapValues[vwapValues.length - 1] : null;
+
+  // Extract OI walls, max pain, GEX from deep dive options_context
+  const ctx = deepDive.options_context;
+  const oiWallsFromDD = ctx.oi_walls
+    ? {
+        callWalls: ctx.oi_walls.call_walls,
+        putWalls: ctx.oi_walls.put_walls,
+      }
+    : null;
+  const gexFromDD: GEXSummary | null = ctx.gex_summary
+    ? {
+        netGEX: ctx.gex_summary.net_gex,
+        gexFlipLevel: ctx.gex_summary.gex_flip_level ?? null,
+        topConcentrations: [],
+        dealerPositioning: ctx.gex_summary.dealer_positioning,
+      }
+    : null;
+
+  // Algo S/R with multi-source confluence — needs candles + price
+  const algoSR =
+    candles.length >= 5 && currentPrice > 0
+      ? computeAlgoSR({
+          candles,
+          currentPrice,
+          volumeProfile,
+          oiWalls: oiWallsFromDD,
+          maxPain: ctx.max_pain ?? null,
+          gex: gexFromDD,
+          vwap: latestVwap,
+        })
+      : [];
+
+  // IV skew + OI summary from live options chain
+  const ivSkew =
+    optionsChain && currentPrice > 0
+      ? computeIVSkew(optionsChain, currentPrice)
+      : null;
+  const oiSummary = optionsChain ? computeOISummary(optionsChain) : null;
+
+  // Catalyst calendar (14-day window) — always available
+  const catalysts = getUpcomingCatalysts(14);
+
+  return {
+    volumeProfile,
+    algoSR,
+    ivSkew,
+    oiSummary,
+    catalysts,
+    currentPrice,
+    earningsDate,
+  };
 }
 
 /**
@@ -147,6 +286,13 @@ export function aggregateReportData(input: AggregateReportInput): ReportData {
     input.ticker,
   );
 
+  const enrichedData = computeEnrichedData(
+    input.deepDive,
+    input.candlesByPeriod,
+    input.optionsChain ?? null,
+    input.earningsDate ?? null,
+  );
+
   return {
     ticker: input.ticker,
     generatedAt: new Date().toISOString(),
@@ -157,5 +303,6 @@ export function aggregateReportData(input: AggregateReportInput): ReportData {
     cascadeContext: input.cascadeContext,
     whaleAlert: input.whaleAlert,
     chartScreenshots: {}, // Populated later by chart capture utility
+    enrichedData,
   };
 }
