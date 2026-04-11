@@ -24,8 +24,10 @@ import PriceChart, {
   type IndicatorConfig,
   type PriceChartHandle,
 } from "@/components/charts/PriceChart";
+import PatternLegendBar from "@/components/charts/PatternLegendBar";
+import type { CalloutEntry } from "@/components/charts/primitives/CalloutAnnotationPrimitive";
 import ChartLegend from "@/components/charts/ChartLegend";
-import { Eye, EyeOff, BarChart3 } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import {
   IndicatorGuidePanel,
   InfoTooltip,
@@ -44,7 +46,9 @@ function indicatorPatternsToOverlays(
     .map((p) => {
       const candle = candles[p.detectedAt];
       const time =
-        typeof candle.time === "number" ? String(candle.time) : candle.time;
+        typeof candle.time === "number"
+          ? new Date(candle.time * 1000).toISOString()
+          : candle.time;
       return {
         name: p.name,
         type: p.signal,
@@ -59,6 +63,7 @@ function indicatorPatternsToOverlays(
         end_price: p.signal === "bearish" ? candle.high : candle.low,
         secondary_start_price: null,
         secondary_end_price: null,
+        indicator: p.indicator,
       };
     });
 }
@@ -128,7 +133,8 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
     const [internalTimeframe, setInternalTimeframe] =
       useState<ChartHistoryPeriod>("3mo");
     const [showPatterns, setShowPatterns] = useState(true);
-    const [showIndicators, setShowIndicators] = useState(false);
+    const [showAllSignals, setShowAllSignals] = useState(false);
+    const [calloutEntries, setCalloutEntries] = useState<CalloutEntry[]>([]);
     const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig>({
       ema9: false,
       ema21: false,
@@ -214,37 +220,44 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">Price Action</p>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowIndicators(!showIndicators)}
-              className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
-                showIndicators
-                  ? "bg-primary/20 text-primary"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              }`}
-              aria-pressed={showIndicators}
-              title="Toggle indicators panel"
-            >
-              <BarChart3 className="h-3 w-3" />
-              Indicators
-            </button>
             {hasAnyPatterns && (
-              <button
-                onClick={() => setShowPatterns(!showPatterns)}
-                className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
-                aria-pressed={showPatterns}
-                title={
-                  showPatterns
-                    ? "Hide pattern overlays"
-                    : "Show pattern overlays"
-                }
-              >
-                {showPatterns ? (
-                  <Eye className="h-3 w-3" />
-                ) : (
-                  <EyeOff className="h-3 w-3" />
+              <>
+                <button
+                  onClick={() => setShowPatterns(!showPatterns)}
+                  className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
+                  aria-pressed={showPatterns}
+                  title={
+                    showPatterns
+                      ? "Hide pattern overlays"
+                      : "Show pattern overlays"
+                  }
+                >
+                  {showPatterns ? (
+                    <Eye className="h-3 w-3" />
+                  ) : (
+                    <EyeOff className="h-3 w-3" />
+                  )}
+                  Patterns
+                </button>
+                {showPatterns && (
+                  <button
+                    onClick={() => setShowAllSignals(!showAllSignals)}
+                    className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
+                      showAllSignals
+                        ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                    aria-pressed={showAllSignals}
+                    title={
+                      showAllSignals
+                        ? "Showing all signals — click to filter to high-confidence only"
+                        : "Showing high-confidence signals only — click to show all"
+                    }
+                  >
+                    {showAllSignals ? "All signals" : "High-conf"}
+                  </button>
                 )}
-                Patterns
-              </button>
+              </>
             )}
             <div className="flex gap-1">
               {CHART_HISTORY_PERIODS.map((tf) => (
@@ -266,32 +279,30 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
         </div>
 
         {/* Indicator toggles */}
-        {showIndicators && (
-          <div className="flex flex-wrap gap-1.5">
-            {INDICATOR_OPTIONS.map(({ key, label, color }) => {
-              const active = mergedIndicators[key];
-              return (
-                <span key={key} className="inline-flex items-center gap-0.5">
-                  <button
-                    onClick={() => toggleIndicator(key)}
-                    className={`flex items-center gap-1.5 px-2 py-0.5 text-xs rounded transition-colors ${
-                      active
-                        ? "bg-accent text-accent-foreground ring-1 ring-accent"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    }`}
-                    aria-pressed={!!active}
-                  >
-                    <span
-                      className={`w-2 h-2 rounded-full ${color} ${active ? "opacity-100" : "opacity-40"}`}
-                    />
-                    {label}
-                  </button>
-                  <InfoTooltip text="" indicatorKey={key} />
-                </span>
-              );
-            })}
-          </div>
-        )}
+        <div className="flex flex-wrap gap-1.5">
+          {INDICATOR_OPTIONS.map(({ key, label, color }) => {
+            const active = mergedIndicators[key];
+            return (
+              <span key={key} className="inline-flex items-center gap-0.5">
+                <button
+                  onClick={() => toggleIndicator(key)}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 text-xs rounded transition-colors ${
+                    active
+                      ? "bg-accent text-accent-foreground ring-1 ring-accent"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                  aria-pressed={!!active}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${color} ${active ? "opacity-100" : "opacity-40"}`}
+                  />
+                  {label}
+                </button>
+                <InfoTooltip text="" indicatorKey={key} />
+              </span>
+            );
+          })}
+        </div>
 
         {/* Chart */}
         {isLoading ? (
@@ -303,6 +314,9 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
           </div>
         ) : (
           <>
+            {showPatterns && calloutEntries.length > 0 && (
+              <PatternLegendBar entries={calloutEntries} />
+            )}
             <PriceChart
               ref={priceChartRef}
               candles={candles}
@@ -316,6 +330,9 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
               exitPrice={exitPrice}
               optionsContext={optionsContext}
               indicators={mergedIndicators}
+              timeframe={activeTimeframe}
+              minConfidence={showAllSignals ? 0 : 0.6}
+              onCalloutEntries={setCalloutEntries}
             />
             <ChartLegend
               supportResistance={supportResistance}

@@ -121,6 +121,11 @@ export const technicalPatternSchema = z.object({
   confidence: z.number().min(0).max(1),
   timeframe: analysisTimeframeEnum.nullable().optional(),
   price_target: z.number().nullable().optional(),
+  /** Which indicator system produced this pattern (undefined = AI/Gemini) */
+  indicator: z
+    .enum(["ema", "bollinger", "rsi", "macd", "volume", "ai"])
+    .nullable()
+    .optional(),
   // Chart overlay coordinates (nullable for backward compat with existing data)
   drawing_type: z
     .enum(["trendline", "channel", "spike_region", "marker", "none"])

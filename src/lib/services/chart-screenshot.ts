@@ -123,6 +123,7 @@ export async function captureSingleChart(
         exitPrice: undefined,
         optionsContext: reportData.deepDive.options_context,
         indicators: PDF_INDICATOR_CONFIG,
+        timeframe: tfData.period,
       });
     };
 

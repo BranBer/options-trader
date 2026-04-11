@@ -695,10 +695,28 @@ aggregate data → capture charts → render PDF → trigger download.
    }
    ```
 
-   - Filename format: `DeepDive_{TICKER}_{YYYY-MM-DD}.pdf`
-   - Clean up object URL after download starts
+---
+
+## Cross-Epic Dependency: Chart Overlay Clutter
+
+During PDF export testing (Phase 3 complete), a UX issue was uncovered:
+technical indicator overlays on the chart are severely cluttered when
+multiple patterns fire simultaneously — labels overlap, markers pile up,
+and signal colors are indistinguishable. This is especially problematic
+for PDF exports where the chart is a static image.
+
+**Epic 45 — Chart Overlay Declutter & Visual Clarity** was created to
+address this. Epic 45 Story 45.4 (Numbered Legend for PDF Chart Pages)
+will improve `ReportChartPage.tsx` to use numbered markers + a legend
+table instead of inline text labels.
+
+See `docs/epics/EPIC_45_chart_overlay_declutter.md` for the full epic.
+
+- Filename format: `DeepDive_{TICKER}_{YYYY-MM-DD}.pdf`
+- Clean up object URL after download starts
 
 3. **Create `src/hooks/useExportPdf.ts`**
+
    ```typescript
    export function useExportPdf(ticker: string) {
      // Returns { exportPdf, isExporting, progress, error }

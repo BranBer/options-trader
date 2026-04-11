@@ -33,6 +33,9 @@ import {
   detachPatternOverlays,
   type AttachedOverlays,
 } from "./primitives/PatternMarkerHelper";
+import { CalloutAnnotationPrimitive } from "./primitives/CalloutAnnotationPrimitive";
+import type { CalloutEntry } from "./primitives/CalloutAnnotationPrimitive";
+import type { ChartHistoryPeriod } from "@/lib/utils/chart-timeframes";
 
 export interface IndicatorConfig {
   ema9?: boolean;
@@ -72,6 +75,15 @@ interface PriceChartProps {
   optionsContext?: DeepDiveAnalysis["options_context"];
   /** Which computed indicators to display */
   indicators?: IndicatorConfig;
+  /** Active history range used for timestamp labels and viewport padding */
+  timeframe?: ChartHistoryPeriod;
+  /**
+   * Minimum pattern confidence to display (0–1). Patterns below this
+   * threshold are hidden. Defaults to 0.6 when omitted.
+   */
+  minConfidence?: number;
+  /** Called when callout entries are computed, for rendering the external legend */
+  onCalloutEntries?: (entries: CalloutEntry[]) => void;
 }
 
 const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
@@ -88,6 +100,9 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       exitPrice,
       optionsContext,
       indicators,
+      timeframe = "3mo",
+      minConfidence = 0.6,
+      onCalloutEntries,
     },
     ref,
   ) {
@@ -110,9 +125,13 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
 
     const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
     const overlaysRef = useRef<AttachedOverlays | null>(null);
+    const calloutRef = useRef<CalloutAnnotationPrimitive | null>(null);
 
     const initChart = useCallback(() => {
       if (!containerRef.current || candles.length === 0) return;
+
+      // Reset legend when chart reinitializes
+      onCalloutEntries?.([]);
 
       // Clean up previous chart
       if (chartRef.current) {
@@ -463,8 +482,6 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         macdHistSeries.setData(macdHistData);
       }
 
-      chart.timeScale().fitContent();
-
       // Pattern overlays
       if (technicalPatterns && technicalPatterns.length > 0 && showPatterns) {
         // Build a map from normalized YYYY-MM-DD → original Time value
@@ -488,9 +505,23 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           technicalPatterns,
           candleSeries,
           candleTimeMap,
+          { minConfidence, timeframe },
         );
         overlaysRef.current = overlays;
+
+        // Callout annotation layer: numbered chart markers + spines
+        if (overlays.callouts.length > 0) {
+          const calloutPrimitive = new CalloutAnnotationPrimitive();
+          calloutPrimitive.setEntries(overlays.callouts);
+          candleSeries.attachPrimitive(calloutPrimitive);
+          calloutRef.current = calloutPrimitive;
+        }
+
+        // Fire the legend callback so the DOM legend can render
+        onCalloutEntries?.(overlays.callouts);
       }
+
+      chart.timeScale().fitContent();
 
       // Crosshair move for pattern hover detection
       if (onHoveredPattern) {
@@ -523,6 +554,10 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           detachPatternOverlays(overlaysRef.current, candleSeriesRef.current);
           overlaysRef.current = null;
         }
+        if (calloutRef.current && candleSeriesRef.current) {
+          candleSeriesRef.current.detachPrimitive(calloutRef.current);
+          calloutRef.current = null;
+        }
         chart.remove();
         chartRef.current = null;
       };
@@ -537,6 +572,8 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       exitPrice,
       optionsContext,
       indicators,
+      timeframe,
+      minConfidence,
     ]);
 
     // Highlight a specific pattern overlay when hovered from text
@@ -553,6 +590,17 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           prim.setVisible(idx === highlightedPatternIndex);
         } else {
           prim.setVisible(true);
+        }
+      }
+      // Filter callout annotations to only the highlighted pattern
+      if (calloutRef.current && overlaysRef.current) {
+        if (highlightedPatternIndex != null) {
+          const highlightedId = `pattern-${highlightedPatternIndex}`;
+          calloutRef.current.setEntries(
+            overlaysRef.current.callouts.filter((c) => c.id === highlightedId),
+          );
+        } else {
+          calloutRef.current.setEntries(overlaysRef.current.callouts);
         }
       }
     }, [highlightedPatternIndex]);

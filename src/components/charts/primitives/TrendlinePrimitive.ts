@@ -92,18 +92,6 @@ class TrendlinePaneRenderer implements IPrimitivePaneRenderer {
         ctx.globalAlpha = 1;
       }
 
-      // Draw label at midpoint
-      if (label) {
-        const mx = (x1 + x2) / 2;
-        const my = (y1 + y2) / 2 - 8;
-        ctx.font = "11px sans-serif";
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.9;
-        ctx.textAlign = "center";
-        ctx.fillText(label, mx, my);
-        ctx.globalAlpha = 1;
-      }
-
       ctx.restore();
     });
   }

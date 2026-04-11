@@ -58,28 +58,6 @@ class HighlightRegionRenderer implements IPrimitivePaneRenderer {
       ctx.stroke();
       ctx.globalAlpha = 1;
 
-      // Label at top center
-      if (label) {
-        const mx = (x1 + x2) / 2;
-        ctx.font = "10px sans-serif";
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.85;
-        ctx.textAlign = "center";
-
-        // Background pill for label
-        const metrics = ctx.measureText(label);
-        const pw = metrics.width + 8;
-        const ph = 16;
-        ctx.fillStyle = "rgba(0,0,0,0.6)";
-        ctx.beginPath();
-        ctx.roundRect(mx - pw / 2, 4, pw, ph, 3);
-        ctx.fill();
-
-        ctx.fillStyle = color;
-        ctx.fillText(label, mx, 16);
-        ctx.globalAlpha = 1;
-      }
-
       ctx.restore();
     });
   }

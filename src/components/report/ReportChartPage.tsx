@@ -1,6 +1,11 @@
 import { View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 import type { TimeframeReportData } from "@/types/report";
-import type { IndicatorAnalysis } from "@/types/analysis";
+import type { IndicatorAnalysis, TechnicalPattern } from "@/types/analysis";
+import {
+  comparePatternChronology,
+  formatPatternChronologyLabel,
+  getPatternChronologyTime,
+} from "@/lib/utils/pattern-chronology";
 import ReportPage from "./ReportPage";
 import { colors, fontSize, baseStyles, getSignalStyle } from "./styles";
 
@@ -36,10 +41,12 @@ const s = StyleSheet.create({
     color: colors.textMuted,
   },
   // Pattern table
-  patternCol1: { width: "38%" },
-  patternCol2: { width: "22%" },
-  patternCol3: { width: "20%" },
-  patternCol4: { width: "20%" },
+  patternCol0: { width: "8%" },
+  patternCol1: { width: "30%" },
+  patternCol2: { width: "20%" },
+  patternCol3: { width: "16%" },
+  patternCol4: { width: "10%" },
+  patternCol5: { width: "16%" },
   noPatterns: {
     fontSize: fontSize.body,
     color: colors.textMuted,
@@ -90,11 +97,28 @@ const s = StyleSheet.create({
   },
 });
 
-function PatternTable({
-  patterns,
-}: {
-  patterns: TimeframeReportData["patterns"];
-}) {
+type PatternRow = {
+  pattern: TechnicalPattern;
+  order: number;
+  chronologyLabel: string | null;
+};
+
+function buildPatternRows(tfData: TimeframeReportData): PatternRow[] {
+  const allPatterns = [...tfData.patterns, ...tfData.indicatorPatterns];
+
+  return allPatterns.sort(comparePatternChronology).map((pattern, index) => ({
+    pattern,
+    order: index + 1,
+    chronologyLabel: (() => {
+      const rawTime = getPatternChronologyTime(pattern);
+      return rawTime
+        ? formatPatternChronologyLabel(rawTime, tfData.period)
+        : null;
+    })(),
+  }));
+}
+
+function PatternTable({ patterns }: { patterns: PatternRow[] }) {
   if (!patterns.length) {
     return (
       <Text style={s.noPatterns}>No patterns detected for this timeframe.</Text>
@@ -105,21 +129,29 @@ function PatternTable({
     <View>
       {/* Header */}
       <View style={baseStyles.tableHeader}>
+        <Text style={[baseStyles.tableCellHeader, s.patternCol0]}>#</Text>
         <Text style={[baseStyles.tableCellHeader, s.patternCol1]}>Pattern</Text>
-        <Text style={[baseStyles.tableCellHeader, s.patternCol2]}>Type</Text>
-        <Text style={[baseStyles.tableCellHeader, s.patternCol3]}>
+        <Text style={[baseStyles.tableCellHeader, s.patternCol2]}>When</Text>
+        <Text style={[baseStyles.tableCellHeader, s.patternCol3]}>Type</Text>
+        <Text style={[baseStyles.tableCellHeader, s.patternCol4]}>
           Confidence
         </Text>
-        <Text style={[baseStyles.tableCellHeader, s.patternCol4]}>Target</Text>
+        <Text style={[baseStyles.tableCellHeader, s.patternCol5]}>Target</Text>
       </View>
 
       {/* Rows */}
-      {patterns.map((p, i) => {
-        const signal = getSignalStyle(p.type);
+      {patterns.map(({ pattern, order, chronologyLabel }, i) => {
+        const signal = getSignalStyle(pattern.type);
         return (
           <View key={i} style={baseStyles.tableRow} wrap={false}>
-            <Text style={[baseStyles.tableCell, s.patternCol1]}>{p.name}</Text>
-            <View style={[s.patternCol2, { paddingHorizontal: 4 }]}>
+            <Text style={[baseStyles.tableCell, s.patternCol0]}>{order}</Text>
+            <Text style={[baseStyles.tableCell, s.patternCol1]}>
+              {pattern.name}
+            </Text>
+            <Text style={[baseStyles.tableCell, s.patternCol2]}>
+              {chronologyLabel ?? "—"}
+            </Text>
+            <View style={[s.patternCol3, { paddingHorizontal: 4 }]}>
               <View
                 style={[
                   s.badgeInline,
@@ -130,15 +162,17 @@ function PatternTable({
                 ]}
               >
                 <Text style={{ color: signal.color, fontSize: fontSize.badge }}>
-                  {p.type.charAt(0).toUpperCase() + p.type.slice(1)}
+                  {pattern.type.charAt(0).toUpperCase() + pattern.type.slice(1)}
                 </Text>
               </View>
             </View>
-            <Text style={[baseStyles.tableCell, s.patternCol3]}>
-              {Math.round(p.confidence * 100)}%
-            </Text>
             <Text style={[baseStyles.tableCell, s.patternCol4]}>
-              {p.price_target ? `$${p.price_target.toFixed(2)}` : "—"}
+              {Math.round(pattern.confidence * 100)}%
+            </Text>
+            <Text style={[baseStyles.tableCell, s.patternCol5]}>
+              {pattern.price_target
+                ? `$${pattern.price_target.toFixed(2)}`
+                : "—"}
             </Text>
           </View>
         );
@@ -195,7 +229,7 @@ export default function ReportChartPage({
 }: ReportChartPageProps) {
   const title =
     TIMEFRAME_LABELS[tfData.timeframe] ?? `${tfData.timeframe} Analysis`;
-  const allPatterns = [...tfData.patterns, ...tfData.indicatorPatterns];
+  const patternRows = buildPatternRows(tfData);
 
   return (
     <ReportPage ticker={ticker} generatedAt={generatedAt}>
@@ -217,7 +251,7 @@ export default function ReportChartPage({
       {/* Pattern table */}
       <View style={baseStyles.section}>
         <Text style={baseStyles.h2}>Detected Patterns</Text>
-        <PatternTable patterns={allPatterns} />
+        <PatternTable patterns={patternRows} />
       </View>
 
       {/* Indicator grid (shared across timeframes — from LLM analysis) */}

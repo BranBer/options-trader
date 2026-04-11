@@ -56,6 +56,7 @@ export async function fetchAllTimeframeCandles(
 
 function indicatorPatternsToOverlays(
   patterns: {
+    indicator: string;
     name: string;
     signal: string;
     description: string;
@@ -72,7 +73,9 @@ function indicatorPatternsToOverlays(
     .map((p) => {
       const candle = candles[p.detectedAt];
       const time =
-        typeof candle.time === "number" ? String(candle.time) : candle.time;
+        typeof candle.time === "number"
+          ? new Date(candle.time * 1000).toISOString()
+          : candle.time;
       return {
         name: p.name,
         type: p.signal as "bullish" | "bearish" | "neutral",
@@ -87,6 +90,7 @@ function indicatorPatternsToOverlays(
         end_price: p.signal === "bearish" ? candle.high : candle.low,
         secondary_start_price: null,
         secondary_end_price: null,
+        indicator: p.indicator,
       };
     });
 }
