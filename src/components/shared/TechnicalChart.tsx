@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import {
+  useState,
+  useCallback,
+  useMemo,
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+} from "react";
 import { useHistoricalData } from "@/hooks/useApiData";
 import type { TechnicalPattern } from "@/types/analysis";
 import type { DeepDiveAnalysis } from "@/types/analysis";
@@ -15,6 +22,7 @@ import type { IndicatorPattern } from "@/lib/utils/indicator-patterns";
 import type { Candle } from "@/lib/utils/technical-indicators";
 import PriceChart, {
   type IndicatorConfig,
+  type PriceChartHandle,
 } from "@/components/charts/PriceChart";
 import ChartLegend from "@/components/charts/ChartLegend";
 import { Eye, EyeOff, BarChart3 } from "lucide-react";
@@ -89,221 +97,243 @@ interface TechnicalChartProps {
   onTimeframeChange?: (timeframe: ChartHistoryPeriod) => void;
 }
 
-export default function TechnicalChart({
-  ticker,
-  supportResistance,
-  technicalPatterns,
-  technicalPatternsByTimeframe,
-  entryPrice,
-  exitPrice,
-  hoveredPatternIndex = null,
-  onHoveredPattern,
-  height = 300,
-  optionsContext,
-  indicators,
-  timeframe,
-  onTimeframeChange,
-}: TechnicalChartProps) {
-  const [internalTimeframe, setInternalTimeframe] =
-    useState<ChartHistoryPeriod>("3mo");
-  const [showPatterns, setShowPatterns] = useState(true);
-  const [showIndicators, setShowIndicators] = useState(false);
-  const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig>({
-    ema9: false,
-    ema21: false,
-    bollinger: false,
-    volumeMA: false,
-    rsi: false,
-    macd: false,
-  });
+export interface TechnicalChartHandle {
+  takeScreenshot: () => string | null;
+}
 
-  // Merge external indicators prop with local toggle state
-  const mergedIndicators: IndicatorConfig = indicators
-    ? { ...activeIndicators, ...indicators }
-    : activeIndicators;
-  const activeTimeframe = timeframe ?? internalTimeframe;
-  const activePatterns = useMemo(
-    () =>
-      getTechnicalPatternsForTimeframe({
-        technicalPatterns,
-        timeframePatterns: technicalPatternsByTimeframe,
-        period: activeTimeframe,
-      }),
-    [activeTimeframe, technicalPatterns, technicalPatternsByTimeframe],
-  );
-
-  const handleTimeframeChange = useCallback(
-    (nextTimeframe: ChartHistoryPeriod) => {
-      onTimeframeChange?.(nextTimeframe);
-      if (!timeframe) {
-        setInternalTimeframe(nextTimeframe);
-      }
+const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
+  function TechnicalChart(
+    {
+      ticker,
+      supportResistance,
+      technicalPatterns,
+      technicalPatternsByTimeframe,
+      entryPrice,
+      exitPrice,
+      hoveredPatternIndex = null,
+      onHoveredPattern,
+      height = 300,
+      optionsContext,
+      indicators,
+      timeframe,
+      onTimeframeChange,
     },
-    [onTimeframeChange, timeframe],
-  );
+    ref,
+  ) {
+    const priceChartRef = useRef<PriceChartHandle>(null);
 
-  const toggleIndicator = useCallback((key: keyof IndicatorConfig) => {
-    setActiveIndicators((prev) => ({ ...prev, [key]: !prev[key] }));
-  }, []);
+    useImperativeHandle(ref, () => ({
+      takeScreenshot: () => priceChartRef.current?.takeScreenshot() ?? null,
+    }));
+    const [internalTimeframe, setInternalTimeframe] =
+      useState<ChartHistoryPeriod>("3mo");
+    const [showPatterns, setShowPatterns] = useState(true);
+    const [showIndicators, setShowIndicators] = useState(false);
+    const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig>({
+      ema9: false,
+      ema21: false,
+      bollinger: false,
+      volumeMA: false,
+      rsi: false,
+      macd: false,
+    });
 
-  const { data: histData, isLoading } = useHistoricalData(
-    ticker,
-    activeTimeframe,
-  );
-  const candles = histData?.candles ?? [];
-  const indicatorPatternReport = useMemo(
-    () =>
-      candles.length > 0
-        ? detectAllIndicatorPatterns(candles, ticker, activeTimeframe)
-        : null,
-    [activeTimeframe, candles, ticker],
-  );
-
-  const indicatorOverlays = useMemo(
-    () =>
-      indicatorPatternReport
-        ? indicatorPatternsToOverlays(indicatorPatternReport.patterns, candles)
-        : [],
-    [indicatorPatternReport, candles],
-  );
-
-  const mergedPatterns = useMemo(
-    () => [...activePatterns, ...indicatorOverlays],
-    [activePatterns, indicatorOverlays],
-  );
-
-  const hasAnyPatterns =
-    mergedPatterns.length > 0 ||
-    (technicalPatterns?.length ?? 0) > 0 ||
-    Object.values(technicalPatternsByTimeframe ?? {}).some(
-      (patterns) => (patterns?.length ?? 0) > 0,
+    // Merge external indicators prop with local toggle state
+    const mergedIndicators: IndicatorConfig = indicators
+      ? { ...activeIndicators, ...indicators }
+      : activeIndicators;
+    const activeTimeframe = timeframe ?? internalTimeframe;
+    const activePatterns = useMemo(
+      () =>
+        getTechnicalPatternsForTimeframe({
+          technicalPatterns,
+          timeframePatterns: technicalPatternsByTimeframe,
+          period: activeTimeframe,
+        }),
+      [activeTimeframe, technicalPatterns, technicalPatternsByTimeframe],
     );
 
-  const handleHover = useCallback(
-    (idx: number | null) => onHoveredPattern?.(idx),
-    [onHoveredPattern],
-  );
+    const handleTimeframeChange = useCallback(
+      (nextTimeframe: ChartHistoryPeriod) => {
+        onTimeframeChange?.(nextTimeframe);
+        if (!timeframe) {
+          setInternalTimeframe(nextTimeframe);
+        }
+      },
+      [onTimeframeChange, timeframe],
+    );
 
-  return (
-    <div className="space-y-2">
-      {/* Controls row */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Price Action</p>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowIndicators(!showIndicators)}
-            className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
-              showIndicators
-                ? "bg-primary/20 text-primary"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            }`}
-            aria-pressed={showIndicators}
-            title="Toggle indicators panel"
-          >
-            <BarChart3 className="h-3 w-3" />
-            Indicators
-          </button>
-          {hasAnyPatterns && (
+    const toggleIndicator = useCallback((key: keyof IndicatorConfig) => {
+      setActiveIndicators((prev) => ({ ...prev, [key]: !prev[key] }));
+    }, []);
+
+    const { data: histData, isLoading } = useHistoricalData(
+      ticker,
+      activeTimeframe,
+    );
+    const candles = histData?.candles ?? [];
+    const indicatorPatternReport = useMemo(
+      () =>
+        candles.length > 0
+          ? detectAllIndicatorPatterns(candles, ticker, activeTimeframe)
+          : null,
+      [activeTimeframe, candles, ticker],
+    );
+
+    const indicatorOverlays = useMemo(
+      () =>
+        indicatorPatternReport
+          ? indicatorPatternsToOverlays(
+              indicatorPatternReport.patterns,
+              candles,
+            )
+          : [],
+      [indicatorPatternReport, candles],
+    );
+
+    const mergedPatterns = useMemo(
+      () => [...activePatterns, ...indicatorOverlays],
+      [activePatterns, indicatorOverlays],
+    );
+
+    const hasAnyPatterns =
+      mergedPatterns.length > 0 ||
+      (technicalPatterns?.length ?? 0) > 0 ||
+      Object.values(technicalPatternsByTimeframe ?? {}).some(
+        (patterns) => (patterns?.length ?? 0) > 0,
+      );
+
+    const handleHover = useCallback(
+      (idx: number | null) => onHoveredPattern?.(idx),
+      [onHoveredPattern],
+    );
+
+    return (
+      <div className="space-y-2">
+        {/* Controls row */}
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Price Action</p>
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowPatterns(!showPatterns)}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
-              aria-pressed={showPatterns}
-              title={
-                showPatterns ? "Hide pattern overlays" : "Show pattern overlays"
-              }
+              onClick={() => setShowIndicators(!showIndicators)}
+              className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
+                showIndicators
+                  ? "bg-primary/20 text-primary"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+              aria-pressed={showIndicators}
+              title="Toggle indicators panel"
             >
-              {showPatterns ? (
-                <Eye className="h-3 w-3" />
-              ) : (
-                <EyeOff className="h-3 w-3" />
-              )}
-              Patterns
+              <BarChart3 className="h-3 w-3" />
+              Indicators
             </button>
-          )}
-          <div className="flex gap-1">
-            {CHART_HISTORY_PERIODS.map((tf) => (
+            {hasAnyPatterns && (
               <button
-                key={tf}
-                onClick={() => handleTimeframeChange(tf)}
-                className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                  activeTimeframe === tf
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                }`}
-                aria-pressed={activeTimeframe === tf}
+                onClick={() => setShowPatterns(!showPatterns)}
+                className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
+                aria-pressed={showPatterns}
+                title={
+                  showPatterns
+                    ? "Hide pattern overlays"
+                    : "Show pattern overlays"
+                }
               >
-                {CHART_HISTORY_LABELS[tf]}
+                {showPatterns ? (
+                  <Eye className="h-3 w-3" />
+                ) : (
+                  <EyeOff className="h-3 w-3" />
+                )}
+                Patterns
               </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Indicator toggles */}
-      {showIndicators && (
-        <div className="flex flex-wrap gap-1.5">
-          {INDICATOR_OPTIONS.map(({ key, label, color }) => {
-            const active = mergedIndicators[key];
-            return (
-              <span key={key} className="inline-flex items-center gap-0.5">
+            )}
+            <div className="flex gap-1">
+              {CHART_HISTORY_PERIODS.map((tf) => (
                 <button
-                  onClick={() => toggleIndicator(key)}
-                  className={`flex items-center gap-1.5 px-2 py-0.5 text-xs rounded transition-colors ${
-                    active
-                      ? "bg-accent text-accent-foreground ring-1 ring-accent"
+                  key={tf}
+                  onClick={() => handleTimeframeChange(tf)}
+                  className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                    activeTimeframe === tf
+                      ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground hover:bg-muted/80"
                   }`}
-                  aria-pressed={!!active}
+                  aria-pressed={activeTimeframe === tf}
                 >
-                  <span
-                    className={`w-2 h-2 rounded-full ${color} ${active ? "opacity-100" : "opacity-40"}`}
-                  />
-                  {label}
+                  {CHART_HISTORY_LABELS[tf]}
                 </button>
-                <InfoTooltip text="" indicatorKey={key} />
-              </span>
-            );
-          })}
+              ))}
+            </div>
+          </div>
         </div>
-      )}
 
-      {/* Chart */}
-      {isLoading ? (
-        <div
-          className="flex items-center justify-center text-sm text-muted-foreground animate-pulse"
-          style={{ height }}
-        >
-          Loading chart data...
-        </div>
-      ) : (
-        <>
-          <PriceChart
-            candles={candles}
-            supportResistance={supportResistance}
-            technicalPatterns={mergedPatterns}
-            showPatterns={showPatterns}
-            highlightedPatternIndex={hoveredPatternIndex}
-            onHoveredPattern={handleHover}
-            height={height}
-            entryPrice={entryPrice}
-            exitPrice={exitPrice}
-            optionsContext={optionsContext}
-            indicators={mergedIndicators}
-          />
-          <ChartLegend
-            supportResistance={supportResistance}
-            technicalPatterns={mergedPatterns}
-            showPatterns={showPatterns}
-          />
-          <IndicatorPatternSummary report={indicatorPatternReport} />
-          <IndicatorGuidePanel
-            activeIndicators={Object.entries(mergedIndicators)
-              .filter(([, v]) => v)
-              .map(([k]) => k)}
-            showOptionsContext={!!optionsContext}
-          />
-        </>
-      )}
-    </div>
-  );
-}
+        {/* Indicator toggles */}
+        {showIndicators && (
+          <div className="flex flex-wrap gap-1.5">
+            {INDICATOR_OPTIONS.map(({ key, label, color }) => {
+              const active = mergedIndicators[key];
+              return (
+                <span key={key} className="inline-flex items-center gap-0.5">
+                  <button
+                    onClick={() => toggleIndicator(key)}
+                    className={`flex items-center gap-1.5 px-2 py-0.5 text-xs rounded transition-colors ${
+                      active
+                        ? "bg-accent text-accent-foreground ring-1 ring-accent"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                    aria-pressed={!!active}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${color} ${active ? "opacity-100" : "opacity-40"}`}
+                    />
+                    {label}
+                  </button>
+                  <InfoTooltip text="" indicatorKey={key} />
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Chart */}
+        {isLoading ? (
+          <div
+            className="flex items-center justify-center text-sm text-muted-foreground animate-pulse"
+            style={{ height }}
+          >
+            Loading chart data...
+          </div>
+        ) : (
+          <>
+            <PriceChart
+              ref={priceChartRef}
+              candles={candles}
+              supportResistance={supportResistance}
+              technicalPatterns={mergedPatterns}
+              showPatterns={showPatterns}
+              highlightedPatternIndex={hoveredPatternIndex}
+              onHoveredPattern={handleHover}
+              height={height}
+              entryPrice={entryPrice}
+              exitPrice={exitPrice}
+              optionsContext={optionsContext}
+              indicators={mergedIndicators}
+            />
+            <ChartLegend
+              supportResistance={supportResistance}
+              technicalPatterns={mergedPatterns}
+              showPatterns={showPatterns}
+            />
+            <IndicatorPatternSummary report={indicatorPatternReport} />
+            <IndicatorGuidePanel
+              activeIndicators={Object.entries(mergedIndicators)
+                .filter(([, v]) => v)
+                .map(([k]) => k)}
+              showOptionsContext={!!optionsContext}
+            />
+          </>
+        )}
+      </div>
+    );
+  },
+);
+
+export default TechnicalChart;

@@ -25,7 +25,12 @@ import {
   Globe,
   Clock,
   Zap,
+  Download,
+  Loader2,
+  Check,
 } from "lucide-react";
+import { useExportPdf } from "@/hooks/useExportPdf";
+import type { ExportProgress } from "@/hooks/useExportPdf";
 
 interface WhaleDeepDiveProps {
   ticker: string;
@@ -83,6 +88,25 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
     [deepDive, timeframe],
   );
 
+  const {
+    exportPdf,
+    isExporting,
+    progress,
+    error: exportError,
+  } = useExportPdf(ticker);
+
+  const handleExport = useCallback(() => {
+    if (!deepDive) return;
+    exportPdf({
+      deepDive,
+      recommendation: null,
+      confidenceBreakdown: analysisRow?.confidenceBreakdown ?? null,
+      whaleAlert: null,
+      cascadeContext:
+        activeCascadesForTicker.length > 0 ? activeCascadesForTicker : null,
+    });
+  }, [deepDive, analysisRow, activeCascadesForTicker, exportPdf]);
+
   if (ddLoading) {
     return (
       <div className="p-4 text-sm text-muted-foreground animate-pulse">
@@ -109,10 +133,22 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
             <Target className="h-4 w-4" />
             Deep Dive: {ticker}
           </h3>
-          {analysisCreatedAt && (
-            <FreshnessBadge createdAt={analysisCreatedAt} />
-          )}
+          <div className="flex items-center gap-2">
+            <ExportPdfButton
+              isExporting={isExporting}
+              progress={progress}
+              onClick={handleExport}
+            />
+            {analysisCreatedAt && (
+              <FreshnessBadge createdAt={analysisCreatedAt} />
+            )}
+          </div>
         </div>
+        {exportError && (
+          <p className="text-xs text-red-400 mt-1">
+            Export failed: {exportError}
+          </p>
+        )}
         <p className="text-sm mt-1">{deepDive.whale_trade_summary}</p>
       </div>
 
@@ -395,6 +431,44 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
         {deepDive.disclaimer}
       </p>
     </div>
+  );
+}
+
+const PROGRESS_LABELS: Record<ExportProgress, string> = {
+  idle: "",
+  aggregating: "Preparing data…",
+  "capturing-charts": "Rendering charts…",
+  "generating-pdf": "Generating PDF…",
+  complete: "Complete!",
+};
+
+function ExportPdfButton({
+  isExporting,
+  progress,
+  onClick,
+}: {
+  isExporting: boolean;
+  progress: ExportProgress;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={isExporting}
+      aria-label="Export deep dive analysis as PDF"
+      className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {progress === "complete" ? (
+        <Check className="h-3.5 w-3.5 text-green-500" />
+      ) : isExporting ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Download className="h-3.5 w-3.5" />
+      )}
+      {isExporting || progress === "complete"
+        ? PROGRESS_LABELS[progress]
+        : "Export PDF"}
+    </button>
   );
 }
 
