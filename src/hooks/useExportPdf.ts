@@ -11,6 +11,7 @@ import {
   fetchOptionsChainClient,
   aggregateReportData,
 } from "@/lib/services/report-data-aggregator";
+import type { CatalystSummary } from "@/lib/utils/economic-calendar";
 import { captureChartScreenshots } from "@/lib/services/chart-screenshot";
 import { generateDeepDiveReport } from "@/lib/services/pdf-export";
 import {
@@ -62,18 +63,25 @@ export function useExportPdf(ticker: string): UseExportPdfReturn {
       setError(null);
 
       try {
-        // Stage 1: Aggregate data (fetch candles + options chain in parallel)
+        // Stage 1: Aggregate data (fetch candles, options chain, and live calendar in parallel)
         setProgress("aggregating");
-        const [candlesByPeriod, optionsResult] = await Promise.all([
-          fetchAllTimeframeCandles(ticker),
-          fetchOptionsChainClient(ticker),
-        ]);
+        const [candlesByPeriod, optionsResult, liveCatalysts] =
+          await Promise.all([
+            fetchAllTimeframeCandles(ticker),
+            fetchOptionsChainClient(ticker),
+            fetch("/api/calendar/upcoming?days=14")
+              .then((r) =>
+                r.ok ? (r.json() as Promise<CatalystSummary>) : null,
+              )
+              .catch(() => null),
+          ]);
         const reportData: ReportData = aggregateReportData({
           ticker,
           ...input,
           candlesByPeriod,
           optionsChain: optionsResult.chain,
           earningsDate: optionsResult.earningsDate,
+          liveCatalysts: liveCatalysts ?? undefined,
         });
 
         // Stage 2: Capture chart screenshots

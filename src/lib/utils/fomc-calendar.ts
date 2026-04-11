@@ -1,3 +1,5 @@
+import { getCachedCalendar } from "@/lib/services/live-economic-calendar";
+
 export interface FOMCProximity {
   nextDate: string;
   daysToNext: number;
@@ -20,7 +22,14 @@ const FOMC_DATES_2026 = [
 export function getFOMCProximity(date: Date = new Date()): FOMCProximity {
   const now = date.getTime();
 
-  for (const fomcStr of FOMC_DATES_2026) {
+  // Prefer live cache (populated by refreshCalendarCache); fall back to hardcoded
+  const liveFOMCDates = getCachedCalendar()
+    .filter((e) => e.name === "FOMC Decision")
+    .map((e) => e.date)
+    .sort();
+  const fomcDates = liveFOMCDates.length > 0 ? liveFOMCDates : FOMC_DATES_2026;
+
+  for (const fomcStr of fomcDates) {
     const fomcDate = new Date(fomcStr);
     const diff = fomcDate.getTime() - now;
     const daysToNext = Math.ceil(diff / (1000 * 60 * 60 * 24));
@@ -36,6 +45,6 @@ export function getFOMCProximity(date: Date = new Date()): FOMCProximity {
   }
 
   // All dates passed — return last date of the year
-  const last = FOMC_DATES_2026[FOMC_DATES_2026.length - 1];
+  const last = fomcDates[fomcDates.length - 1];
   return { nextDate: last, daysToNext: 0, isDecisionWeek: false };
 }

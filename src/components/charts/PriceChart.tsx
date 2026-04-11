@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   createChart,
+  createSeriesMarkers,
   type IChartApi,
   type ISeriesApi,
   ColorType,
@@ -19,6 +20,7 @@ import {
   type HistogramData,
   type LineData,
   type Time,
+  type SeriesMarker,
 } from "lightweight-charts";
 import type { DeepDiveAnalysis, TechnicalPattern } from "@/types/analysis";
 import {
@@ -36,6 +38,7 @@ import {
 import { CalloutAnnotationPrimitive } from "./primitives/CalloutAnnotationPrimitive";
 import type { CalloutEntry } from "./primitives/CalloutAnnotationPrimitive";
 import type { ChartHistoryPeriod } from "@/lib/utils/chart-timeframes";
+import type { EconomicEvent } from "@/lib/utils/economic-calendar";
 
 export interface IndicatorConfig {
   ema9?: boolean;
@@ -84,6 +87,11 @@ interface PriceChartProps {
   minConfidence?: number;
   /** Called when callout entries are computed, for rendering the external legend */
   onCalloutEntries?: (entries: CalloutEntry[]) => void;
+  /**
+   * Economic events to overlay as markers on the chart.
+   * Events are snapped to the nearest candle within the visible range.
+   */
+  economicEvents?: EconomicEvent[];
 }
 
 const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
@@ -103,6 +111,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       timeframe = "3mo",
       minConfidence = 0.6,
       onCalloutEntries,
+      economicEvents,
     },
     ref,
   ) {
@@ -328,7 +337,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           ...(priceScaleId ? { priceScaleId } : {}),
         });
         const lineData: LineData<Time>[] = [];
-        for (let i = 0; i < data.length; i++) {
+        for (let i = 0; i < Math.min(data.length, times.length); i++) {
           if (data[i] != null) {
             lineData.push({ time: times[i], value: data[i]! });
           }
@@ -390,7 +399,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           borderVisible: false,
         });
         const rsiLineData: LineData<Time>[] = [];
-        for (let i = 0; i < rsiData.length; i++) {
+        for (let i = 0; i < Math.min(rsiData.length, times.length); i++) {
           if (rsiData[i] != null) {
             rsiLineData.push({ time: times[i], value: rsiData[i]! });
           }
@@ -433,7 +442,11 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           borderVisible: false,
         });
         const macdLineData: LineData<Time>[] = [];
-        for (let i = 0; i < macdResult.macd.length; i++) {
+        for (
+          let i = 0;
+          i < Math.min(macdResult.macd.length, times.length);
+          i++
+        ) {
           if (macdResult.macd[i] != null) {
             macdLineData.push({ time: times[i], value: macdResult.macd[i]! });
           }
@@ -450,7 +463,11 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           crosshairMarkerVisible: false,
         });
         const signalLineData: LineData<Time>[] = [];
-        for (let i = 0; i < macdResult.signal.length; i++) {
+        for (
+          let i = 0;
+          i < Math.min(macdResult.signal.length, times.length);
+          i++
+        ) {
           if (macdResult.signal[i] != null) {
             signalLineData.push({
               time: times[i],
@@ -467,7 +484,11 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           lastValueVisible: false,
         });
         const macdHistData: HistogramData<Time>[] = [];
-        for (let i = 0; i < macdResult.histogram.length; i++) {
+        for (
+          let i = 0;
+          i < Math.min(macdResult.histogram.length, times.length);
+          i++
+        ) {
           if (macdResult.histogram[i] != null) {
             macdHistData.push({
               time: times[i],
@@ -519,6 +540,52 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
 
         // Fire the legend callback so the DOM legend can render
         onCalloutEntries?.(overlays.callouts);
+      }
+
+      // Economic event markers (Story 47.8)
+      if (economicEvents && economicEvents.length > 0 && candles.length > 0) {
+        // Build a lookup: YYYY-MM-DD → candle Time value
+        const dateToTime = new Map<string, Time>();
+        for (const c of candles) {
+          let dateKey: string;
+          if (typeof c.time === "number") {
+            dateKey = new Date(c.time * 1000).toISOString().slice(0, 10);
+          } else {
+            dateKey = String(c.time).slice(0, 10);
+          }
+          if (!dateToTime.has(dateKey)) {
+            dateToTime.set(dateKey, c.time as Time);
+          }
+        }
+
+        const markers: SeriesMarker<Time>[] = [];
+        for (const event of economicEvents) {
+          const t = dateToTime.get(event.date);
+          if (!t) continue; // event date not in visible range
+
+          const color =
+            event.impact === "high"
+              ? "#ef4444" // red-500
+              : event.impact === "medium"
+                ? "#f59e0b" // amber-500
+                : "#6b7280"; // gray-500
+
+          markers.push({
+            time: t,
+            position: "aboveBar",
+            shape: "circle",
+            color,
+            size: event.impact === "high" ? 1.5 : 1,
+            text: event.name,
+            id: `econ-${event.date}-${event.name}`,
+          });
+        }
+
+        if (markers.length > 0) {
+          // Sort by time ascending — required by lightweight-charts
+          markers.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+          createSeriesMarkers(candleSeries, markers);
+        }
       }
 
       chart.timeScale().fitContent();
@@ -574,6 +641,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       indicators,
       timeframe,
       minConfidence,
+      economicEvents,
     ]);
 
     // Highlight a specific pattern overlay when hovered from text

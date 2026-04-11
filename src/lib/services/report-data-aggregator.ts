@@ -25,7 +25,10 @@ import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
 import { computeVolumeProfile } from "@/lib/utils/volume-profile";
 import { computeAlgoSR } from "@/lib/utils/algo-sr";
 import { computeIVSkew, computeOISummary } from "@/lib/utils/options-analytics";
-import { getUpcomingCatalysts } from "@/lib/utils/economic-calendar";
+import {
+  getUpcomingCatalysts,
+  type CatalystSummary,
+} from "@/lib/utils/economic-calendar";
 import type { OptionsChainSummary } from "@/types/market";
 import type { GEXSummary } from "@/lib/utils/gex-calculator";
 import { vwap } from "@/lib/utils/technical-indicators";
@@ -147,6 +150,8 @@ export interface AggregateReportInput {
   candlesByPeriod: CandlesByPeriod;
   optionsChain?: OptionsChainSummary | null;
   earningsDate?: string | null;
+  /** Live catalyst data fetched from /api/calendar/upcoming — bypasses client-side fallback to hardcoded dates */
+  liveCatalysts?: CatalystSummary;
 }
 
 /** Combined options data fetched from the API route */
@@ -204,6 +209,7 @@ function computeEnrichedData(
   candlesByPeriod: CandlesByPeriod,
   optionsChain: OptionsChainSummary | null,
   earningsDate: string | null,
+  liveCatalysts?: CatalystSummary,
 ): EnrichedMarketData {
   const candles = pickBestCandles(candlesByPeriod);
   const candles1D = candlesByPeriod["1d"] ?? [];
@@ -261,8 +267,10 @@ function computeEnrichedData(
       : null;
   const oiSummary = optionsChain ? computeOISummary(optionsChain) : null;
 
-  // Catalyst calendar (14-day window) — always available
-  const catalysts = getUpcomingCatalysts(14);
+  // Catalyst calendar (14-day window) — use server-fetched live data when
+  // available (client-side PDF export passes this in); otherwise call
+  // getUpcomingCatalysts which works correctly server-side.
+  const catalysts = liveCatalysts ?? getUpcomingCatalysts(14);
 
   return {
     volumeProfile,
@@ -291,6 +299,7 @@ export function aggregateReportData(input: AggregateReportInput): ReportData {
     input.candlesByPeriod,
     input.optionsChain ?? null,
     input.earningsDate ?? null,
+    input.liveCatalysts,
   );
 
   return {

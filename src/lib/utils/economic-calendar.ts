@@ -10,7 +10,12 @@
  * - LOW: Housing Starts, Durable Goods, Consumer Confidence
  */
 
+import { getCachedCalendar } from "@/lib/services/live-economic-calendar";
+
 export type EventImpact = "high" | "medium" | "low";
+
+/** Identifies which authoritative data source provided this event. */
+export type EventSource = "bls" | "bea" | "census" | "fed" | "heuristic";
 
 export interface EconomicEvent {
   date: string;
@@ -18,6 +23,12 @@ export interface EconomicEvent {
   impact: EventImpact;
   /** Brief description of what this release measures */
   description: string;
+  /** Data source for this event. Absent on legacy hardcoded events. */
+  source?: EventSource;
+  /** True when date is heuristic-estimated rather than officially scheduled. */
+  isEstimated?: boolean;
+  /** The reporting period this release covers, e.g. "March 2026". */
+  periodCovered?: string;
 }
 
 export interface UpcomingCatalyst extends EconomicEvent {
@@ -40,16 +51,19 @@ export interface CatalystSummary {
 // ---------------------------------------------------------------------------
 
 const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
-  // CPI — typically 2nd or 3rd Tuesday/Wednesday of month
+  // CPI — BLS official schedule: https://www.bls.gov/schedule/news_release/cpi.htm
+  // Dec'25→Jan 13, Jan'26→Feb 13, Feb'26→Mar 11, Mar'26→Apr 10,
+  // Apr'26→May 12, May'26→Jun 10, Jun'26→Jul 14, Jul'26→Aug 12,
+  // Aug'26→Sep 11, Sep'26→Oct 14, Oct'26→Nov 10, Nov'26→Dec 10
   {
-    date: "2026-01-14",
+    date: "2026-01-13",
     name: "CPI",
     impact: "high",
     description:
       "Consumer Price Index — key inflation gauge; higher-than-expected = hawkish Fed, risk-off",
   },
   {
-    date: "2026-02-11",
+    date: "2026-02-13",
     name: "CPI",
     impact: "high",
     description: "Consumer Price Index — key inflation gauge",
@@ -61,13 +75,13 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Consumer Price Index — key inflation gauge",
   },
   {
-    date: "2026-04-14",
+    date: "2026-04-10",
     name: "CPI",
     impact: "high",
     description: "Consumer Price Index — key inflation gauge",
   },
   {
-    date: "2026-05-13",
+    date: "2026-05-12",
     name: "CPI",
     impact: "high",
     description: "Consumer Price Index — key inflation gauge",
@@ -79,7 +93,7 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Consumer Price Index — key inflation gauge",
   },
   {
-    date: "2026-07-15",
+    date: "2026-07-14",
     name: "CPI",
     impact: "high",
     description: "Consumer Price Index — key inflation gauge",
@@ -91,7 +105,7 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Consumer Price Index — key inflation gauge",
   },
   {
-    date: "2026-09-16",
+    date: "2026-09-11",
     name: "CPI",
     impact: "high",
     description: "Consumer Price Index — key inflation gauge",
@@ -103,7 +117,7 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Consumer Price Index — key inflation gauge",
   },
   {
-    date: "2026-11-12",
+    date: "2026-11-10",
     name: "CPI",
     impact: "high",
     description: "Consumer Price Index — key inflation gauge",
@@ -265,33 +279,43 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Fed's preferred inflation measure",
   },
 
-  // PPI — ~1 day after CPI
+  // PPI — BLS official schedule: https://www.bls.gov/schedule/news_release/ppi.htm
+  // Jan'26→Feb 27, Feb'26→Mar 18, Mar'26→Apr 14,
+  // Apr'26→May 13, May'26→Jun 11, Jun'26→Jul 15,
+  // Jul'26→Aug 13, Aug'26→Sep 10, Sep'26→Oct 15,
+  // Oct'26→Nov 13, Nov'26→Dec 15
   {
-    date: "2026-01-15",
+    date: "2026-01-14",
     name: "PPI",
     impact: "medium",
     description: "Producer Price Index — upstream inflation; leads CPI trends",
   },
   {
-    date: "2026-02-12",
+    date: "2026-01-30",
     name: "PPI",
     impact: "medium",
     description: "Producer Price Index",
   },
   {
-    date: "2026-03-12",
+    date: "2026-02-27",
     name: "PPI",
     impact: "medium",
     description: "Producer Price Index",
   },
   {
-    date: "2026-04-15",
+    date: "2026-03-18",
     name: "PPI",
     impact: "medium",
     description: "Producer Price Index",
   },
   {
-    date: "2026-05-14",
+    date: "2026-04-14",
+    name: "PPI",
+    impact: "medium",
+    description: "Producer Price Index",
+  },
+  {
+    date: "2026-05-13",
     name: "PPI",
     impact: "medium",
     description: "Producer Price Index",
@@ -303,7 +327,7 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Producer Price Index",
   },
   {
-    date: "2026-07-16",
+    date: "2026-07-15",
     name: "PPI",
     impact: "medium",
     description: "Producer Price Index",
@@ -315,7 +339,7 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Producer Price Index",
   },
   {
-    date: "2026-09-17",
+    date: "2026-09-10",
     name: "PPI",
     impact: "medium",
     description: "Producer Price Index",
@@ -333,52 +357,62 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Producer Price Index",
   },
   {
-    date: "2026-12-11",
+    date: "2026-12-15",
     name: "PPI",
     impact: "medium",
     description: "Producer Price Index",
   },
 
-  // Retail Sales — mid-month
+  // Retail Sales — Census official schedule: https://www.census.gov/economic-indicators/calendar-listview.html
+  // Jan'26→Mar 6, Feb'26→Apr 1, Mar'26→Apr 21,
+  // Apr'26→May 14, May'26→Jun 17, Jun'26→Jul 16,
+  // Jul'26→Aug 14, Aug'26→Sep 16, Sep'26→Oct 15,
+  // Oct'26→Nov 17, Nov'26→Dec 16
   {
-    date: "2026-01-16",
+    date: "2026-01-14",
     name: "Retail Sales",
     impact: "medium",
     description:
       "Consumer spending — 70% of GDP; strong = bullish consumer sector",
   },
   {
-    date: "2026-02-17",
+    date: "2026-02-10",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
   },
   {
-    date: "2026-03-17",
+    date: "2026-03-06",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
   },
   {
-    date: "2026-04-16",
+    date: "2026-04-01",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
   },
   {
-    date: "2026-05-15",
+    date: "2026-04-21",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
   },
   {
-    date: "2026-06-16",
+    date: "2026-05-14",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
   },
   {
-    date: "2026-07-17",
+    date: "2026-06-17",
+    name: "Retail Sales",
+    impact: "medium",
+    description: "Consumer spending data",
+  },
+  {
+    date: "2026-07-16",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
@@ -390,13 +424,13 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Consumer spending data",
   },
   {
-    date: "2026-09-15",
+    date: "2026-09-16",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
   },
   {
-    date: "2026-10-16",
+    date: "2026-10-15",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
@@ -408,7 +442,7 @@ const ECONOMIC_EVENTS_2026: EconomicEvent[] = [
     description: "Consumer spending data",
   },
   {
-    date: "2026-12-15",
+    date: "2026-12-16",
     name: "Retail Sales",
     impact: "medium",
     description: "Consumer spending data",
@@ -611,9 +645,14 @@ export function getUpcomingCatalysts(
   const fromMs = fromDate.getTime();
   const windowEnd = fromMs + tradeWindowDays * 24 * 60 * 60 * 1000;
 
+  // Prefer live cache; fall back to hardcoded schedule when cache is cold (tests / first start)
+  const liveEvents = getCachedCalendar();
+  const source: EconomicEvent[] =
+    liveEvents.length > 0 ? liveEvents : ECONOMIC_EVENTS_2026;
+
   const events: UpcomingCatalyst[] = [];
 
-  for (const event of ECONOMIC_EVENTS_2026) {
+  for (const event of source) {
     const eventMs = new Date(event.date).getTime();
     if (eventMs >= fromMs && eventMs <= windowEnd) {
       const daysUntil = Math.ceil((eventMs - fromMs) / (1000 * 60 * 60 * 24));

@@ -24,6 +24,7 @@ import PriceChart, {
   type IndicatorConfig,
   type PriceChartHandle,
 } from "@/components/charts/PriceChart";
+import type { EconomicEvent } from "@/lib/utils/economic-calendar";
 import PatternLegendBar from "@/components/charts/PatternLegendBar";
 import type { CalloutEntry } from "@/components/charts/primitives/CalloutAnnotationPrimitive";
 import ChartLegend from "@/components/charts/ChartLegend";
@@ -100,6 +101,8 @@ interface TechnicalChartProps {
   indicators?: IndicatorConfig;
   timeframe?: ChartHistoryPeriod;
   onTimeframeChange?: (timeframe: ChartHistoryPeriod) => void;
+  /** Economic event markers to overlay on the chart */
+  economicEvents?: EconomicEvent[];
 }
 
 export interface TechnicalChartHandle {
@@ -122,6 +125,7 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
       indicators,
       timeframe,
       onTimeframeChange,
+      economicEvents,
     },
     ref,
   ) {
@@ -333,6 +337,7 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
               timeframe={activeTimeframe}
               minConfidence={showAllSignals ? 0 : 0.6}
               onCalloutEntries={setCalloutEntries}
+              economicEvents={economicEvents}
             />
             <ChartLegend
               supportResistance={supportResistance}

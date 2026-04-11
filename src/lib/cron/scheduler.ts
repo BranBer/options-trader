@@ -15,6 +15,7 @@ import {
   recordPipelineRunStart,
   type PipelineRunTrigger,
 } from "./pipeline-run-store";
+import { refreshCalendarCache } from "@/lib/services/live-economic-calendar";
 
 let lastRefreshAt: string | null = null;
 let isRunning = false;
@@ -178,6 +179,21 @@ export function startScheduler() {
     console.log("[Scheduler] Cron trigger");
     await runPipeline("schedule");
   });
+
+  // Refresh economic calendar daily at 00:05 ET (05:05 UTC)
+  // This ensures dates are live before the markets open each day.
+  cron.schedule("5 5 * * *", async () => {
+    console.log("[Scheduler] Daily calendar refresh");
+    await refreshCalendarCache().catch((err) =>
+      console.error("[Scheduler] Calendar refresh failed:", err),
+    );
+  });
+
+  // Cold-start: warm the calendar cache immediately so callers have live data
+  // as soon as the first pipeline run or API call occurs.
+  refreshCalendarCache().catch((err) =>
+    console.error("[Scheduler] Cold-start calendar refresh failed:", err),
+  );
 
   // Run immediately on startup
   runPipeline("startup").catch(console.error);

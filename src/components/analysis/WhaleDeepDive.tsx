@@ -3,7 +3,11 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { useDeepDive, useActiveCascades } from "@/hooks/useApiData";
+import {
+  useDeepDive,
+  useActiveCascades,
+  useCalendarStatus,
+} from "@/hooks/useApiData";
 import type { DeepDiveAnalysis } from "@/types/analysis";
 import { findUpstreamNexus } from "@/lib/data/nexus-companies";
 import type { ActiveCascadeEntry } from "@/app/api/analysis/active-cascades/route";
@@ -56,6 +60,7 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
 
   const { data: deepDiveData, isLoading: ddLoading } = useDeepDive(ticker);
   const { data: cascadeData } = useActiveCascades();
+  const { data: calendarData } = useCalendarStatus();
 
   // Find active cascades that affect this ticker
   const activeCascadesForTicker = useMemo(() => {
@@ -175,6 +180,7 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
         optionsContext={deepDive.options_context}
         timeframe={timeframe}
         onTimeframeChange={setTimeframe}
+        economicEvents={calendarData?.nextEvents}
       />
 
       <Separator />

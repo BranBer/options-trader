@@ -3,6 +3,7 @@
 import { useQuery, useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import type { NexusDriftAnalysis } from "@/types/analysis";
 import type { ActiveCascadesResponse } from "@/app/api/analysis/active-cascades/route";
+import type { EconomicEvent } from "@/lib/utils/economic-calendar";
 
 export interface NewsEvent {
   id: number;
@@ -256,6 +257,27 @@ export function useNexusDriftAnalysis() {
       }
       return res.json();
     },
+  });
+}
+
+export interface CalendarStatusResponse {
+  totalEvents: number;
+  fetchedAt: string | null;
+  isStale: boolean;
+  sourceStatus: Record<string, string>;
+  nextEvents: EconomicEvent[];
+}
+
+export function useCalendarStatus() {
+  return useQuery<CalendarStatusResponse>({
+    queryKey: ["calendarStatus"],
+    queryFn: async () => {
+      const res = await fetch("/api/calendar/status");
+      if (!res.ok) throw new Error("Failed to fetch calendar status");
+      return res.json();
+    },
+    staleTime: 60 * 60 * 1000, // 1 h — calendar data changes once a day
+    refetchOnWindowFocus: false,
   });
 }
 
