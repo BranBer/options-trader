@@ -46,7 +46,15 @@ import {
 import { NEXUS_COMPANIES } from "@/lib/data/nexus-companies";
 import type { InsiderSentiment } from "@/types/insider";
 import type { SectorRotationContext } from "@/lib/utils/sector-rotation";
-import type { DeepDiveAnalysis, TradeRecommendation } from "@/types/analysis";
+import type {
+  DeepDiveAnalysis,
+  TradeRecommendation,
+  DeepDiveSummary,
+} from "@/types/analysis";
+import {
+  computeSignalScorecard,
+  type ScorecardInput,
+} from "@/lib/utils/signal-scorecard";
 
 const MIN_CORRELATION_CONFIDENCE = 0.5;
 const RECOMMEND_CONCURRENCY = 2;
@@ -67,6 +75,55 @@ function getWhaleRefMetadata(
     primaryWhaleId: matches[0]?.id ?? null,
     whaleIds: matches.slice(0, 5).map((whale) => whale.id),
   };
+}
+
+/** Story 39.8 — extract a concise DeepDiveSummary from a full DeepDiveAnalysis */
+function extractDeepDiveSummary(dive: DeepDiveAnalysis): DeepDiveSummary {
+  // Majority vote from technical_patterns[].type
+  const types = dive.technical_patterns.map((p) => p.type);
+  const bullish = types.filter((t) => t === "bullish").length;
+  const bearish = types.filter((t) => t === "bearish").length;
+  const overallSentiment: DeepDiveSummary["overallSentiment"] =
+    bullish > bearish ? "bullish" : bearish > bullish ? "bearish" : "neutral";
+
+  const keyPatterns = dive.technical_patterns.slice(0, 3).map((p) => ({
+    name: p.name,
+    signal: p.type as "bullish" | "bearish" | "neutral",
+  }));
+
+  const supportLevels = dive.support_resistance
+    .filter((sr) => sr.type === "support")
+    .map((sr) => sr.level);
+  const resistanceLevels = dive.support_resistance
+    .filter((sr) => sr.type === "resistance")
+    .map((sr) => sr.level);
+
+  const ivAssessment = dive.options_context.iv_interpretation ?? "";
+  const thetaGreek = dive.options_context.greeks_breakdown?.find(
+    (g) => g.greek === "theta",
+  );
+  const thetaAnalysis = thetaGreek
+    ? `${thetaGreek.value}: ${thetaGreek.plain_english}`
+    : dive.options_context.greeks_summary;
+
+  return {
+    overallSentiment,
+    riskLevel: dive.risk_assessment.overall_risk,
+    keyPatterns,
+    supportLevels,
+    resistanceLevels,
+    ivAssessment,
+    thetaAnalysis,
+  };
+}
+
+/** Derive a simple whale direction string from a smart_money_signal value */
+function smartMoneyToDirection(
+  signal: string,
+): "bullish" | "bearish" | "neutral" {
+  if (signal.includes("bullish")) return "bullish";
+  if (signal.includes("bearish")) return "bearish";
+  return "neutral";
 }
 
 // Progress step indices (must match scheduler.ts init order)
@@ -361,6 +418,41 @@ export async function runAnalysisPipeline(): Promise<number> {
   );
   progress.complete(STEP_CROSS_REF);
 
+  // Story 39.8 — build a map of the most recent deep dive per ticker so recommendation
+  // prompts receive deep-dive context.  Deep dives from previous pipeline cycles (up to 4h
+  // old) feed into this cycle's recommendations; within a single run the deep dive still
+  // runs AFTER recommendations (Step 5), so the map carries forward from prior cycles.
+  const recentDiveRows = await db
+    .select({ output: analyses.output })
+    .from(analyses)
+    .where(
+      and(
+        gte(
+          analyses.createdAt,
+          new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+        ),
+        eq(analyses.type, "deep_dive"),
+      ),
+    )
+    .orderBy(desc(analyses.createdAt));
+
+  const deepDiveMap = new Map<string, DeepDiveAnalysis>();
+  for (const row of recentDiveRows) {
+    try {
+      const parsed = JSON.parse(row.output ?? "{}") as DeepDiveAnalysis;
+      if (parsed.ticker && !deepDiveMap.has(parsed.ticker)) {
+        deepDiveMap.set(parsed.ticker, parsed);
+      }
+    } catch {
+      /* skip */
+    }
+  }
+  if (deepDiveMap.size > 0) {
+    console.log(
+      `[AnalysisPipeline] Deep dive context loaded for ${deepDiveMap.size} tickers: ${[...deepDiveMap.keys()].join(", ")}`,
+    );
+  }
+
   // Step 4: Generate recommendations for high-confidence correlations
   const highConfCorrelations = crossRef.correlations.filter(
     (c) => c.correlation_confidence >= MIN_CORRELATION_CONFIDENCE,
@@ -472,6 +564,39 @@ export async function runAnalysisPipeline(): Promise<number> {
             recentNexusEarnings,
           );
 
+          // Story 39.8 — deep dive summary from previous cycle (if available)
+          const priorDive = deepDiveMap.get(ticker);
+          const deepDiveSummary = priorDive
+            ? extractDeepDiveSummary(priorDive)
+            : null;
+
+          // Story 39.11 — compute signal scorecard
+          let pcRatio: number | null = null;
+          if (chain) {
+            const totalCallVol = chain.nearestExpiry.calls.reduce(
+              (s, c) => s + c.volume,
+              0,
+            );
+            const totalPutVol = chain.nearestExpiry.puts.reduce(
+              (s, c) => s + c.volume,
+              0,
+            );
+            pcRatio = totalCallVol > 0 ? totalPutVol / totalCallVol : null;
+          }
+          const scorecardInput: ScorecardInput = {
+            whaleDirection: smartMoneyToDirection(
+              correlation.smart_money_signal,
+            ),
+            whalePremium: correlation.whale_trade.premium,
+            whaleOptionType: correlation.whale_trade.type,
+            indicatorReportsByTimeframe,
+            pcRatio,
+            gexPositioning: chain?.gex?.dealerPositioning ?? null,
+            shortInterest: siData,
+            deepDiveSummary,
+          };
+          const scorecard = computeSignalScorecard(scorecardInput);
+
           const recommendation = await generateRecommendation(correlation, {
             price: marketData?.price ?? 0,
             ivRank: atmIV != null ? Math.round(atmIV * 100) : undefined,
@@ -501,9 +626,9 @@ export async function runAnalysisPipeline(): Promise<number> {
               recentWhales.find((w) => w.ticker === ticker)?.intentHint ?? null,
             shortInterest: siData,
             cascadeContext: cascadeCtx,
+            deepDiveSummary,
+            scorecard,
           });
-
-          // Store latest market snapshot
           if (marketData) {
             try {
               await db.insert(marketSnapshots).values({
@@ -686,6 +811,37 @@ export async function runAnalysisPipeline(): Promise<number> {
               whaleRow?.expiry ?? "",
             );
 
+            // Story 39.8/39.11 — deep dive context + scorecard for fallback recs
+            const priorDiveFb = deepDiveMap.get(ticker);
+            const deepDiveSummaryFb = priorDiveFb
+              ? extractDeepDiveSummary(priorDiveFb)
+              : null;
+            let pcRatioFb: number | null = null;
+            if (chain) {
+              const tcv = chain.nearestExpiry.calls.reduce(
+                (s, c) => s + c.volume,
+                0,
+              );
+              const tpv = chain.nearestExpiry.puts.reduce(
+                (s, c) => s + c.volume,
+                0,
+              );
+              pcRatioFb = tcv > 0 ? tpv / tcv : null;
+            }
+            const fbSiData = await getOrFetchShortInterest(ticker).catch(
+              () => null,
+            );
+            const scorecardFb = computeSignalScorecard({
+              whaleDirection: uncorr.type === "put" ? "bearish" : "bullish",
+              whalePremium: uncorr.premium,
+              whaleOptionType: uncorr.type,
+              indicatorReportsByTimeframe,
+              pcRatio: pcRatioFb,
+              gexPositioning: chain?.gex?.dealerPositioning ?? null,
+              shortInterest: fbSiData,
+              deepDiveSummary: deepDiveSummaryFb,
+            });
+
             const recommendation = await generateRecommendation(
               syntheticCorrelation,
               {
@@ -719,6 +875,8 @@ export async function runAnalysisPipeline(): Promise<number> {
                   NEXUS_COMPANIES,
                   recentNexusEarnings,
                 ),
+                deepDiveSummary: deepDiveSummaryFb,
+                scorecard: scorecardFb,
               },
             );
 
@@ -1029,6 +1187,10 @@ export async function runAnalysisPipeline(): Promise<number> {
             confidence: null,
           });
 
+          // Story 39.8 — update in-memory map so any subsequent same-cycle
+          // logic (composite confidence, etc.) can reference it.
+          deepDiveMap.set(item.ticker, deepDive);
+
           console.log(
             `[AnalysisPipeline] Deep dive for ${item.ticker}: risk=${deepDive.risk_assessment.overall_risk}`,
           );
@@ -1050,73 +1212,11 @@ export async function runAnalysisPipeline(): Promise<number> {
   }
   progress.complete(STEP_DEEP_DIVES);
 
-  // Step 6: Confidence feedback loop — adjust recommendation confidence using deep dive results
+  // Step 6: Compute composite confidence for each recommendation
+  // (Story 39.8 — confidence feedback loop removed; deep dive now informs recs directly)
   if (deepDiveQueue.length > 0) {
-    console.log("[AnalysisPipeline] Running confidence feedback loop...");
-
-    // Fetch the deep dives and recommendations we just stored (current cycle)
-    const recentDeepDives = await db
-      .select()
-      .from(analyses)
-      .where(
-        and(gte(analyses.createdAt, since), eq(analyses.type, "deep_dive")),
-      )
-      .orderBy(desc(analyses.createdAt));
-
-    const recentRecs = await db
-      .select()
-      .from(analyses)
-      .where(
-        and(
-          gte(analyses.createdAt, since),
-          eq(analyses.type, "trade_recommendation"),
-        ),
-      )
-      .orderBy(desc(analyses.createdAt));
-
-    for (const diveRow of recentDeepDives) {
-      try {
-        const diveOutput = JSON.parse(
-          diveRow.output ?? "{}",
-        ) as DeepDiveAnalysis;
-        const diveTicker = diveOutput.ticker;
-        if (!diveTicker) continue;
-
-        // Find matching recommendation by ticker
-        const matchingRec = recentRecs.find((r) => {
-          const refs = JSON.parse(r.inputRefs ?? "{}");
-          const refTicker =
-            refs.correlationTicker ?? refs.whaleSignalTicker ?? refs.ticker;
-          return refTicker === diveTicker;
-        });
-        if (!matchingRec) continue;
-
-        const recOutput = JSON.parse(
-          matchingRec.output ?? "{}",
-        ) as TradeRecommendation;
-        const adjustment = computeConfidenceAdjustment(diveOutput, recOutput);
-
-        if (adjustment.delta !== 0) {
-          await db
-            .update(analyses)
-            .set({ confidence: adjustment.adjusted })
-            .where(eq(analyses.id, matchingRec.id));
-
-          console.log(
-            `[AnalysisPipeline] Confidence adjusted: ${diveTicker} ` +
-              `${adjustment.original.toFixed(2)} → ${adjustment.adjusted.toFixed(2)} ` +
-              `(${adjustment.delta > 0 ? "+" : ""}${adjustment.delta.toFixed(3)} from deep dive feedback)`,
-          );
-        }
-      } catch {
-        // Non-critical — skip any parsing errors
-      }
-    }
-
-    // Step 7: Compute composite confidence for each recommendation
     console.log("[AnalysisPipeline] Computing composite confidence scores...");
 
-    // Re-fetch recommendations (confidence may have been updated by feedback loop)
     const updatedRecs = await db
       .select()
       .from(analyses)

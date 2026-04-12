@@ -1,10 +1,15 @@
 import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
 import type { ShortInterestData } from "@/lib/services/market-fetcher";
 import type { CascadeContext } from "@/lib/utils/cascade-detector";
+import type { DeepDiveSummary } from "@/types/analysis";
+import {
+  type SignalScorecard,
+  formatScorecardForPrompt,
+} from "@/lib/utils/signal-scorecard";
 
 // ---------- System Instruction ----------
 
-export const TRADE_ANALYZER_SYSTEM_INSTRUCTION = `You are an options trading strategist. Given whale options activity (with or without a correlated news event), macro context, and current market data, you generate a structured trade thesis and recommendation.
+export const TRADE_ANALYZER_SYSTEM_INSTRUCTION = `You are an independent options trading strategist. Given whale options activity, macro context, technical signals, and deep-dive analysis, you generate a structured trade thesis and recommendation that reflects YOUR OWN evidence-based judgment — not a rubber-stamp of the whale's direction.
 
 Rules:
 1. Never guarantee returns. Frame everything as probabilistic analysis.
@@ -26,6 +31,32 @@ Rules:
     - Long-term whale (DTE > 45): Recommend expiries 60-90+ days out. This whale has a longer-term thesis.
     - Always state the whale's DTE and what timeframe it implies in your thesis. If the whale's option has already expired or expires within 1 day, note this is an extremely aggressive short-term play and the recommended strategy should reflect that urgency.
 15. EARNINGS CASCADE: When upstream nexus companies (supply chain bellwethers) have recently reported earnings, a cascade context section will be provided. Use this to adjust your directional confidence (strong upstream beat = bullish tailwind), factor cascade timing into entry recommendation (immediate phase = stronger signal), and note cascade risk in risk factors (e.g. "upstream catalyst may already be priced in if >48h old"). Do NOT double-count cascade with earningsRisk — cascade is about UPSTREAM events, earningsRisk is about THIS ticker's own upcoming earnings.
+16. CRITICAL — EVIDENCE HIERARCHY: Form your directional opinion using this evidence hierarchy (most to least weight):
+    1. Multi-timeframe technical trend consensus (macro + micro patterns agreeing across timeframes)
+    2. Options microstructure (P/C ratio, IV skew, GEX positioning, OI walls)
+    3. Deep dive risk assessment and sentiment (when provided)
+    4. Macro context (VIX regime, FOMC, earnings proximity)
+    5. Short interest and institutional positioning
+    6. Whale trade direction (treat as ONE data point, NOT the conclusion)
+    If items 1–3 conflict with the whale's direction, your recommendation SHOULD disagree with the whale. State this explicitly in your thesis.
+17. CRITICAL — WHALE SKEPTICISM: Do NOT assume the whale is correct. Whale trades may represent:
+    - Short covering (buying calls to close a short position — NOT bullish conviction)
+    - Portfolio hedging (buying puts as insurance — does NOT mean bearish outlook)
+    - Multi-leg strategies where only one leg is visible
+    - Institutional rebalancing unrelated to directional views
+    Evaluate the whale trade in context of short interest, overall options flow, and your independent technical analysis.
+18. CONFLICTING SIGNALS: When technical signals conflict with whale direction:
+    - If 4+ bearish patterns and whale is bullish: recommend bearish or neutral strategy. Note the whale disagreement explicitly.
+    - If deep dive assessment is "high" or "very_high" risk: reduce confidence by at least 0.1 and prefer defined-risk structures.
+    - If short interest is >10% of float and whale buys calls: explicitly discuss short covering probability in the thesis.
+    - If ALL signals conflict (patterns, indicators, deep dive, options flow all bearish but whale bullish): recommend the OPPOSITE direction from the whale with a clear explanation of why the evidence overrides the whale signal.
+19. NO TRADE SIGNAL: If signals are deeply conflicted with no clear edge, you MAY recommend a "stand aside" / no-trade stance by: setting confidence < 0.15, choosing direction "neutral", and explaining in the thesis that current conditions do not offer a favorable risk/reward. This is a valid recommendation.
+20. EXPIRY SELECTION — SIGNAL TIMEFRAME: The pre-computed scorecard provides a "Dominant Signal Timeframe" and suggested expiry range. Base your recommended expiry on the DOMINANT SIGNAL TIMEFRAME, not solely on the whale's expiry:
+    - IF the strongest signals are from 1W patterns: recommend 7–14 day expiries
+    - IF from 1M patterns: recommend 14–30 day expiries
+    - IF from 3M patterns: recommend 30–60 day expiries
+    - IF from 6M+ patterns: recommend 60–120 day expiries
+    The whale's expiry is a REFERENCE POINT, not a mandate. Balance both the whale DTE (Rule 14) and the signal timeframe (this rule) in your final expiry choice.
 
 Always respond with the exact JSON schema provided.`;
 
@@ -68,6 +99,8 @@ export function buildTradeAnalyzerPrompt(
   indicatorReportsByTimeframe?: Partial<Record<string, IndicatorPatternReport>>,
   shortInterest?: ShortInterestData | null,
   cascadeContext?: CascadeContext | null,
+  deepDiveSummary?: DeepDiveSummary | null,
+  scorecard?: SignalScorecard | null,
 ): string {
   const todayStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/New_York",
@@ -99,10 +132,44 @@ export function buildTradeAnalyzerPrompt(
     /* correlation may not be valid JSON in edge cases */
   }
 
-  let prompt = `Based on the following whale trade signal and market data, generate a structured trade recommendation.
+  // Determine whale direction from correlation for scorecard/deep dive context
+  let whaleDirection: "bullish" | "bearish" | "neutral" = "neutral";
+  try {
+    const parsedCorr = JSON.parse(correlationJson);
+    const sms: string = parsedCorr?.smart_money_signal ?? "";
+    if (sms.includes("bullish")) whaleDirection = "bullish";
+    else if (sms.includes("bearish")) whaleDirection = "bearish";
+  } catch {
+    /* ignore */
+  }
+
+  // Scorecard block (Story 39.11) — placed at the very top of the prompt
+  const scorecardBlock =
+    scorecard != null
+      ? `${formatScorecardForPrompt(scorecard, whaleDirection)}\n\n`
+      : "";
+
+  // Deep dive summary block (Story 39.8) — placed before whale signal
+  let deepDiveBlock = "";
+  if (deepDiveSummary) {
+    const patternLines = deepDiveSummary.keyPatterns
+      .map((p) => `  - ${p.name} [${p.signal}]`)
+      .join("\n");
+    deepDiveBlock = `\nPre-computed Deep Dive Summary (run before this recommendation):
+- Overall Sentiment: ${deepDiveSummary.overallSentiment.toUpperCase()}
+- Risk Level: ${deepDiveSummary.riskLevel.toUpperCase()}
+- Key Patterns:\n${patternLines}
+- Support Levels: ${deepDiveSummary.supportLevels.length > 0 ? deepDiveSummary.supportLevels.map((l) => `$${l}`).join(", ") : "none identified"}
+- Resistance Levels: ${deepDiveSummary.resistanceLevels.length > 0 ? deepDiveSummary.resistanceLevels.map((l) => `$${l}`).join(", ") : "none identified"}
+- IV Assessment: ${deepDiveSummary.ivAssessment}
+- Theta Context: ${deepDiveSummary.thetaAnalysis}
+This deep dive reflects ALL available technical, options, and macro data for ${ticker}. Use it as a PRIMARY input (Rule 16 — weight #3).`;
+  }
+
+  let prompt = `${scorecardBlock}Based on the following whale trade signal and market data, generate a structured trade recommendation.
 
 Today's Date: ${todayStr}
-IMPORTANT: All option expiry dates must be after ${todayStr}. Do not recommend expired options.
+IMPORTANT: All option expiry dates must be after ${todayStr}. Do not recommend expired options.${deepDiveBlock}
 
 Whale Trade Signal:
 ${correlationJson}${whaleDteNote}

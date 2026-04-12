@@ -632,6 +632,10 @@ interface MarketDataForRecommendation {
     | import("@/lib/services/market-fetcher").ShortInterestData
     | null;
   cascadeContext?: import("@/lib/utils/cascade-detector").CascadeContext | null;
+  /** Story 39.8 — Deep dive summary computed before this recommendation */
+  deepDiveSummary?: import("@/types/analysis").DeepDiveSummary | null;
+  /** Story 39.11 — Pre-computed signal scorecard injected at top of prompt */
+  scorecard?: import("@/lib/utils/signal-scorecard").SignalScorecard | null;
 }
 
 export async function generateRecommendation(
@@ -658,6 +662,8 @@ export async function generateRecommendation(
     marketData.indicatorReportsByTimeframe,
     marketData.shortInterest,
     marketData.cascadeContext,
+    marketData.deepDiveSummary,
+    marketData.scorecard,
   );
 
   const result = await callLLMWithRetry(

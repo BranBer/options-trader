@@ -58,7 +58,7 @@ const s = StyleSheet.create({
   },
   catalystRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingVertical: 3,
     borderBottomWidth: 0.5,
     borderBottomColor: colors.border,
@@ -498,13 +498,13 @@ export default function ReportMarketStructurePage({
         </View>
       )}
 
-      {/* Catalyst Calendar */}
+      {/* Catalyst Calendar — always starts on a new page to prevent mid-card splits */}
       {(catalysts.events.length > 0 || enrichedData.earningsDate) && (
-        <View style={baseStyles.section}>
+        <View style={baseStyles.section} break={true}>
           <Text style={baseStyles.h1}>
             Catalyst Calendar ({catalysts.highImpactCount} high-impact)
           </Text>
-          <View style={baseStyles.card}>
+          <View style={baseStyles.card} wrap={false}>
             {enrichedData.earningsDate &&
               (() => {
                 const daysTo = Math.ceil(

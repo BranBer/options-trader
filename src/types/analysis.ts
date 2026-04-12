@@ -252,6 +252,20 @@ export const deepDiveAnalysisSchema = z.object({
 
 export type DeepDiveAnalysis = z.infer<typeof deepDiveAnalysisSchema>;
 
+// --- Deep Dive Summary (Story 39.8 — fed into recommendation prompt) ---
+export interface DeepDiveSummary {
+  overallSentiment: "bullish" | "bearish" | "neutral";
+  riskLevel: "low" | "moderate" | "high" | "very_high";
+  keyPatterns: Array<{
+    name: string;
+    signal: "bullish" | "bearish" | "neutral";
+  }>;
+  supportLevels: number[];
+  resistanceLevels: number[];
+  ivAssessment: string;
+  thetaAnalysis: string;
+}
+
 // --- Nexus Drift Analysis (Epic 43) ---
 export const nexusDriftRemovalSchema = z.object({
   ticker: z.string(),
