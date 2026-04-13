@@ -40,6 +40,21 @@ import type { CalloutEntry } from "./primitives/CalloutAnnotationPrimitive";
 import type { ChartHistoryPeriod } from "@/lib/utils/chart-timeframes";
 import type { EconomicEvent } from "@/lib/utils/economic-calendar";
 
+export interface TriggerMarker {
+  /** Candle time in seconds (lightweight-charts Time) */
+  time: number;
+  /** "bullish" | "bearish" | "neutral" */
+  direction: string;
+  /** Interaction type label, e.g. "reclaim", "bounce", "breakdown" */
+  type: string;
+  /** Price level the interaction occurred at */
+  level: number;
+  /** Human-readable text shown on hover */
+  text: string;
+  /** Whether this is the primary trigger (larger marker) */
+  primary?: boolean;
+}
+
 export interface IndicatorConfig {
   ema9?: boolean;
   ema21?: boolean;
@@ -92,6 +107,8 @@ interface PriceChartProps {
    * Events are snapped to the nearest candle within the visible range.
    */
   economicEvents?: EconomicEvent[];
+  /** Trigger markers from the trigger engine */
+  triggerMarkers?: TriggerMarker[];
 }
 
 const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
@@ -112,6 +129,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       minConfidence = 0.6,
       onCalloutEntries,
       economicEvents,
+      triggerMarkers,
     },
     ref,
   ) {
@@ -543,6 +561,8 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       }
 
       // Economic event markers (Story 47.8)
+      const allMarkers: SeriesMarker<Time>[] = [];
+
       if (economicEvents && economicEvents.length > 0 && candles.length > 0) {
         // Build a lookup: YYYY-MM-DD → candle Time value
         const dateToTime = new Map<string, Time>();
@@ -558,7 +578,6 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           }
         }
 
-        const markers: SeriesMarker<Time>[] = [];
         for (const event of economicEvents) {
           const t = dateToTime.get(event.date);
           if (!t) continue; // event date not in visible range
@@ -570,7 +589,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
                 ? "#f59e0b" // amber-500
                 : "#6b7280"; // gray-500
 
-          markers.push({
+          allMarkers.push({
             time: t,
             position: "aboveBar",
             shape: "circle",
@@ -580,12 +599,48 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
             id: `econ-${event.date}-${event.name}`,
           });
         }
+      }
 
-        if (markers.length > 0) {
-          // Sort by time ascending — required by lightweight-charts
-          markers.sort((a, b) => String(a.time).localeCompare(String(b.time)));
-          createSeriesMarkers(candleSeries, markers);
+      // Trigger markers (Epic 48)
+      if (triggerMarkers && triggerMarkers.length > 0 && candles.length > 0) {
+        // Build candle time lookup (seconds → Time) for snapping
+        const candleTimeSet = new Set<number>();
+        for (const c of candles) {
+          candleTimeSet.add(
+            typeof c.time === "number"
+              ? c.time
+              : new Date(c.time).getTime() / 1000,
+          );
         }
+
+        for (const tm of triggerMarkers) {
+          const triggerTimeSec = tm.time;
+          // Only show if candle is in the visible range
+          if (!candleTimeSet.has(triggerTimeSec)) continue;
+
+          const isBullish = tm.direction === "bullish";
+          const isBearish = tm.direction === "bearish";
+
+          allMarkers.push({
+            time: triggerTimeSec as unknown as Time,
+            position: isBearish ? "aboveBar" : "belowBar",
+            shape: isBearish ? "arrowDown" : "arrowUp",
+            color: isBullish
+              ? "#22c55e" // green-500
+              : isBearish
+                ? "#ef4444" // red-500
+                : "#f59e0b", // amber-500
+            size: tm.primary ? 2 : 1.5,
+            text: `${tm.type} $${tm.level.toFixed(0)}`,
+            id: `trigger-${tm.time}-${tm.type}`,
+          });
+        }
+      }
+
+      if (allMarkers.length > 0) {
+        // Sort by time ascending — required by lightweight-charts
+        allMarkers.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+        createSeriesMarkers(candleSeries, allMarkers);
       }
 
       chart.timeScale().fitContent();
@@ -642,6 +697,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       timeframe,
       minConfidence,
       economicEvents,
+      triggerMarkers,
     ]);
 
     // Highlight a specific pattern overlay when hovered from text

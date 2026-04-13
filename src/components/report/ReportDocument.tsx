@@ -5,6 +5,7 @@ import ReportNarrativePage from "./ReportNarrativePage";
 import ReportChartPage from "./ReportChartPage";
 import ReportOptionsPage from "./ReportOptionsPage";
 import ReportMarketStructurePage from "./ReportMarketStructurePage";
+import ReportTriggerPage from "./ReportTriggerPage";
 import ReportStrategyPage from "./ReportStrategyPage";
 import ReportFooterPage from "./ReportFooterPage";
 
@@ -53,7 +54,14 @@ export default function ReportDocument({ data }: ReportDocumentProps) {
         optionsContext={data.deepDive.options_context}
       />
 
-      {/* Page 11: Strategy + Risk */}
+      {/* Page 11: Trigger Assessment (Epic 48 — daily chart trigger detection) */}
+      <ReportTriggerPage
+        ticker={data.ticker}
+        generatedAt={data.generatedAt}
+        triggerReport={data.triggerReport}
+      />
+
+      {/* Page 12: Strategy + Risk */}
       <ReportStrategyPage data={data} />
 
       {/* Page 11-12: Educational Notes + Disclaimer */}

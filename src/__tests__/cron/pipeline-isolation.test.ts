@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // --- Mocks ---
 const mockFetchAllNews = vi.fn();
+const mockFetchAllTechNews = vi.fn();
 const mockClassifyAndStoreNews = vi.fn();
 const mockRunWhalePipeline = vi.fn();
 const mockRunAnalysisPipeline = vi.fn();
@@ -13,9 +14,18 @@ vi.mock("@/lib/services/news-fetcher", () => ({
   fetchAllNews: (...args: unknown[]) => mockFetchAllNews(...args),
 }));
 
+vi.mock("@/lib/services/tech-news-fetcher", () => ({
+  fetchAllTechNews: (...args: unknown[]) => mockFetchAllTechNews(...args),
+}));
+
+vi.mock("@/lib/services/live-economic-calendar", () => ({
+  refreshCalendarCache: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/lib/cron/pipelines/news-pipeline", () => ({
   classifyAndStoreNews: (...args: unknown[]) =>
     mockClassifyAndStoreNews(...args),
+  runTechNewsPipeline: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock("@/lib/cron/pipelines/whale-pipeline", () => ({
@@ -47,6 +57,7 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
     vi.clearAllMocks();
     // Happy path defaults
     mockFetchAllNews.mockResolvedValue([]);
+    mockFetchAllTechNews.mockResolvedValue([]);
     mockRunWhalePipeline.mockResolvedValue(0);
     mockClassifyAndStoreNews.mockResolvedValue(0);
     mockRunAnalysisPipeline.mockResolvedValue(0);

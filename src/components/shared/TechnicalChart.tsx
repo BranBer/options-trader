@@ -25,6 +25,7 @@ import PriceChart, {
   type PriceChartHandle,
 } from "@/components/charts/PriceChart";
 import type { EconomicEvent } from "@/lib/utils/economic-calendar";
+import type { TriggerMarker } from "@/components/charts/PriceChart";
 import PatternLegendBar from "@/components/charts/PatternLegendBar";
 import type { CalloutEntry } from "@/components/charts/primitives/CalloutAnnotationPrimitive";
 import ChartLegend from "@/components/charts/ChartLegend";
@@ -103,6 +104,8 @@ interface TechnicalChartProps {
   onTimeframeChange?: (timeframe: ChartHistoryPeriod) => void;
   /** Economic event markers to overlay on the chart */
   economicEvents?: EconomicEvent[];
+  /** Trigger markers from the trigger engine to overlay on the chart */
+  triggerMarkers?: TriggerMarker[];
 }
 
 export interface TechnicalChartHandle {
@@ -126,6 +129,7 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
       timeframe,
       onTimeframeChange,
       economicEvents,
+      triggerMarkers,
     },
     ref,
   ) {
@@ -338,6 +342,7 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
               minConfidence={showAllSignals ? 0 : 0.6}
               onCalloutEntries={setCalloutEntries}
               economicEvents={economicEvents}
+              triggerMarkers={triggerMarkers}
             />
             <ChartLegend
               supportResistance={supportResistance}

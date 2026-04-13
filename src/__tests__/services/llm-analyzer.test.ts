@@ -918,7 +918,7 @@ describe("generateDeepDive", () => {
   it("calls LLM and returns parsed deep dive", async () => {
     mockLLMResponse(VALID_DEEP_DIVE_RESPONSE, 3000);
 
-    const result = await generateDeepDive(mockInput);
+    const { deepDive: result } = await generateDeepDive(mockInput);
     expect(result.ticker).toBe("AAPL");
     expect(result.technical_patterns).toHaveLength(1);
     expect(result.support_resistance).toHaveLength(2);
@@ -1000,7 +1000,7 @@ describe("generateDeepDive", () => {
       3000,
     );
 
-    const result = await generateDeepDive(mockInput);
+    const { deepDive: result } = await generateDeepDive(mockInput);
 
     expect(result.support_resistance[2].strength).toBe("strong");
   });
@@ -1033,7 +1033,7 @@ describe("generateDeepDive", () => {
       3200,
     );
 
-    const result = await generateDeepDive({
+    const { deepDive: result } = await generateDeepDive({
       ...mockInput,
       historicalDataByTimeframe: {
         "1W": mockInput.historicalData,
@@ -1136,7 +1136,7 @@ describe("generateDeepDive", () => {
       },
     ];
 
-    const result = await generateDeepDive({
+    const { deepDive: result } = await generateDeepDive({
       ...mockInput,
       historicalDataByTimeframe: {
         "1W": mockInput.historicalData,

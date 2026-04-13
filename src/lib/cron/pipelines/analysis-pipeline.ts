@@ -55,6 +55,13 @@ import {
   computeSignalScorecard,
   type ScorecardInput,
 } from "@/lib/utils/signal-scorecard";
+import {
+  buildTriggerReport,
+  type TriggerReport,
+} from "@/lib/utils/trigger-engine";
+import { computeAlgoSR } from "@/lib/utils/algo-sr";
+import { computeVolumeProfile } from "@/lib/utils/volume-profile";
+import { DEEP_DIVE_PIPELINE_VERSION } from "@/lib/cron/pipelines/pipeline-version";
 
 const MIN_CORRELATION_CONFIDENCE = 0.5;
 const RECOMMEND_CONCURRENCY = 2;
@@ -207,7 +214,9 @@ let _lastSuccessfulCompletionAt: string | null = null;
  * Runs AFTER news and whale pipelines complete.
  * Returns count of analyses stored.
  */
-export async function runAnalysisPipeline(): Promise<number> {
+export async function runAnalysisPipeline(options?: {
+  force?: boolean;
+}): Promise<number> {
   console.log("[AnalysisPipeline] Starting...");
 
   // Step 0: Fetch macro context (VIX + FOMC) — used by recommendations + deep dives
@@ -290,7 +299,7 @@ export async function runAnalysisPipeline(): Promise<number> {
 
   // Story 17.5 — Staleness check: use last successful completion timestamp
   // instead of querying the cross_reference row (which may exist from a failed cycle)
-  if (_lastSuccessfulCompletionAt) {
+  if (_lastSuccessfulCompletionAt && !options?.force) {
     const newestNewsTime = recentNews[0]?.createdAt ?? "";
     const newestWhaleTime = recentWhales[0]?.createdAt ?? "";
 
@@ -298,13 +307,51 @@ export async function runAnalysisPipeline(): Promise<number> {
       newestNewsTime <= _lastSuccessfulCompletionAt &&
       newestWhaleTime <= _lastSuccessfulCompletionAt
     ) {
+      // Before skipping, check if any recent deep dives need a version upgrade
+      const oneDayAgo = new Date(
+        Date.now() - 24 * 60 * 60 * 1000,
+      ).toISOString();
+      const recentDivesForVersion = await db
+        .select({ inputRefs: analyses.inputRefs })
+        .from(analyses)
+        .where(
+          and(
+            gte(analyses.createdAt, oneDayAgo),
+            eq(analyses.type, "deep_dive"),
+          ),
+        );
+      const needsUpgrade = recentDivesForVersion.some((d) => {
+        try {
+          const refs = JSON.parse(d.inputRefs ?? "{}");
+          return (refs.pipelineVersion ?? 0) < DEEP_DIVE_PIPELINE_VERSION;
+        } catch {
+          return true;
+        }
+      });
+
+      if (!needsUpgrade) {
+        console.log(
+          `[AnalysisPipeline] No new data since last successful run (${_lastSuccessfulCompletionAt}) — skipping LLM calls`,
+        );
+        progress.complete(STEP_CROSS_REF);
+        progress.complete(STEP_RECOMMENDATIONS);
+        progress.complete(STEP_DEEP_DIVES);
+        return 0;
+      }
       console.log(
-        `[AnalysisPipeline] No new data since last successful run (${_lastSuccessfulCompletionAt}) — skipping LLM calls`,
+        `[AnalysisPipeline] No new data, but ${
+          recentDivesForVersion.filter((d) => {
+            try {
+              return (
+                (JSON.parse(d.inputRefs ?? "{}").pipelineVersion ?? 0) <
+                DEEP_DIVE_PIPELINE_VERSION
+              );
+            } catch {
+              return true;
+            }
+          }).length
+        } deep dive(s) need upgrade to v${DEEP_DIVE_PIPELINE_VERSION} — continuing pipeline`,
       );
-      progress.complete(STEP_CROSS_REF);
-      progress.complete(STEP_RECOMMENDATIONS);
-      progress.complete(STEP_DEEP_DIVES);
-      return 0;
     }
   }
 
@@ -583,6 +630,35 @@ export async function runAnalysisPipeline(): Promise<number> {
             );
             pcRatio = totalCallVol > 0 ? totalPutVol / totalCallVol : null;
           }
+          // Story 48.6 — compute trigger report from 3M daily candles
+          let triggerReport: TriggerReport | null = null;
+          if (candles3M.length >= 10 && marketData) {
+            const vp = computeVolumeProfile(candles3M);
+            const algoSRLevels = computeAlgoSR({
+              candles: candles3M,
+              currentPrice: marketData.price,
+              volumeProfile: vp,
+              oiWalls: chain?.oiWalls ?? null,
+              maxPain: chain?.maxPain ?? null,
+              gex:
+                (chain?.gex as
+                  | import("@/lib/utils/gex-calculator").GEXSummary
+                  | null) ?? null,
+            });
+            triggerReport = buildTriggerReport({
+              ticker,
+              candles: candles3M,
+              algoSRLevels,
+              volumeProfile: vp,
+              dailyPatterns: indicatorReport ?? null, // 3M daily candle patterns
+              htfPatterns: [
+                indicatorReportsByTimeframe?.["1W"],
+                indicatorReportsByTimeframe?.["1M"],
+                indicatorReportsByTimeframe?.["3M"],
+              ].filter((r): r is NonNullable<typeof r> => r != null),
+            });
+          }
+
           const scorecardInput: ScorecardInput = {
             whaleDirection: smartMoneyToDirection(
               correlation.smart_money_signal,
@@ -594,6 +670,7 @@ export async function runAnalysisPipeline(): Promise<number> {
             gexPositioning: chain?.gex?.dealerPositioning ?? null,
             shortInterest: siData,
             deepDiveSummary,
+            triggerReport,
           };
           const scorecard = computeSignalScorecard(scorecardInput);
 
@@ -628,6 +705,7 @@ export async function runAnalysisPipeline(): Promise<number> {
             cascadeContext: cascadeCtx,
             deepDiveSummary,
             scorecard,
+            triggerReport,
           });
           if (marketData) {
             try {
@@ -655,6 +733,7 @@ export async function runAnalysisPipeline(): Promise<number> {
               correlationConfidence: correlation.correlation_confidence,
               primaryWhaleId: whaleRefMetadata.primaryWhaleId,
               whaleIds: whaleRefMetadata.whaleIds,
+              triggerReport,
             }),
             output: JSON.stringify(recommendation),
             confidence: recommendation.confidence,
@@ -831,6 +910,36 @@ export async function runAnalysisPipeline(): Promise<number> {
             const fbSiData = await getOrFetchShortInterest(ticker).catch(
               () => null,
             );
+
+            // Story 48.6 — trigger report for fallback recs
+            let triggerReportFb: TriggerReport | null = null;
+            if (candles3M.length >= 10 && marketData) {
+              const vpFb = computeVolumeProfile(candles3M);
+              const algoSRFb = computeAlgoSR({
+                candles: candles3M,
+                currentPrice: marketData.price,
+                volumeProfile: vpFb,
+                oiWalls: chain?.oiWalls ?? null,
+                maxPain: chain?.maxPain ?? null,
+                gex:
+                  (chain?.gex as
+                    | import("@/lib/utils/gex-calculator").GEXSummary
+                    | null) ?? null,
+              });
+              triggerReportFb = buildTriggerReport({
+                ticker,
+                candles: candles3M,
+                algoSRLevels: algoSRFb,
+                volumeProfile: vpFb,
+                dailyPatterns: indicatorReport ?? null, // 3M daily candle patterns
+                htfPatterns: [
+                  indicatorReportsByTimeframe?.["1W"],
+                  indicatorReportsByTimeframe?.["1M"],
+                  indicatorReportsByTimeframe?.["3M"],
+                ].filter((r): r is NonNullable<typeof r> => r != null),
+              });
+            }
+
             const scorecardFb = computeSignalScorecard({
               whaleDirection: uncorr.type === "put" ? "bearish" : "bullish",
               whalePremium: uncorr.premium,
@@ -840,6 +949,7 @@ export async function runAnalysisPipeline(): Promise<number> {
               gexPositioning: chain?.gex?.dealerPositioning ?? null,
               shortInterest: fbSiData,
               deepDiveSummary: deepDiveSummaryFb,
+              triggerReport: triggerReportFb,
             });
 
             const recommendation = await generateRecommendation(
@@ -877,6 +987,7 @@ export async function runAnalysisPipeline(): Promise<number> {
                 ),
                 deepDiveSummary: deepDiveSummaryFb,
                 scorecard: scorecardFb,
+                triggerReport: triggerReportFb,
               },
             );
 
@@ -1027,12 +1138,12 @@ export async function runAnalysisPipeline(): Promise<number> {
   }
 
   // Deep dive dedup: skip tickers that already have a deep dive from the last 4 hours
-  if (deepDiveQueue.length > 0) {
+  if (deepDiveQueue.length > 0 && !options?.force) {
     const fourHoursAgo = new Date(
       Date.now() - 4 * 60 * 60 * 1000,
     ).toISOString();
     const recentDives = await db
-      .select({ output: analyses.output })
+      .select({ output: analyses.output, inputRefs: analyses.inputRefs })
       .from(analyses)
       .where(
         and(
@@ -1048,7 +1159,10 @@ export async function runAnalysisPipeline(): Promise<number> {
         if (!parsed.ticker) {
           continue;
         }
-        if (isTimeframeAwareDeepDiveOutput(dd.output)) {
+        const refs = JSON.parse(dd.inputRefs ?? "{}");
+        const currentVersion =
+          (refs.pipelineVersion ?? 0) >= DEEP_DIVE_PIPELINE_VERSION;
+        if (isTimeframeAwareDeepDiveOutput(dd.output) && currentVersion) {
           recentDiveTickers.add(parsed.ticker);
         } else {
           staleRecentDiveCount += 1;
@@ -1144,45 +1258,50 @@ export async function runAnalysisPipeline(): Promise<number> {
             }
           }
 
-          const deepDive = await generateDeepDive({
-            ticker: item.ticker,
-            whaleTrade: item.whaleTrade,
-            historicalData,
-            historicalDataByTimeframe: {
-              "1D": historicalData1D,
-              "1W": historicalData1W,
-              "1M": historicalData1M,
-              "3M": historicalData3M,
-              "6M": historicalData6M,
-              "1Y": historicalData1Y,
-            },
-            optionsChain: chain,
-            currentPrice,
-            correlatedEvent: item.correlatedEvent,
-            newsContext,
-            macroContext: macroBase,
-            optionsAnalytics: chain
-              ? {
-                  maxPain: chain.maxPain ?? null,
-                  oiWalls: chain.oiWalls ?? null,
-                  ivRvSpread: ddIvRvSpread,
-                  realizedVol: ddRealizedVol,
-                  gex: chain.gex ?? null,
-                }
-              : undefined,
-            shortInterest: await getOrFetchShortInterest(item.ticker).catch(
-              () => null,
-            ),
-            cascadeContext: detectCascade(
-              item.ticker,
-              NEXUS_COMPANIES,
-              recentNexusEarnings,
-            ),
-          });
+          const { deepDive, triggerReport: ddTriggerReport } =
+            await generateDeepDive({
+              ticker: item.ticker,
+              whaleTrade: item.whaleTrade,
+              historicalData,
+              historicalDataByTimeframe: {
+                "1D": historicalData1D,
+                "1W": historicalData1W,
+                "1M": historicalData1M,
+                "3M": historicalData3M,
+                "6M": historicalData6M,
+                "1Y": historicalData1Y,
+              },
+              optionsChain: chain,
+              currentPrice,
+              correlatedEvent: item.correlatedEvent,
+              newsContext,
+              macroContext: macroBase,
+              optionsAnalytics: chain
+                ? {
+                    maxPain: chain.maxPain ?? null,
+                    oiWalls: chain.oiWalls ?? null,
+                    ivRvSpread: ddIvRvSpread,
+                    realizedVol: ddRealizedVol,
+                    gex: chain.gex ?? null,
+                  }
+                : undefined,
+              shortInterest: await getOrFetchShortInterest(item.ticker).catch(
+                () => null,
+              ),
+              cascadeContext: detectCascade(
+                item.ticker,
+                NEXUS_COMPANIES,
+                recentNexusEarnings,
+              ),
+            });
 
           await db.insert(analyses).values({
             type: "deep_dive",
-            inputRefs: JSON.stringify({ ticker: item.ticker }),
+            inputRefs: JSON.stringify({
+              ticker: item.ticker,
+              triggerReport: ddTriggerReport,
+              pipelineVersion: DEEP_DIVE_PIPELINE_VERSION,
+            }),
             output: JSON.stringify(deepDive),
             confidence: null,
           });

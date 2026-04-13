@@ -6,6 +6,8 @@ import {
   type SignalScorecard,
   formatScorecardForPrompt,
 } from "@/lib/utils/signal-scorecard";
+import type { TriggerReport } from "@/lib/utils/trigger-engine";
+import { formatTriggerReportForPrompt } from "@/lib/utils/trigger-engine";
 
 // ---------- System Instruction ----------
 
@@ -32,13 +34,14 @@ Rules:
     - Always state the whale's DTE and what timeframe it implies in your thesis. If the whale's option has already expired or expires within 1 day, note this is an extremely aggressive short-term play and the recommended strategy should reflect that urgency.
 15. EARNINGS CASCADE: When upstream nexus companies (supply chain bellwethers) have recently reported earnings, a cascade context section will be provided. Use this to adjust your directional confidence (strong upstream beat = bullish tailwind), factor cascade timing into entry recommendation (immediate phase = stronger signal), and note cascade risk in risk factors (e.g. "upstream catalyst may already be priced in if >48h old"). Do NOT double-count cascade with earningsRisk — cascade is about UPSTREAM events, earningsRisk is about THIS ticker's own upcoming earnings.
 16. CRITICAL — EVIDENCE HIERARCHY: Form your directional opinion using this evidence hierarchy (most to least weight):
-    1. Multi-timeframe technical trend consensus (macro + micro patterns agreeing across timeframes)
-    2. Options microstructure (P/C ratio, IV skew, GEX positioning, OI walls)
-    3. Deep dive risk assessment and sentiment (when provided)
-    4. Macro context (VIX regime, FOMC, earnings proximity)
-    5. Short interest and institutional positioning
-    6. Whale trade direction (treat as ONE data point, NOT the conclusion)
-    If items 1–3 conflict with the whale's direction, your recommendation SHOULD disagree with the whale. State this explicitly in your thesis.
+    1. Daily chart triggers (1D level interactions with structure + HTF alignment — when provided with score ≥55, this is the strongest directional signal)
+    2. Multi-timeframe technical trend consensus (macro + micro patterns agreeing across timeframes)
+    3. Options microstructure (P/C ratio, IV skew, GEX positioning, OI walls)
+    4. Deep dive risk assessment and sentiment (when provided)
+    5. Macro context (VIX regime, FOMC, earnings proximity)
+    6. Short interest and institutional positioning
+    7. Whale trade direction (treat as ONE data point, NOT the conclusion)
+    If items 1–4 conflict with the whale's direction, your recommendation SHOULD disagree with the whale. State this explicitly in your thesis.
 17. CRITICAL — WHALE SKEPTICISM: Do NOT assume the whale is correct. Whale trades may represent:
     - Short covering (buying calls to close a short position — NOT bullish conviction)
     - Portfolio hedging (buying puts as insurance — does NOT mean bearish outlook)
@@ -101,6 +104,7 @@ export function buildTradeAnalyzerPrompt(
   cascadeContext?: CascadeContext | null,
   deepDiveSummary?: DeepDiveSummary | null,
   scorecard?: SignalScorecard | null,
+  triggerReport?: TriggerReport | null,
 ): string {
   const todayStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/New_York",
@@ -330,6 +334,14 @@ Market Data for ${ticker}:
     prompt += `\n\n## Earnings Cascade Context`;
     prompt += `\n${cascadeContext.promptSection}`;
     prompt += `\nFactor this upstream earnings cascade into your thesis and confidence assessment. The cascade signal is ${cascadeContext.cascadeDirection} with strength ${cascadeContext.cascadeStrength.toFixed(2)}.`;
+  }
+
+  // Story 48.7 — Daily chart trigger assessment (highest-weight evidence)
+  if (triggerReport) {
+    const triggerBlock = formatTriggerReportForPrompt(triggerReport);
+    if (triggerBlock) {
+      prompt += `\n\n${triggerBlock}`;
+    }
   }
 
   prompt += `\n\nGenerate a trade recommendation with risk analysis.`;

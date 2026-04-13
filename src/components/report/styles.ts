@@ -23,6 +23,7 @@ export const signalColors = {
   bullish: { bg: "#22c55e20", border: "#22c55e", text: "#22c55e" },
   bearish: { bg: "#ef444420", border: "#ef4444", text: "#ef4444" },
   neutral: { bg: "#71717a20", border: "#71717a", text: "#71717a" },
+  caution: { bg: "#f59e0b20", border: "#f59e0b", text: "#f59e0b" },
 } as const;
 
 export const riskColors = {

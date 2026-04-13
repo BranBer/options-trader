@@ -5,6 +5,7 @@ import type { DeepDiveAnalysis, TradeRecommendation } from "@/types/analysis";
 import type { WhaleAlert } from "@/types/whale";
 import type { ActiveCascadeEntry } from "@/app/api/analysis/active-cascades/route";
 import type { CompositeConfidenceBreakdown } from "@/lib/utils/composite-confidence";
+import type { TriggerReport } from "@/lib/utils/trigger-engine";
 import type { ReportData } from "@/types/report";
 import {
   fetchAllTimeframeCandles,
@@ -32,6 +33,7 @@ export interface ExportPdfInput {
   confidenceBreakdown: CompositeConfidenceBreakdown | null;
   whaleAlert: WhaleAlert | null;
   cascadeContext: ActiveCascadeEntry[] | null;
+  triggerReport?: TriggerReport | null;
 }
 
 export interface UseExportPdfReturn {

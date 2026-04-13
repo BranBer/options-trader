@@ -146,6 +146,7 @@ function makeReportData(overrides?: Partial<ReportData>): ReportData {
       currentPrice: 0,
       earningsDate: null,
     },
+    triggerReport: null,
     ...overrides,
   };
 }

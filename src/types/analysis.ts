@@ -3,7 +3,108 @@ import { ANALYSIS_TIMEFRAMES } from "@/lib/utils/chart-timeframes";
 import type { MarketSnapshot, OptionsChainSummary } from "@/types/market";
 import type { WhaleAlertRow } from "@/types/whale";
 
-// --- Cross-Reference Correlation ---
+// ── Trigger Detection (Epic 48) ────────────────────────────────────────
+
+export const swingPointSchema = z.object({
+  type: z.enum(["high", "low"]),
+  price: z.number(),
+  time: z.number(),
+  index: z.number().int(),
+});
+
+export const swingStructureSchema = z.object({
+  swings: z.array(swingPointSchema),
+  structure: z.enum(["bullish", "bearish", "consolidation", "transition"]),
+  structureShift: z
+    .object({
+      from: z.enum(["bullish", "bearish", "consolidation"]),
+      at: swingPointSchema,
+    })
+    .nullable(),
+  lastHigherLow: swingPointSchema.nullable(),
+  lastLowerHigh: swingPointSchema.nullable(),
+});
+
+const candleSnapshotSchema = z.object({
+  time: z.number(),
+  open: z.number(),
+  high: z.number(),
+  low: z.number(),
+  close: z.number(),
+});
+
+export const levelInteractionSchema = z.object({
+  level: z.number(),
+  levelLabel: z.string(),
+  type: z.enum([
+    "reclaim",
+    "rejection",
+    "breakdown",
+    "bounce",
+    "test",
+    "acceptance_above",
+    "acceptance_below",
+  ]),
+  candle: candleSnapshotSchema,
+  confirmationCandle: z
+    .object({ time: z.number(), close: z.number() })
+    .optional(),
+  wickOnly: z.boolean(),
+  distance: z.number(),
+  confluence: z.number().int().min(1).max(5).optional(),
+});
+
+export const scoreBreakdownSchema = z.object({
+  levelInteraction: z.number().min(0).max(40),
+  structureAlignment: z.number().min(0).max(25),
+  contextAlignment: z.number().min(0).max(20),
+  patternSupport: z.number().min(0).max(15),
+});
+
+export const triggerResultSchema = z.object({
+  direction: z.enum(["bullish", "bearish", "neutral"]),
+  classification: z.enum(["trigger", "weak_trigger", "setup", "no_trigger"]),
+  score: z.number().min(0).max(100),
+  scoreBreakdown: scoreBreakdownSchema,
+  interaction: levelInteractionSchema.nullable(),
+  structureContext: z.enum([
+    "bullish",
+    "bearish",
+    "consolidation",
+    "transition",
+  ]),
+  htfAlignment: z.enum(["aligned", "countertrend", "conflicted"]),
+  confirmationType: z.enum([
+    "close_above",
+    "close_below",
+    "hold",
+    "follow_through",
+    "momentum_expansion",
+    "none",
+  ]),
+  confidence: z.enum(["high", "moderate", "low"]),
+  summary: z.string(),
+});
+
+export const triggerReportSchema = z.object({
+  ticker: z.string(),
+  computedAt: z.string(),
+  primaryTrigger: triggerResultSchema.nullable(),
+  secondaryTriggers: z.array(triggerResultSchema),
+  activeLevels: z.array(levelInteractionSchema),
+  swingStructure: swingStructureSchema,
+  overallAssessment: z.enum([
+    "actionable_bullish",
+    "actionable_bearish",
+    "setup_only",
+    "no_trigger",
+    "conflicted",
+  ]),
+});
+
+export type ZodTriggerReport = z.infer<typeof triggerReportSchema>;
+
+// ── Cross-Reference Correlation ────────────────────────────────────────
 export const correlationSchema = z.object({
   whale_trade: z.object({
     ticker: z.string(),
@@ -105,6 +206,16 @@ export const tradeRecommendationSchema = z.object({
     whale_position_size: z.string(),
     similarity_note: z.string(),
   }),
+  trigger_context: z
+    .object({
+      acted_on: z.boolean(),
+      trigger_direction: z.enum(["bullish", "bearish", "neutral"]).optional(),
+      trigger_score: z.number().min(0).max(100).optional(),
+      level_cited: z.string().optional(),
+      rationale: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
   disclaimer: z.string(),
 });
 

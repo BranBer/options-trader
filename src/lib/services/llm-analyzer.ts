@@ -58,6 +58,7 @@ import { computeAlgoSR } from "@/lib/utils/algo-sr";
 import { computeIVSkew, computeOISummary } from "@/lib/utils/options-analytics";
 import { getUpcomingCatalysts } from "@/lib/utils/economic-calendar";
 import type { SignalHierarchyInput } from "@/lib/utils/signal-hierarchy";
+import { buildTriggerReport } from "@/lib/utils/trigger-engine";
 
 export interface ClassifyNewsConfig {
   systemInstruction?: string;
@@ -636,6 +637,8 @@ interface MarketDataForRecommendation {
   deepDiveSummary?: import("@/types/analysis").DeepDiveSummary | null;
   /** Story 39.11 — Pre-computed signal scorecard injected at top of prompt */
   scorecard?: import("@/lib/utils/signal-scorecard").SignalScorecard | null;
+  /** Story 48.6 — Daily chart trigger report */
+  triggerReport?: import("@/lib/utils/trigger-engine").TriggerReport | null;
 }
 
 export async function generateRecommendation(
@@ -664,6 +667,7 @@ export async function generateRecommendation(
     marketData.cascadeContext,
     marketData.deepDiveSummary,
     marketData.scorecard,
+    marketData.triggerReport,
   );
 
   const result = await callLLMWithRetry(
@@ -1114,6 +1118,24 @@ export async function generateDeepDive(
   // Economic catalyst calendar
   signalHierarchy.catalysts = getUpcomingCatalysts(14);
 
+  // Story 48.6 — Compute trigger report from daily candles + pre-computed algo-SR/volume-profile
+  let triggerReport: import("@/lib/utils/trigger-engine").TriggerReport | null =
+    null;
+  if (profileCandles.length >= 10) {
+    triggerReport = buildTriggerReport({
+      ticker,
+      candles: profileCandles,
+      algoSRLevels: signalHierarchy.algoSR ?? undefined,
+      volumeProfile: signalHierarchy.volumeProfile,
+      dailyPatterns: computedIndicators["3M"] ?? null, // daily candle patterns
+      htfPatterns: [
+        computedIndicators["1W"],
+        computedIndicators["1M"],
+        computedIndicators["3M"],
+      ].filter((r): r is NonNullable<typeof r> => r != null),
+    });
+  }
+
   const prompt = buildDeepDivePrompt({
     ticker,
     whaleTradeJson: JSON.stringify(input.whaleTrade, null, 2),
@@ -1133,6 +1155,7 @@ export async function generateDeepDive(
     shortInterest: input.shortInterest,
     cascadeContext: input.cascadeContext,
     signalHierarchy,
+    triggerReport,
   });
 
   const result = await callLLMWithRetry(
@@ -1157,7 +1180,7 @@ export async function generateDeepDive(
       `patterns=${normalized.technical_patterns.length}, S/R=${normalized.support_resistance.length}`,
   );
 
-  return normalized;
+  return { deepDive: normalized, triggerReport };
 }
 
 // ============================================================

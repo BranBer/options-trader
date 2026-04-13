@@ -3,6 +3,7 @@ import type {
   TechnicalPattern,
   TradeRecommendation,
 } from "@/types/analysis";
+import type { TriggerReport } from "@/lib/utils/trigger-engine";
 import type { WhaleAlert } from "@/types/whale";
 import type { ActiveCascadeEntry } from "@/app/api/analysis/active-cascades/route";
 import type { Candle } from "@/lib/utils/technical-indicators";
@@ -49,4 +50,6 @@ export interface ReportData {
   chartScreenshots: Record<string, string>;
   /** Epic 46 — enriched market structure data */
   enrichedData: EnrichedMarketData;
+  /** Epic 48 — daily chart trigger assessment */
+  triggerReport: TriggerReport | null;
 }

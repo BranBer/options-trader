@@ -24,6 +24,7 @@ import {
   isOverBudget,
   recordApiCall,
 } from "@/lib/utils/api-budget";
+import { DEEP_DIVE_PIPELINE_VERSION } from "@/lib/cron/pipelines/pipeline-version";
 import { getEarningsProximity } from "@/lib/utils/earnings-proximity";
 import { getFOMCProximity } from "@/lib/utils/fomc-calendar";
 import { buildVIXContext } from "@/lib/utils/vix-regimes";
@@ -492,8 +493,9 @@ export async function getAnalyzedEventIds(
 async function persistEventTickerAnalysis(args: {
   analysis: EventTickerAnalysis;
   confidence: number;
+  triggerReport?: import("@/lib/utils/trigger-engine").TriggerReport | null;
 }) {
-  const { analysis, confidence } = args;
+  const { analysis, confidence, triggerReport: ddTriggerReport } = args;
   const { eventId, ticker, marketSnapshot, deepDive, recommendation } =
     analysis;
 
@@ -511,11 +513,18 @@ async function persistEventTickerAnalysis(args: {
   }
 
   const inputRefs = JSON.stringify({ eventId, ticker, source: "event_ticker" });
+  const deepDiveInputRefs = JSON.stringify({
+    eventId,
+    ticker,
+    source: "event_ticker",
+    triggerReport: ddTriggerReport ?? null,
+    pipelineVersion: DEEP_DIVE_PIPELINE_VERSION,
+  });
 
   await db.insert(analyses).values({
     type: "deep_dive",
     source: "event_ticker",
-    inputRefs,
+    inputRefs: deepDiveInputRefs,
     output: JSON.stringify(deepDive),
     confidence,
   });
@@ -610,7 +619,7 @@ async function analyzeSingleTicker(args: {
     whaleAlert: primaryWhale,
   });
 
-  const deepDive = await generateDeepDive({
+  const { deepDive, triggerReport: ddTriggerReport } = await generateDeepDive({
     ticker,
     whaleTrade: {
       ticker,
@@ -677,6 +686,7 @@ async function analyzeSingleTicker(args: {
   await persistEventTickerAnalysis({
     analysis: eventAnalysis,
     confidence: normalizedRecommendation.confidence,
+    triggerReport: ddTriggerReport,
   });
 
   return eventAnalysis;

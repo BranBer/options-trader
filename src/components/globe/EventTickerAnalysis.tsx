@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useState, useCallback } from "react";
+import { RefreshCw, Download, Loader2, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
   formatPremium,
 } from "@/lib/utils/formatters";
 import type { EventTickerAnalysis } from "@/types/analysis";
+import { useExportPdf, type ExportProgress } from "@/hooks/useExportPdf";
 
 export default function EventTickerAnalysisPanel({
   analyses,
@@ -51,12 +52,12 @@ export default function EventTickerAnalysisPanel({
           />
         ) : (
           <Tabs defaultValue={analyses[0].ticker}>
-            <TabsList className="mb-4 flex h-auto max-w-full flex-wrap justify-start gap-1 overflow-visible bg-muted/70 p-1">
+            <TabsList className="mb-4 flex h-auto max-w-full flex-wrap justify-start gap-1 bg-muted/70 p-1">
               {analyses.map((analysis) => (
                 <TabsTrigger
                   key={analysis.ticker}
                   value={analysis.ticker}
-                  className="h-8! flex-none! px-3 py-1"
+                  className="flex-none px-3 py-1 text-sm"
                 >
                   {analysis.ticker}
                 </TabsTrigger>
@@ -81,6 +82,14 @@ export default function EventTickerAnalysisPanel({
   );
 }
 
+const PROGRESS_LABELS: Record<ExportProgress, string> = {
+  idle: "",
+  aggregating: "Preparing data…",
+  "capturing-charts": "Rendering charts…",
+  "generating-pdf": "Generating PDF…",
+  complete: "Complete!",
+};
+
 function TickerAnalysisCard({
   analysis,
   onReload,
@@ -89,6 +98,18 @@ function TickerAnalysisCard({
   onReload?: () => Promise<void>;
 }) {
   const [reloading, setReloading] = useState(false);
+
+  const { exportPdf, isExporting, progress } = useExportPdf(analysis.ticker);
+
+  const handleExport = useCallback(() => {
+    void exportPdf({
+      deepDive: analysis.deepDive,
+      recommendation: analysis.recommendation,
+      confidenceBreakdown: null,
+      whaleAlert: null,
+      cascadeContext: null,
+    });
+  }, [analysis.deepDive, analysis.recommendation, exportPdf]);
 
   const handleReload = async () => {
     if (!onReload) return;
@@ -116,21 +137,40 @@ function TickerAnalysisCard({
         <Badge variant="outline" className="font-mono">
           {analysis.ticker}
         </Badge>
-        {onReload && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs ml-auto"
-            disabled={reloading}
-            onClick={() => void handleReload()}
-            aria-label={`Reload analysis for ${analysis.ticker}`}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            disabled={isExporting}
+            aria-label={`Export PDF report for ${analysis.ticker}`}
+            className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <RefreshCw
-              className={`h-3 w-3 mr-1 ${reloading ? "animate-spin" : ""}`}
-            />
-            {reloading ? "Reloading..." : "Reload"}
-          </Button>
-        )}
+            {progress === "complete" ? (
+              <Check className="h-3.5 w-3.5 text-green-500" />
+            ) : isExporting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            {isExporting || progress === "complete"
+              ? PROGRESS_LABELS[progress]
+              : "Export PDF"}
+          </button>
+          {onReload && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              disabled={reloading}
+              onClick={() => void handleReload()}
+              aria-label={`Reload analysis for ${analysis.ticker}`}
+            >
+              <RefreshCw
+                className={`h-3 w-3 mr-1 ${reloading ? "animate-spin" : ""}`}
+              />
+              {reloading ? "Reloading..." : "Reload"}
+            </Button>
+          )}
+        </div>
         <Badge variant={recommendationDirectionVariant}>
           {recommendation.direction}
         </Badge>
@@ -480,13 +520,19 @@ function TickerAnalysisCard({
               <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
                 Risk Factors
               </p>
-              <div className="flex flex-wrap gap-2">
+              <ul className="space-y-1.5">
                 {recommendation.risk_factors.map((risk) => (
-                  <Badge key={risk} variant="outline">
-                    {risk}
-                  </Badge>
+                  <li
+                    key={risk}
+                    className="flex gap-2 rounded-md border px-2.5 py-1.5 text-xs leading-relaxed"
+                  >
+                    <span className="mt-0.5 shrink-0 text-muted-foreground">
+                      &bull;
+                    </span>
+                    <span>{risk}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           )}
         </div>
@@ -532,13 +578,19 @@ function TickerAnalysisCard({
               <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
                 Key Risks
               </p>
-              <div className="flex flex-wrap gap-2">
+              <ul className="space-y-1.5">
                 {deepDive.risk_assessment.key_risks.map((risk) => (
-                  <Badge key={risk} variant="outline">
-                    {risk}
-                  </Badge>
+                  <li
+                    key={risk}
+                    className="flex gap-2 rounded-md border px-2.5 py-1.5 text-xs leading-relaxed"
+                  >
+                    <span className="mt-0.5 shrink-0 text-muted-foreground">
+                      &bull;
+                    </span>
+                    <span>{risk}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           ) : null}
 

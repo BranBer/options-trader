@@ -5,6 +5,8 @@ import type { ShortInterestData } from "@/lib/services/market-fetcher";
 import type { CascadeContext } from "@/lib/utils/cascade-detector";
 import type { SignalHierarchyInput } from "@/lib/utils/signal-hierarchy";
 import { buildSignalHierarchyPrompt } from "@/lib/utils/signal-hierarchy";
+import type { TriggerReport } from "@/lib/utils/trigger-engine";
+import { formatTriggerReportForPrompt } from "@/lib/utils/trigger-engine";
 
 // ---------- System Instruction ----------
 
@@ -92,6 +94,8 @@ interface DeepDivePromptInput {
   shortInterest?: ShortInterestData | null;
   cascadeContext?: CascadeContext | null;
   signalHierarchy?: SignalHierarchyInput | null;
+  /** Story 48.8 — Daily chart trigger report for context */
+  triggerReport?: TriggerReport | null;
 }
 
 function renderIndicatorReport(report: IndicatorPatternReport): string {
@@ -154,6 +158,15 @@ ${input.optionsChainSummary}`;
     const hierarchySection = buildSignalHierarchyPrompt(input.signalHierarchy);
     if (hierarchySection) {
       prompt += `\n\n${hierarchySection}`;
+    }
+  }
+
+  // Story 48.8 — Daily chart trigger context (informational, not mandate)
+  if (input.triggerReport) {
+    const triggerBlock = formatTriggerReportForPrompt(input.triggerReport);
+    if (triggerBlock) {
+      prompt += `\n\n${triggerBlock}`;
+      prompt += `\nIncorporate this daily chart trigger context into your technical analysis. Note whether the trigger aligns with or contradicts the broader multi-timeframe picture.`;
     }
   }
 

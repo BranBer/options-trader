@@ -1,6 +1,11 @@
 "use client";
 
-import { useQuery, useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import {
+  useQuery,
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { NexusDriftAnalysis } from "@/types/analysis";
 import type { ActiveCascadesResponse } from "@/app/api/analysis/active-cascades/route";
 import type { EconomicEvent } from "@/lib/utils/economic-calendar";
@@ -256,6 +261,38 @@ export function useNexusDriftAnalysis() {
         );
       }
       return res.json();
+    },
+  });
+}
+
+export function useRefreshDeepDive(ticker: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    {
+      success: boolean;
+      analysis: unknown;
+      triggerReport: unknown;
+      createdAt: string;
+    },
+    Error
+  >({
+    mutationKey: ["refreshDeepDive", ticker],
+    mutationFn: async () => {
+      const res = await fetch("/api/analysis/deep-dive/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          body.error ?? `Deep dive refresh failed (${res.status})`,
+        );
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["deepDive", ticker] });
     },
   });
 }

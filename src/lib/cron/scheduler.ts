@@ -118,7 +118,9 @@ export async function runPipeline(
 
   try {
     // Stage 3-5: Analysis (pipeline updates progress internally)
-    const analysisCount = await runAnalysisPipeline();
+    const analysisCount = await runAnalysisPipeline(
+      trigger === "manual" ? { force: true } : undefined,
+    );
     console.log(
       `[Pipeline] Phase 2 complete: ${analysisCount} analyses stored`,
     );

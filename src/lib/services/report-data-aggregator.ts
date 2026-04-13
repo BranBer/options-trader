@@ -11,6 +11,7 @@ import type {
 import type { WhaleAlert } from "@/types/whale";
 import type { ActiveCascadeEntry } from "@/app/api/analysis/active-cascades/route";
 import type { CompositeConfidenceBreakdown } from "@/lib/utils/composite-confidence";
+import type { TriggerReport } from "@/lib/utils/trigger-engine";
 import type { Candle } from "@/lib/utils/technical-indicators";
 import type {
   AnalysisTimeframe,
@@ -152,6 +153,8 @@ export interface AggregateReportInput {
   earningsDate?: string | null;
   /** Live catalyst data fetched from /api/calendar/upcoming — bypasses client-side fallback to hardcoded dates */
   liveCatalysts?: CatalystSummary;
+  /** Epic 48 — trigger report computed during pipeline analysis */
+  triggerReport?: TriggerReport | null;
 }
 
 /** Combined options data fetched from the API route */
@@ -313,5 +316,6 @@ export function aggregateReportData(input: AggregateReportInput): ReportData {
     whaleAlert: input.whaleAlert,
     chartScreenshots: {}, // Populated later by chart capture utility
     enrichedData,
+    triggerReport: input.triggerReport ?? null,
   };
 }

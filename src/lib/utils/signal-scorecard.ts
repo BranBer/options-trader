@@ -9,6 +9,7 @@
 import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
 import type { ShortInterestData } from "@/lib/services/market-fetcher";
 import type { DeepDiveSummary } from "@/types/analysis";
+import type { TriggerReport } from "@/lib/utils/trigger-engine";
 
 // ---------- Types ----------
 
@@ -39,6 +40,8 @@ export interface ScorecardInput {
   gexPositioning?: string | null;
   shortInterest?: ShortInterestData | null;
   deepDiveSummary?: DeepDiveSummary | null;
+  /** Story 48.9 — Daily chart trigger report */
+  triggerReport?: TriggerReport | null;
 }
 
 // ---------- Core computation ----------
@@ -47,6 +50,32 @@ export function computeSignalScorecard(input: ScorecardInput): SignalScorecard {
   const bullishSignals: string[] = [];
   const bearishSignals: string[] = [];
   const neutralSignals: string[] = [];
+
+  // 0. Daily chart trigger (highest weight — Story 48.9)
+  if (input.triggerReport?.primaryTrigger) {
+    const trigger = input.triggerReport.primaryTrigger;
+    const assessment = input.triggerReport.overallAssessment;
+    const scoreStr = `score ${trigger.score}/100`;
+    const classLabel = trigger.classification.replace("_", " ");
+
+    if (assessment === "actionable_bullish") {
+      bullishSignals.push(
+        `Daily trigger: ${classLabel} BULLISH at $${trigger.interaction?.level.toFixed(2) ?? "?"} (${scoreStr}, ${trigger.htfAlignment} HTF)`,
+      );
+    } else if (assessment === "actionable_bearish") {
+      bearishSignals.push(
+        `Daily trigger: ${classLabel} BEARISH at $${trigger.interaction?.level.toFixed(2) ?? "?"} (${scoreStr}, ${trigger.htfAlignment} HTF)`,
+      );
+    } else if (assessment === "conflicted") {
+      neutralSignals.push(
+        `Daily trigger: conflicted — ${trigger.direction} ${classLabel} (${scoreStr}) with opposing signals`,
+      );
+    } else if (assessment === "setup_only") {
+      neutralSignals.push(
+        `Daily trigger: setup (not yet confirmed) — ${trigger.direction} at $${trigger.interaction?.level.toFixed(2) ?? "?"} (${scoreStr})`,
+      );
+    }
+  }
 
   // 1. Whale trade
   const premiumStr =
