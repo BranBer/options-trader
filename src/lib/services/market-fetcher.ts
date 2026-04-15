@@ -214,64 +214,81 @@ export async function fetchOptionsChain(
 
 // ---------- Historical OHLCV data ----------
 
+const HIST_MAX_RETRIES = 3;
+const HIST_BASE_DELAY_MS = 1500;
+
 export async function fetchHistoricalData(
   ticker: string,
   period: string = "3mo",
 ): Promise<CandleData[]> {
-  try {
-    // Map period to interval: short periods get intraday, longer get daily
-    const interval = period === "1d" ? "5m" : period === "1wk" ? "1h" : "1d";
+  // Map period to interval: short periods get intraday, longer get daily
+  const interval = period === "1d" ? "5m" : period === "1wk" ? "1h" : "1d";
 
-    // Calculate period1 from period string
-    const now = new Date();
-    const periodMap: Record<string, number> = {
-      "1d": 1,
-      "1wk": 7,
-      "1mo": 30,
-      "3mo": 90,
-      "6mo": 180,
-      "1y": 365,
-    };
-    const days = periodMap[period] ?? 90;
-    const period1 = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  // Calculate period1 from period string
+  const now = new Date();
+  const periodMap: Record<string, number> = {
+    "1d": 1,
+    "1wk": 7,
+    "1mo": 30,
+    "3mo": 90,
+    "6mo": 180,
+    "1y": 365,
+  };
+  const days = periodMap[period] ?? 90;
+  const period1 = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-    const result = await yf.chart(ticker, {
-      period1,
-      period2: now,
-      interval,
-    });
+  for (let attempt = 1; attempt <= HIST_MAX_RETRIES; attempt++) {
+    try {
+      const result = await yf.chart(ticker, {
+        period1,
+        period2: now,
+        interval,
+      });
 
-    if (!result?.quotes?.length) {
-      console.warn(`[market-fetcher] No historical data for ${ticker}`);
+      if (!result?.quotes?.length) {
+        console.warn(`[market-fetcher] No historical data for ${ticker}`);
+        return [];
+      }
+
+      const candles: CandleData[] = result.quotes
+        .filter((q: any) => q.open != null && q.close != null)
+        .map((q: any) => ({
+          // Intraday (5m/1h) candles need unix timestamp (seconds); daily use YYYY-MM-DD string
+          time:
+            interval === "1d"
+              ? new Date(q.date).toISOString().split("T")[0]
+              : Math.floor(new Date(q.date).getTime() / 1000),
+          open: q.open,
+          high: q.high,
+          low: q.low,
+          close: q.close,
+          volume: q.volume ?? 0,
+        }));
+
+      console.log(
+        `[market-fetcher] Fetched ${candles.length} candles for ${ticker} (${period})`,
+      );
+      return candles;
+    } catch (error) {
+      const isTimeout =
+        error instanceof TypeError &&
+        (error as any).cause?.code === "UND_ERR_CONNECT_TIMEOUT";
+      if (isTimeout && attempt < HIST_MAX_RETRIES) {
+        const delay = HIST_BASE_DELAY_MS * 2 ** (attempt - 1);
+        console.warn(
+          `[market-fetcher] Historical data timeout for ${ticker}, retry ${attempt}/${HIST_MAX_RETRIES} in ${delay}ms`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      console.error(
+        `[market-fetcher] Historical data failed for ${ticker}:`,
+        error,
+      );
       return [];
     }
-
-    const candles: CandleData[] = result.quotes
-      .filter((q: any) => q.open != null && q.close != null)
-      .map((q: any) => ({
-        // Intraday (5m/1h) candles need unix timestamp (seconds); daily use YYYY-MM-DD string
-        time:
-          interval === "1d"
-            ? new Date(q.date).toISOString().split("T")[0]
-            : Math.floor(new Date(q.date).getTime() / 1000),
-        open: q.open,
-        high: q.high,
-        low: q.low,
-        close: q.close,
-        volume: q.volume ?? 0,
-      }));
-
-    console.log(
-      `[market-fetcher] Fetched ${candles.length} candles for ${ticker} (${period})`,
-    );
-    return candles;
-  } catch (error) {
-    console.error(
-      `[market-fetcher] Historical data failed for ${ticker}:`,
-      error,
-    );
-    return [];
   }
+  return [];
 }
 
 // ---------- Sector Performance ----------

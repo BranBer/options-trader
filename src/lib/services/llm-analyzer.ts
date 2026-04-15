@@ -222,16 +222,42 @@ export function getTokenUsageStats(): {
 
 function extractJson(text: string): string {
   const trimmed = text.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed;
-  // Try to find JSON object in fenced code block
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) return fenced[1].trim();
-  // Try to extract JSON object/array from prose
-  const objMatch = trimmed.match(/(\{[\s\S]*\})/);
-  if (objMatch) return objMatch[1];
-  const arrMatch = trimmed.match(/(\[[\s\S]*\])/);
-  if (arrMatch) return arrMatch[1];
-  return trimmed;
+  let json: string;
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    json = trimmed;
+  } else {
+    // Try to find JSON object in fenced code block
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced) {
+      json = fenced[1].trim();
+    } else {
+      // Try to extract JSON object/array from prose
+      const objMatch = trimmed.match(/(\{[\s\S]*\})/);
+      if (objMatch) {
+        json = objMatch[1];
+      } else {
+        const arrMatch = trimmed.match(/(\[[\s\S]*\])/);
+        json = arrMatch ? arrMatch[1] : trimmed;
+      }
+    }
+  }
+  return repairJson(json);
+}
+
+/**
+ * Fix common LLM JSON output defects:
+ * 1. Trailing commas before } or ] (most frequent cause of parse failures)
+ * 2. Single-line // comments
+ * 3. Stray trailing text after the root object/array closes
+ */
+function repairJson(json: string): string {
+  // Strip single-line comments (outside of strings — simplified: only full-line)
+  let repaired = json.replace(/^\s*\/\/.*$/gm, "");
+
+  // Remove trailing commas: `,` optionally followed by whitespace before `}` or `]`
+  repaired = repaired.replace(/,\s*(?=[}\]])/g, "");
+
+  return repaired;
 }
 
 // --- Generic retry helper (OpenRouter json_object + schema-in-prompt) ---
@@ -1177,7 +1203,8 @@ export async function generateDeepDive(
 
   console.log(
     `[LLM] Deep dive for ${ticker}: risk=${normalized.risk_assessment.overall_risk}, ` +
-      `patterns=${normalized.technical_patterns.length}, S/R=${normalized.support_resistance.length}`,
+      `patterns=${normalized.technical_patterns.length}, S/R=${normalized.support_resistance.length}, ` +
+      `triggerAssessment=${triggerReport?.overallAssessment ?? "null"} (profileCandles=${profileCandles.length})`,
   );
 
   return { deepDive: normalized, triggerReport };

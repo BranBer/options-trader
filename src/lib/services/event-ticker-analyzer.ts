@@ -680,6 +680,7 @@ async function analyzeSingleTicker(args: {
     deepDive,
     recommendation: normalizedRecommendation,
     whaleMatch,
+    triggerReport: ddTriggerReport ?? null,
     source: "event_ticker",
   };
 

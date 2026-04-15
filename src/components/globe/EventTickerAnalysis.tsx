@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import TechnicalChart from "@/components/shared/TechnicalChart";
+import TriggerAssessmentCard from "@/components/shared/TriggerAssessmentCard";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
 import {
   formatCurrency,
@@ -108,8 +109,14 @@ function TickerAnalysisCard({
       confidenceBreakdown: null,
       whaleAlert: null,
       cascadeContext: null,
+      triggerReport: analysis.triggerReport ?? null,
     });
-  }, [analysis.deepDive, analysis.recommendation, exportPdf]);
+  }, [
+    analysis.deepDive,
+    analysis.recommendation,
+    analysis.triggerReport,
+    exportPdf,
+  ]);
 
   const handleReload = async () => {
     if (!onReload) return;
@@ -304,6 +311,11 @@ function TickerAnalysisCard({
             )}
         </div>
       </Section>
+
+      {analysis.triggerReport &&
+        analysis.triggerReport.overallAssessment !== "no_trigger" && (
+          <TriggerAssessmentCard triggerReport={analysis.triggerReport} />
+        )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Section title="Market Snapshot">

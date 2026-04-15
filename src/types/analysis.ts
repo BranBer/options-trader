@@ -477,6 +477,7 @@ export interface EventTickerAnalysis {
   deepDive: DeepDiveAnalysis;
   recommendation: TradeRecommendation;
   whaleMatch: EventTickerWhaleMatch;
+  triggerReport?: import("@/lib/utils/trigger-engine").TriggerReport | null;
   source: "event_ticker";
   createdAt?: string | null;
 }

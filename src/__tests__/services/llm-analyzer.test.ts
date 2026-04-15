@@ -373,6 +373,19 @@ describe("callLLMWithRetry — via classifyNews", () => {
     expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
+  it("repairs trailing commas in LLM JSON output", async () => {
+    // Simulate the exact defect: trailing commas before } and ]
+    const jsonWithTrailingCommas = JSON.stringify(VALID_CLASSIFICATION_RESPONSE)
+      .replace(/\}]/g, ",}]") // trailing comma in last object before ]
+      .replace(/\}\}/g, ",}}"); // trailing comma before closing }
+    mockLLMResponseRaw(jsonWithTrailingCommas, 800);
+
+    const result = await classifyNews(SAMPLE_ARTICLES);
+    expect(result.articles).toHaveLength(1);
+    // Should succeed on first attempt — no retry needed
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
   it("retries on Zod validation failure", async () => {
     // Return JSON but with wrong schema
     mockLLMResponse({ wrong_field: "bad data" }, 100);
