@@ -114,6 +114,172 @@ describe("Story 48.1 — detectSwings", () => {
     const swings = detectSwings(candles, 3, 0.5);
     expect(swings.length).toBe(0);
   });
+
+  it("normalizes second-based candle timestamps to epoch milliseconds", () => {
+    const candles: Candle[] = [
+      {
+        time: 1_700_000_000,
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1000,
+      },
+      {
+        time: 1_700_086_400,
+        open: 100,
+        high: 103,
+        low: 99,
+        close: 102,
+        volume: 1000,
+      },
+      {
+        time: 1_700_172_800,
+        open: 102,
+        high: 106,
+        low: 101,
+        close: 105,
+        volume: 1000,
+      },
+      {
+        time: 1_700_259_200,
+        open: 105,
+        high: 112,
+        low: 104,
+        close: 110,
+        volume: 1000,
+      },
+      {
+        time: 1_700_345_600,
+        open: 110,
+        high: 118,
+        low: 109,
+        close: 116,
+        volume: 1000,
+      },
+      {
+        time: 1_700_432_000,
+        open: 116,
+        high: 125,
+        low: 115,
+        close: 123,
+        volume: 1000,
+      },
+      {
+        time: 1_700_518_400,
+        open: 123,
+        high: 122,
+        low: 112,
+        close: 114,
+        volume: 1000,
+      },
+      {
+        time: 1_700_604_800,
+        open: 114,
+        high: 115,
+        low: 105,
+        close: 107,
+        volume: 1000,
+      },
+      {
+        time: 1_700_691_200,
+        open: 107,
+        high: 108,
+        low: 98,
+        close: 100,
+        volume: 1000,
+      },
+    ];
+
+    const swings = detectSwings(candles, 2, 0.1);
+    const highAtFive = swings.find((s) => s.type === "high" && s.index === 5);
+
+    expect(highAtFive).toBeDefined();
+    expect(highAtFive!.time).toBe(1_700_432_000_000);
+  });
+
+  it("normalizes string candle timestamps to epoch milliseconds", () => {
+    const candles: Candle[] = [
+      {
+        time: "2026-04-07",
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1000,
+      },
+      {
+        time: "2026-04-08",
+        open: 100,
+        high: 103,
+        low: 99,
+        close: 102,
+        volume: 1000,
+      },
+      {
+        time: "2026-04-09",
+        open: 102,
+        high: 106,
+        low: 101,
+        close: 105,
+        volume: 1000,
+      },
+      {
+        time: "2026-04-10",
+        open: 105,
+        high: 112,
+        low: 104,
+        close: 110,
+        volume: 1000,
+      },
+      {
+        time: "2026-04-11",
+        open: 110,
+        high: 118,
+        low: 109,
+        close: 116,
+        volume: 1000,
+      },
+      {
+        time: "2026-04-12",
+        open: 116,
+        high: 125,
+        low: 115,
+        close: 123,
+        volume: 1000,
+      },
+      {
+        time: "2026-04-13",
+        open: 123,
+        high: 122,
+        low: 112,
+        close: 114,
+        volume: 1000,
+      },
+      {
+        time: "2026-04-14",
+        open: 114,
+        high: 115,
+        low: 105,
+        close: 107,
+        volume: 1000,
+      },
+      {
+        time: "2026-04-15",
+        open: 107,
+        high: 108,
+        low: 98,
+        close: 100,
+        volume: 1000,
+      },
+    ];
+
+    const swings = detectSwings(candles, 2, 0.1);
+    const highAtFive = swings.find((s) => s.type === "high" && s.index === 5);
+
+    expect(highAtFive).toBeDefined();
+    expect(highAtFive!.time).toBe(new Date("2026-04-12").getTime());
+  });
 });
 
 describe("Story 48.1 — classifyStructure", () => {
@@ -258,6 +424,58 @@ describe("Story 48.2 — detectLevelInteraction", () => {
     const int = detectLevelInteraction(candles, support);
     expect(int).not.toBeNull();
     expect(int!.type).toBe("rejection");
+  });
+
+  it("normalizes seconds input to epoch milliseconds in interaction candles", () => {
+    const candles: Candle[] = [
+      {
+        time: 1_700_000_000,
+        open: 340,
+        high: 342,
+        low: 338,
+        close: 340,
+        volume: 1000,
+      },
+      {
+        time: 1_700_086_400,
+        open: 340,
+        high: 348,
+        low: 339,
+        close: 347,
+        volume: 1000,
+      },
+    ];
+
+    const interaction = detectLevelInteraction(candles, support);
+
+    expect(interaction).not.toBeNull();
+    expect(interaction!.candle.time).toBe(1_700_086_400_000);
+  });
+
+  it("preserves millisecond input in interaction candles", () => {
+    const candles: Candle[] = [
+      {
+        time: 1_700_000_000_000,
+        open: 340,
+        high: 342,
+        low: 338,
+        close: 340,
+        volume: 1000,
+      },
+      {
+        time: 1_700_086_400_000,
+        open: 340,
+        high: 348,
+        low: 339,
+        close: 347,
+        volume: 1000,
+      },
+    ];
+
+    const interaction = detectLevelInteraction(candles, support);
+
+    expect(interaction).not.toBeNull();
+    expect(interaction!.candle.time).toBe(1_700_086_400_000);
   });
 
   it("detects breakdown: was above, closed below", () => {

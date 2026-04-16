@@ -35,6 +35,9 @@ export default function ReportDocument({ data }: ReportDocumentProps) {
           tfData={tf}
           chartScreenshot={data.chartScreenshots[tf.timeframe] ?? ""}
           indicators={data.deepDive.indicators}
+          intradayNarrative={
+            tf.timeframe === "1D" ? data.enrichedData.intradayNarrative : []
+          }
         />
       ))}
 

@@ -8,6 +8,7 @@
  */
 
 import type { Candle } from "./technical-indicators";
+import { normalizeCandleTimeMs } from "./candle-time";
 
 // ---------- Types ----------
 
@@ -43,9 +44,7 @@ export interface SwingStructure {
 // ---------- Helpers ----------
 
 function candleTime(candle: Candle): number {
-  return typeof candle.time === "number"
-    ? candle.time
-    : new Date(candle.time).getTime();
+  return normalizeCandleTimeMs(candle.time);
 }
 
 // ---------- Core ----------

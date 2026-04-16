@@ -39,6 +39,12 @@ import { CalloutAnnotationPrimitive } from "./primitives/CalloutAnnotationPrimit
 import type { CalloutEntry } from "./primitives/CalloutAnnotationPrimitive";
 import type { ChartHistoryPeriod } from "@/lib/utils/chart-timeframes";
 import type { EconomicEvent } from "@/lib/utils/economic-calendar";
+import type { TriggerAnnotation } from "@/lib/utils/trigger-annotations";
+import type {
+  IntradayResistanceLevel,
+  IntradaySupportLevel,
+} from "@/lib/utils/intraday-resistance";
+import { TriggerAnnotationPrimitive } from "./primitives/TriggerAnnotationPrimitive";
 
 export interface TriggerMarker {
   /** Candle time in seconds (lightweight-charts Time) */
@@ -53,6 +59,59 @@ export interface TriggerMarker {
   text: string;
   /** Whether this is the primary trigger (larger marker) */
   primary?: boolean;
+}
+
+function isIntradayTimeframe(timeframe: ChartHistoryPeriod): boolean {
+  return timeframe === "1d" || timeframe === "1wk";
+}
+
+export function candleTimeToSeconds(time: string | number): number {
+  if (typeof time === "number") {
+    return time > 10_000_000_000 ? Math.floor(time / 1000) : time;
+  }
+
+  return Math.floor(new Date(time).getTime() / 1000);
+}
+
+function utcDayKeyFromSeconds(timeSec: number): string {
+  return new Date(timeSec * 1000).toISOString().slice(0, 10);
+}
+
+export function resolveTriggerMarkerTime(
+  triggerTimeSec: number,
+  candleTimesSec: number[],
+  timeframe: ChartHistoryPeriod,
+): number | null {
+  if (candleTimesSec.includes(triggerTimeSec)) {
+    return triggerTimeSec;
+  }
+
+  if (!isIntradayTimeframe(timeframe)) {
+    return null;
+  }
+
+  const triggerDay = utcDayKeyFromSeconds(triggerTimeSec);
+  const sameDayTimes = candleTimesSec.filter(
+    (timeSec) => utcDayKeyFromSeconds(timeSec) === triggerDay,
+  );
+
+  if (sameDayTimes.length === 0) {
+    return null;
+  }
+
+  let nearest = sameDayTimes[0];
+  let nearestDistance = Math.abs(nearest - triggerTimeSec);
+
+  for (let index = 1; index < sameDayTimes.length; index += 1) {
+    const candidate = sameDayTimes[index];
+    const distance = Math.abs(candidate - triggerTimeSec);
+    if (distance < nearestDistance) {
+      nearest = candidate;
+      nearestDistance = distance;
+    }
+  }
+
+  return nearest;
 }
 
 export interface IndicatorConfig {
@@ -109,6 +168,12 @@ interface PriceChartProps {
   economicEvents?: EconomicEvent[];
   /** Trigger markers from the trigger engine */
   triggerMarkers?: TriggerMarker[];
+  /** Trigger interaction drawings from the trigger engine */
+  triggerAnnotations?: TriggerAnnotation[];
+  /** Intraday-only resistance levels derived from session structure */
+  intradayResistanceLevels?: IntradayResistanceLevel[];
+  /** Intraday-only support levels derived from session structure */
+  intradaySupportLevels?: IntradaySupportLevel[];
 }
 
 const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
@@ -130,6 +195,9 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       onCalloutEntries,
       economicEvents,
       triggerMarkers,
+      triggerAnnotations,
+      intradayResistanceLevels,
+      intradaySupportLevels,
     },
     ref,
   ) {
@@ -153,6 +221,9 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
     const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
     const overlaysRef = useRef<AttachedOverlays | null>(null);
     const calloutRef = useRef<CalloutAnnotationPrimitive | null>(null);
+    const triggerAnnotationRef = useRef<TriggerAnnotationPrimitive | null>(
+      null,
+    );
 
     const initChart = useCallback(() => {
       if (!containerRef.current || candles.length === 0) return;
@@ -264,6 +335,79 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         }
       }
 
+      if (intradayResistanceLevels && intradayResistanceLevels.length > 0) {
+        for (const [index, level] of intradayResistanceLevels.entries()) {
+          const color =
+            level.source === "opening-range"
+              ? "rgba(239,68,68,0.65)"
+              : level.source === "premarket-high"
+                ? "rgba(251,146,60,0.72)"
+                : level.source === "anchored-vwap"
+                  ? "rgba(14,165,233,0.75)"
+                  : level.source === "prior-day-high" ||
+                      level.source === "prior-day-close"
+                    ? "rgba(245,158,11,0.7)"
+                    : "rgba(168,85,247,0.7)";
+          const lineStyle =
+            level.source === "vwap-band" || level.source === "anchored-vwap"
+              ? 1
+              : level.source === "prior-day-close"
+                ? 2
+                : 0;
+
+          candleSeries.createPriceLine({
+            price: level.level,
+            color,
+            lineWidth:
+              level.strength === "strong"
+                ? 2
+                : level.strength === "moderate"
+                  ? 1
+                  : 1,
+            lineStyle,
+            axisLabelVisible: index < 3,
+            title: level.label,
+          });
+        }
+      }
+
+      if (intradaySupportLevels && intradaySupportLevels.length > 0) {
+        for (const [index, level] of intradaySupportLevels.entries()) {
+          const color =
+            level.source === "opening-range-low"
+              ? "rgba(34,197,94,0.72)"
+              : level.source === "premarket-low"
+                ? "rgba(16,185,129,0.72)"
+                : level.source === "anchored-vwap-high"
+                  ? "rgba(6,182,212,0.75)"
+                  : level.source === "prior-day-low" ||
+                      level.source === "prior-day-close"
+                    ? "rgba(74,222,128,0.7)"
+                    : "rgba(45,212,191,0.7)";
+          const lineStyle =
+            level.source === "vwap-band-lower" ||
+            level.source === "anchored-vwap-high"
+              ? 1
+              : level.source === "prior-day-close"
+                ? 2
+                : 0;
+
+          candleSeries.createPriceLine({
+            price: level.level,
+            color,
+            lineWidth:
+              level.strength === "strong"
+                ? 2
+                : level.strength === "moderate"
+                  ? 1
+                  : 1,
+            lineStyle,
+            axisLabelVisible: index < 3,
+            title: level.label,
+          });
+        }
+      }
+
       // Options context lines: max pain, OI walls, GEX flip
       if (optionsContext) {
         const { max_pain, oi_walls, gex_summary } = optionsContext;
@@ -339,6 +483,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       // ——— Computed Technical Indicators ———
       const closes = candles.map((c) => c.close);
       const times = candles.map((c) => c.time as Time);
+      const candleTimesSec = candles.map((c) => candleTimeToSeconds(c.time));
 
       function addLineSeries(
         data: (number | null)[],
@@ -560,6 +705,32 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         onCalloutEntries?.(overlays.callouts);
       }
 
+      if (triggerAnnotations && triggerAnnotations.length > 0) {
+        const resolvedAnnotations = triggerAnnotations
+          .map((annotation) => {
+            const resolvedTimeSec = resolveTriggerMarkerTime(
+              annotation.time,
+              candleTimesSec,
+              timeframe,
+            );
+            if (resolvedTimeSec == null) return null;
+
+            return {
+              ...annotation,
+              time: resolvedTimeSec,
+            };
+          })
+          .filter(
+            (annotation): annotation is TriggerAnnotation => annotation != null,
+          );
+
+        if (resolvedAnnotations.length > 0) {
+          const primitive = new TriggerAnnotationPrimitive(resolvedAnnotations);
+          candleSeries.attachPrimitive(primitive);
+          triggerAnnotationRef.current = primitive;
+        }
+      }
+
       // Economic event markers (Story 47.8)
       const allMarkers: SeriesMarker<Time>[] = [];
 
@@ -603,26 +774,21 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
 
       // Trigger markers (Epic 48)
       if (triggerMarkers && triggerMarkers.length > 0 && candles.length > 0) {
-        // Build candle time lookup (seconds → Time) for snapping
-        const candleTimeSet = new Set<number>();
-        for (const c of candles) {
-          candleTimeSet.add(
-            typeof c.time === "number"
-              ? c.time
-              : new Date(c.time).getTime() / 1000,
-          );
-        }
+        const candleTimesSec = candles.map((c) => candleTimeToSeconds(c.time));
 
         for (const tm of triggerMarkers) {
-          const triggerTimeSec = tm.time;
-          // Only show if candle is in the visible range
-          if (!candleTimeSet.has(triggerTimeSec)) continue;
+          const resolvedTimeSec = resolveTriggerMarkerTime(
+            tm.time,
+            candleTimesSec,
+            timeframe,
+          );
+          if (resolvedTimeSec == null) continue;
 
           const isBullish = tm.direction === "bullish";
           const isBearish = tm.direction === "bearish";
 
           allMarkers.push({
-            time: triggerTimeSec as unknown as Time,
+            time: resolvedTimeSec as unknown as Time,
             position: isBearish ? "aboveBar" : "belowBar",
             shape: isBearish ? "arrowDown" : "arrowUp",
             color: isBullish
@@ -632,7 +798,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
                 : "#f59e0b", // amber-500
             size: tm.primary ? 2 : 1.5,
             text: `${tm.type} $${tm.level.toFixed(0)}`,
-            id: `trigger-${tm.time}-${tm.type}`,
+            id: `trigger-${resolvedTimeSec}-${tm.type}`,
           });
         }
       }
@@ -680,6 +846,10 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           candleSeriesRef.current.detachPrimitive(calloutRef.current);
           calloutRef.current = null;
         }
+        if (triggerAnnotationRef.current && candleSeriesRef.current) {
+          candleSeriesRef.current.detachPrimitive(triggerAnnotationRef.current);
+          triggerAnnotationRef.current = null;
+        }
         chart.remove();
         chartRef.current = null;
       };
@@ -698,6 +868,9 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       minConfidence,
       economicEvents,
       triggerMarkers,
+      triggerAnnotations,
+      intradayResistanceLevels,
+      intradaySupportLevels,
     ]);
 
     // Highlight a specific pattern overlay when hovered from text

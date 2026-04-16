@@ -7,6 +7,10 @@ import type {
   PriceChartHandle,
   IndicatorConfig,
 } from "@/components/charts/PriceChart";
+import {
+  buildIntradayResistanceLevels,
+  buildIntradaySupportLevels,
+} from "@/lib/utils/intraday-resistance";
 
 /** Dimensions optimized for PDF embedding at ~185 DPI on letter-size pages */
 export const CHART_WIDTH = 1200;
@@ -124,6 +128,24 @@ export async function captureSingleChart(
         optionsContext: reportData.deepDive.options_context,
         indicators: PDF_INDICATOR_CONFIG,
         timeframe: tfData.period,
+        intradayResistanceLevels:
+          tfData.period === "1d"
+            ? buildIntradayResistanceLevels({
+                intradayCandles: tfData.candles,
+                dailyCandles:
+                  reportData.timeframes.find((item) => item.period === "1mo")
+                    ?.candles ?? [],
+              })
+            : [],
+        intradaySupportLevels:
+          tfData.period === "1d"
+            ? buildIntradaySupportLevels({
+                intradayCandles: tfData.candles,
+                dailyCandles:
+                  reportData.timeframes.find((item) => item.period === "1mo")
+                    ?.candles ?? [],
+              })
+            : [],
       });
     };
 

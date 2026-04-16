@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { RefreshCw, Download, Loader2, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,11 +11,13 @@ import { Progress } from "@/components/ui/progress";
 import TechnicalChart from "@/components/shared/TechnicalChart";
 import TriggerAssessmentCard from "@/components/shared/TriggerAssessmentCard";
 import OptionsStatsPanel from "@/components/charts/OptionsStatsPanel";
+import type { TriggerMarker } from "@/components/charts/PriceChart";
 import {
   formatCurrency,
   formatNumber,
   formatPremium,
 } from "@/lib/utils/formatters";
+import { buildTriggerAnnotations } from "@/lib/utils/trigger-annotations";
 import type { EventTickerAnalysis } from "@/types/analysis";
 import { useExportPdf, type ExportProgress } from "@/hooks/useExportPdf";
 
@@ -127,6 +129,52 @@ function TickerAnalysisCard({
       setReloading(false);
     }
   };
+
+  const triggerMarkers = useMemo<TriggerMarker[]>(() => {
+    const triggerReport = analysis.triggerReport;
+    if (!triggerReport) return [];
+
+    const markers: TriggerMarker[] = [];
+    const seen = new Set<number>();
+
+    const primary = triggerReport.primaryTrigger;
+    if (primary?.interaction) {
+      const timeSec = Math.floor(primary.interaction.candle.time / 1000);
+      seen.add(timeSec);
+      markers.push({
+        time: timeSec,
+        direction: primary.direction,
+        type: primary.interaction.type,
+        level: primary.interaction.level,
+        text: `${primary.interaction.type} $${primary.interaction.level.toFixed(0)} (${primary.classification.replace(/_/g, " ")})`,
+        primary: true,
+      });
+    }
+
+    for (const trigger of triggerReport.secondaryTriggers) {
+      if (!trigger.interaction) continue;
+      const timeSec = Math.floor(trigger.interaction.candle.time / 1000);
+      if (seen.has(timeSec)) continue;
+
+      seen.add(timeSec);
+      markers.push({
+        time: timeSec,
+        direction: trigger.direction,
+        type: trigger.interaction.type,
+        level: trigger.interaction.level,
+        text: `${trigger.interaction.type} $${trigger.interaction.level.toFixed(0)}`,
+        primary: false,
+      });
+    }
+
+    return markers;
+  }, [analysis.triggerReport]);
+
+  const triggerAnnotations = useMemo(
+    () => buildTriggerAnnotations(analysis.triggerReport),
+    [analysis.triggerReport],
+  );
+
   const recommendation = analysis.recommendation;
   const deepDive = analysis.deepDive;
   const marketSnapshot = analysis.marketSnapshot;
@@ -199,6 +247,8 @@ function TickerAnalysisCard({
               technicalPatterns={deepDive.technical_patterns}
               technicalPatternsByTimeframe={deepDive.timeframe_patterns}
               optionsContext={deepDive.options_context}
+              triggerMarkers={triggerMarkers}
+              triggerAnnotations={triggerAnnotations}
               height={360}
             />
           </div>

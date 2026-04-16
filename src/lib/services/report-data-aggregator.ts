@@ -30,6 +30,11 @@ import {
   getUpcomingCatalysts,
   type CatalystSummary,
 } from "@/lib/utils/economic-calendar";
+import {
+  buildIntradayResistanceLevels,
+  summarizeIntradaySessionChronology,
+  buildIntradaySupportLevels,
+} from "@/lib/utils/intraday-resistance";
 import type { OptionsChainSummary } from "@/types/market";
 import type { GEXSummary } from "@/lib/utils/gex-calculator";
 import { vwap } from "@/lib/utils/technical-indicators";
@@ -232,6 +237,28 @@ function computeEnrichedData(
   const latestVwap =
     vwapValues.length > 0 ? vwapValues[vwapValues.length - 1] : null;
 
+  const intradayResistance =
+    candles1D.length >= 6
+      ? buildIntradayResistanceLevels({
+          intradayCandles: candles1D,
+          dailyCandles: candlesByPeriod["1mo"] ?? candles,
+        })
+      : [];
+  const intradaySupport =
+    candles1D.length >= 6
+      ? buildIntradaySupportLevels({
+          intradayCandles: candles1D,
+          dailyCandles: candlesByPeriod["1mo"] ?? candles,
+        })
+      : [];
+  const intradayNarrative =
+    candles1D.length >= 6
+      ? summarizeIntradaySessionChronology({
+          intradayCandles: candles1D,
+          dailyCandles: candlesByPeriod["1mo"] ?? candles,
+        })
+      : [];
+
   // Extract OI walls, max pain, GEX from deep dive options_context
   const ctx = deepDive.options_context;
   const oiWallsFromDD = ctx.oi_walls
@@ -278,6 +305,9 @@ function computeEnrichedData(
   return {
     volumeProfile,
     algoSR,
+    intradayResistance,
+    intradaySupport,
+    intradayNarrative,
     ivSkew,
     oiSummary,
     catalysts,

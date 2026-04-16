@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useNews, type NewsEvent } from "@/hooks/useApiData";
@@ -23,6 +24,7 @@ type EventTickerResponse = {
 };
 
 export default function GlobePage() {
+  const queryClient = useQueryClient();
   const { data, isLoading } = useNews(5, 200);
   const [selectedEvent, setSelectedEvent] = useState<NewsEvent | null>(null);
   const [eventAnalyses, setEventAnalyses] = useState<
@@ -265,11 +267,14 @@ export default function GlobePage() {
           );
           return { ...current, [event.id]: [...merged, ...payload.analyses] };
         });
+        await queryClient.invalidateQueries({
+          queryKey: ["historicalData", ticker.toUpperCase()],
+        });
       } catch {
         // Non-critical � the stale data remains visible
       }
     },
-    [selectedEvent],
+    [queryClient, selectedEvent],
   );
 
   return (

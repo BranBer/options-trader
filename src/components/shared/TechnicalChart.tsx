@@ -26,6 +26,17 @@ import PriceChart, {
 } from "@/components/charts/PriceChart";
 import type { EconomicEvent } from "@/lib/utils/economic-calendar";
 import type { TriggerMarker } from "@/components/charts/PriceChart";
+import type { TriggerAnnotation } from "@/lib/utils/trigger-annotations";
+import {
+  buildIntradayResistanceLevels,
+  buildIntradaySupportLevels,
+  getIntradayResistanceControl,
+  getIntradaySupportControl,
+  summarizeIntradayResistance,
+  summarizeIntradaySupport,
+  type IntradayResistanceLevel,
+  type IntradaySupportLevel,
+} from "@/lib/utils/intraday-resistance";
 import PatternLegendBar from "@/components/charts/PatternLegendBar";
 import type { CalloutEntry } from "@/components/charts/primitives/CalloutAnnotationPrimitive";
 import ChartLegend from "@/components/charts/ChartLegend";
@@ -106,6 +117,8 @@ interface TechnicalChartProps {
   economicEvents?: EconomicEvent[];
   /** Trigger markers from the trigger engine to overlay on the chart */
   triggerMarkers?: TriggerMarker[];
+  /** Trigger interaction drawings derived from the trigger engine */
+  triggerAnnotations?: TriggerAnnotation[];
 }
 
 export interface TechnicalChartHandle {
@@ -130,6 +143,7 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
       onTimeframeChange,
       economicEvents,
       triggerMarkers,
+      triggerAnnotations,
     },
     ref,
   ) {
@@ -185,7 +199,9 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
       ticker,
       activeTimeframe,
     );
+    const { data: dailyHistData } = useHistoricalData(ticker, "1mo");
     const candles = histData?.candles ?? [];
+    const dailyCandles = dailyHistData?.candles ?? [];
     const indicatorPatternReport = useMemo(
       () =>
         candles.length > 0
@@ -208,6 +224,60 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
     const mergedPatterns = useMemo(
       () => [...activePatterns, ...indicatorOverlays],
       [activePatterns, indicatorOverlays],
+    );
+
+    const intradayResistanceLevels = useMemo<IntradayResistanceLevel[]>(
+      () =>
+        activeTimeframe === "1d"
+          ? buildIntradayResistanceLevels({
+              intradayCandles: candles,
+              dailyCandles,
+            })
+          : [],
+      [activeTimeframe, candles, dailyCandles],
+    );
+
+    const intradaySupportLevels = useMemo<IntradaySupportLevel[]>(
+      () =>
+        activeTimeframe === "1d"
+          ? buildIntradaySupportLevels({
+              intradayCandles: candles,
+              dailyCandles,
+            })
+          : [],
+      [activeTimeframe, candles, dailyCandles],
+    );
+
+    const intradayControl = useMemo(
+      () => getIntradayResistanceControl(intradayResistanceLevels),
+      [intradayResistanceLevels],
+    );
+
+    const intradaySupportControl = useMemo(
+      () => getIntradaySupportControl(intradaySupportLevels),
+      [intradaySupportLevels],
+    );
+
+    const intradayResistanceSummary = useMemo(
+      () =>
+        candles.length > 0
+          ? summarizeIntradayResistance(
+              intradayResistanceLevels,
+              candles[candles.length - 1].close,
+            )
+          : "",
+      [candles, intradayResistanceLevels],
+    );
+
+    const intradaySupportSummary = useMemo(
+      () =>
+        candles.length > 0
+          ? summarizeIntradaySupport(
+              intradaySupportLevels,
+              candles[candles.length - 1].close,
+            )
+          : "",
+      [candles, intradaySupportLevels],
     );
 
     const hasAnyPatterns =
@@ -322,6 +392,82 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
           </div>
         ) : (
           <>
+            {activeTimeframe === "1d" && candles.length > 0 && (
+              <div className="rounded-lg border border-border/80 bg-muted/25 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Intraday Control
+                </p>
+                <div className="mt-2 grid gap-3 lg:grid-cols-2">
+                  <div className="space-y-1 rounded-md border border-border/70 bg-background/40 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                          intradayControl.tone === "seller-control"
+                            ? "bg-red-500/15 text-red-300"
+                            : intradayControl.tone === "approaching-supply"
+                              ? "bg-amber-500/15 text-amber-300"
+                              : "bg-emerald-500/15 text-emerald-300"
+                        }`}
+                      >
+                        {intradayControl.label}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {intradayControl.detail}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {intradayResistanceSummary}
+                    </p>
+                    {intradayResistanceLevels.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {intradayResistanceLevels.slice(0, 3).map((level) => (
+                          <span
+                            key={`${level.label}-${level.level}`}
+                            className="inline-flex rounded-full border border-border/80 bg-background/60 px-2 py-0.5 text-xs text-foreground"
+                          >
+                            {level.label} ${level.level.toFixed(2)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1 rounded-md border border-border/70 bg-background/40 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                          intradaySupportControl.tone === "buyer-control"
+                            ? "bg-emerald-500/15 text-emerald-300"
+                            : intradaySupportControl.tone ===
+                                "approaching-support"
+                              ? "bg-cyan-500/15 text-cyan-300"
+                              : "bg-slate-500/15 text-slate-300"
+                        }`}
+                      >
+                        {intradaySupportControl.label}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {intradaySupportControl.detail}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {intradaySupportSummary}
+                    </p>
+                    {intradaySupportLevels.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {intradaySupportLevels.slice(0, 3).map((level) => (
+                          <span
+                            key={`${level.label}-${level.level}`}
+                            className="inline-flex rounded-full border border-border/80 bg-background/60 px-2 py-0.5 text-xs text-foreground"
+                          >
+                            {level.label} ${level.level.toFixed(2)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             {showPatterns && calloutEntries.length > 0 && (
               <PatternLegendBar entries={calloutEntries} />
             )}
@@ -343,6 +489,9 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
               onCalloutEntries={setCalloutEntries}
               economicEvents={economicEvents}
               triggerMarkers={triggerMarkers}
+              triggerAnnotations={triggerAnnotations}
+              intradayResistanceLevels={intradayResistanceLevels}
+              intradaySupportLevels={intradaySupportLevels}
             />
             <ChartLegend
               supportResistance={supportResistance}

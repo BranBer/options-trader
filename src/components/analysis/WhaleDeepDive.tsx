@@ -23,6 +23,7 @@ import TriggerAssessmentCard from "@/components/shared/TriggerAssessmentCard";
 import type { TriggerMarker } from "@/components/charts/PriceChart";
 import { InfoTooltip } from "@/components/charts/IndicatorExplainers";
 import type { TriggerReport } from "@/lib/utils/trigger-engine";
+import { buildTriggerAnnotations } from "@/lib/utils/trigger-annotations";
 import { Progress } from "@/components/ui/progress";
 import {
   TrendingUp,
@@ -142,6 +143,11 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
     return markers;
   }, [triggerReport]);
 
+  const triggerAnnotations = useMemo(
+    () => buildTriggerAnnotations(triggerReport),
+    [triggerReport],
+  );
+
   const {
     exportPdf,
     isExporting,
@@ -260,6 +266,7 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
         onTimeframeChange={setTimeframe}
         economicEvents={calendarData?.nextEvents}
         triggerMarkers={triggerMarkers}
+        triggerAnnotations={triggerAnnotations}
       />
 
       <Separator />

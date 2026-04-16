@@ -16,6 +16,11 @@ import type { VolumeProfile } from "@/lib/utils/volume-profile";
 import type { AlgoSRLevel } from "@/lib/utils/algo-sr";
 import type { IVSkew, OISummary } from "@/lib/utils/options-analytics";
 import type { CatalystSummary } from "@/lib/utils/economic-calendar";
+import type {
+  IntradayResistanceLevel,
+  IntradaySessionNarrative,
+  IntradaySupportLevel,
+} from "@/lib/utils/intraday-resistance";
 
 export interface TimeframeReportData {
   timeframe: AnalysisTimeframe;
@@ -29,6 +34,9 @@ export interface TimeframeReportData {
 export interface EnrichedMarketData {
   volumeProfile: VolumeProfile | null;
   algoSR: AlgoSRLevel[];
+  intradayResistance: IntradayResistanceLevel[];
+  intradaySupport: IntradaySupportLevel[];
+  intradayNarrative: IntradaySessionNarrative[];
   ivSkew: IVSkew | null;
   oiSummary: OISummary | null;
   catalysts: CatalystSummary;

@@ -9,6 +9,7 @@
  */
 
 import type { Candle } from "./technical-indicators";
+import { normalizeCandleTimeMs } from "./candle-time";
 
 // ---------- Types ----------
 
@@ -56,7 +57,7 @@ export interface LevelInteraction {
 
 function toSummary(c: Candle): CandleSummary {
   return {
-    time: typeof c.time === "number" ? c.time : new Date(c.time).getTime(),
+    time: normalizeCandleTimeMs(c.time),
     open: c.open,
     high: c.high,
     low: c.low,

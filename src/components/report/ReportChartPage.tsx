@@ -1,4 +1,5 @@
 import { View, Text, Image, StyleSheet } from "@react-pdf/renderer";
+import type { IntradaySessionNarrative } from "@/lib/utils/intraday-resistance";
 import type { TimeframeReportData } from "@/types/report";
 import type { IndicatorAnalysis, TechnicalPattern } from "@/types/analysis";
 import {
@@ -94,6 +95,29 @@ const s = StyleSheet.create({
     borderWidth: 0.5,
     alignSelf: "flex-start",
     marginBottom: 3,
+  },
+  narrativeCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 4,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    padding: 10,
+    marginBottom: 10,
+  },
+  narrativeItem: {
+    marginBottom: 7,
+  },
+  narrativeTitle: {
+    fontSize: fontSize.caption,
+    fontFamily: "Helvetica-Bold",
+    color: colors.textPrimary,
+    marginBottom: 2,
+    textTransform: "uppercase",
+  },
+  narrativeText: {
+    fontSize: fontSize.body,
+    color: colors.textSecondary,
+    lineHeight: 1.4,
   },
 });
 
@@ -218,6 +242,7 @@ interface ReportChartPageProps {
   tfData: TimeframeReportData;
   chartScreenshot: string;
   indicators: IndicatorAnalysis[];
+  intradayNarrative?: IntradaySessionNarrative[];
 }
 
 export default function ReportChartPage({
@@ -226,10 +251,13 @@ export default function ReportChartPage({
   tfData,
   chartScreenshot,
   indicators,
+  intradayNarrative = [],
 }: ReportChartPageProps) {
   const title =
     TIMEFRAME_LABELS[tfData.timeframe] ?? `${tfData.timeframe} Analysis`;
   const patternRows = buildPatternRows(tfData);
+  const showIntradayNarrative =
+    tfData.timeframe === "1D" && intradayNarrative.length > 0;
 
   return (
     <ReportPage ticker={ticker} generatedAt={generatedAt}>
@@ -247,6 +275,27 @@ export default function ReportChartPage({
           </View>
         )}
       </View>
+
+      {showIntradayNarrative && (
+        <View style={baseStyles.section}>
+          <Text style={baseStyles.h2}>Intraday Session Narrative</Text>
+          <View style={s.narrativeCard}>
+            {intradayNarrative.map((item, index) => (
+              <View
+                key={`${item.title}-${index}`}
+                style={
+                  index === intradayNarrative.length - 1
+                    ? undefined
+                    : s.narrativeItem
+                }
+              >
+                <Text style={s.narrativeTitle}>{item.title}</Text>
+                <Text style={s.narrativeText}>{item.detail}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
 
       {/* Pattern table */}
       <View style={baseStyles.section}>

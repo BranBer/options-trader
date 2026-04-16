@@ -1,6 +1,12 @@
 import { View, Text, StyleSheet } from "@react-pdf/renderer";
 import type { EnrichedMarketData } from "@/types/report";
 import type { DeepDiveAnalysis } from "@/types/analysis";
+import {
+  getIntradayResistanceControl,
+  getIntradaySupportControl,
+  summarizeIntradayResistance,
+  summarizeIntradaySupport,
+} from "@/lib/utils/intraday-resistance";
 import ReportPage from "./ReportPage";
 import { colors, fontSize, baseStyles } from "./styles";
 
@@ -124,6 +130,33 @@ const s = StyleSheet.create({
     color: colors.accentAmber,
     fontFamily: "Helvetica-Bold",
   },
+  controlGrid: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  controlCard: {
+    flex: 1,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    borderRadius: 4,
+    padding: 8,
+  },
+  controlLabel: {
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  controlBadge: {
+    fontSize: fontSize.body,
+    fontFamily: "Helvetica-Bold",
+    marginBottom: 4,
+  },
+  controlText: {
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
+    lineHeight: 1.35,
+  },
 });
 
 interface ReportMarketStructurePageProps {
@@ -141,6 +174,10 @@ export default function ReportMarketStructurePage({
 }: ReportMarketStructurePageProps) {
   const { volumeProfile, algoSR, ivSkew, oiSummary, catalysts, currentPrice } =
     enrichedData;
+  const intradayResistance = enrichedData.intradayResistance;
+  const intradaySupport = enrichedData.intradaySupport;
+  const resistanceControl = getIntradayResistanceControl(intradayResistance);
+  const supportControl = getIntradaySupportControl(intradaySupport);
 
   const supports = algoSR.filter((l) => l.type === "support").slice(0, 5);
   const resistances = algoSR.filter((l) => l.type === "resistance").slice(0, 5);
@@ -358,6 +395,98 @@ export default function ReportMarketStructurePage({
                 )}
               </View>
             </View>
+          </View>
+        </View>
+      )}
+
+      <View style={baseStyles.section}>
+        <Text style={baseStyles.h1}>Intraday Session Control</Text>
+        <View style={s.controlGrid}>
+          <View style={s.controlCard}>
+            <Text style={s.controlLabel}>Overhead Sellers</Text>
+            <Text
+              style={[
+                s.controlBadge,
+                {
+                  color:
+                    resistanceControl.tone === "seller-control"
+                      ? colors.accentRed
+                      : resistanceControl.tone === "approaching-supply"
+                        ? colors.accentAmber
+                        : colors.accentGreen,
+                },
+              ]}
+            >
+              {resistanceControl.label}
+            </Text>
+            <Text style={s.controlText}>{resistanceControl.detail}</Text>
+            <Text style={[s.controlText, { marginTop: 4 }]}>
+              {summarizeIntradayResistance(intradayResistance, currentPrice)}
+            </Text>
+          </View>
+          <View style={s.controlCard}>
+            <Text style={s.controlLabel}>Downside Buyers</Text>
+            <Text
+              style={[
+                s.controlBadge,
+                {
+                  color:
+                    supportControl.tone === "buyer-control"
+                      ? colors.accentGreen
+                      : supportControl.tone === "approaching-support"
+                        ? colors.accentBlue
+                        : colors.textSecondary,
+                },
+              ]}
+            >
+              {supportControl.label}
+            </Text>
+            <Text style={s.controlText}>{supportControl.detail}</Text>
+            <Text style={[s.controlText, { marginTop: 4 }]}>
+              {summarizeIntradaySupport(intradaySupport, currentPrice)}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {intradayResistance.length > 0 && (
+        <View style={baseStyles.section}>
+          <Text style={baseStyles.h1}>Intraday Resistance Bands</Text>
+          <Text style={[baseStyles.caption, { marginBottom: 8 }]}>
+            {summarizeIntradayResistance(intradayResistance, currentPrice)}
+          </Text>
+          <View style={baseStyles.card}>
+            {intradayResistance.map((level, index) => (
+              <View key={index} style={s.levelRow}>
+                <Text style={s.levelPrice}>${level.level.toFixed(2)}</Text>
+                <Text style={s.levelStars}>{level.label}</Text>
+                <Text style={s.levelSources}>{level.note}</Text>
+                <Text style={s.levelDistance}>
+                  +${level.distanceFromPrice.toFixed(2)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
+      {intradaySupport.length > 0 && (
+        <View style={baseStyles.section}>
+          <Text style={baseStyles.h1}>Intraday Support Bands</Text>
+          <Text style={[baseStyles.caption, { marginBottom: 8 }]}>
+            {summarizeIntradaySupport(intradaySupport, currentPrice)}
+          </Text>
+          <View style={baseStyles.card}>
+            {intradaySupport.map((level, index) => (
+              <View key={index} style={s.levelRow}>
+                <Text style={s.levelPrice}>${level.level.toFixed(2)}</Text>
+                <Text style={s.levelStars}>{level.label}</Text>
+                <Text style={s.levelSources}>{level.note}</Text>
+                <Text style={s.levelDistance}>
+                  -${level.distanceFromPrice.toFixed(2)}
+                </Text>
+              </View>
+            ))}
           </View>
         </View>
       )}
