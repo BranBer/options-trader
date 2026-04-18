@@ -502,7 +502,7 @@ describe("callLLMWithRetry — via classifyNews", () => {
     await classifyNews(SAMPLE_ARTICLES);
 
     const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
+    expect(callArgs.model).toBe("moonshotai/kimi-k2.5");
     expect(callArgs.reasoning).toEqual({ effort: "none" });
   });
 
@@ -513,7 +513,7 @@ describe("callLLMWithRetry — via classifyNews", () => {
     await classifyNews(SAMPLE_ARTICLES);
 
     const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
+    expect(callArgs.model).toBe("moonshotai/kimi-k2.5");
     expect(callArgs.reasoning).toEqual({ effort: "none" });
   });
 
@@ -536,7 +536,7 @@ describe("callLLMWithRetry — via classifyNews", () => {
     await classifyNews(SAMPLE_ARTICLES);
 
     const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
+    expect(callArgs.model).toBe("moonshotai/kimi-k2.5");
   });
 });
 

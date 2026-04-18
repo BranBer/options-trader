@@ -753,7 +753,7 @@ Patch `Projects/Options Dashboard/Architecture & Tech Stack.md`:
 
 1. Update the pipeline overview to reflect 3 active stages.
 2. Update the services inventory to match current exports.
-3. Verify model references use `qwen/qwen3.5-plus-02-15` as the default.
+3. Verify model references use `moonshotai/kimi-k2.5` as the default.
 
 **Testing:**
 

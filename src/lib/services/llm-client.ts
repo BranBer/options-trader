@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 
-const DEFAULT_OPEN_ROUTER_MODEL = "qwen/qwen3.5-plus-02-15";
+const DEFAULT_OPEN_ROUTER_MODEL = "moonshotai/kimi-k2.5";
 
 let client: OpenAI | null = null;
 

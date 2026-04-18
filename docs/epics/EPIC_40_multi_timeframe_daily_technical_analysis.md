@@ -57,7 +57,7 @@ Add a complete 1D intraday technical analysis layer with a 6-timeframe selector 
 
 |                        | Value                             |
 | ---------------------- | --------------------------------- |
-| **Model**              | `qwen/qwen3.5-plus-02-15`         |
+| **Model**              | `moonshotai/kimi-k2.5`            |
 | **Input price**        | $0.405/M tokens                   |
 | **Output price**       | $2.40/M tokens                    |
 | **Pipeline frequency** | Every 10 minutes (144 cycles/day) |

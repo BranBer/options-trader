@@ -1279,7 +1279,7 @@ Sprint 1 ──▶ Sprint 2 ──▶ Sprint 3 ──▶ Sprint 4 ──▶ Spri
       "duration_ms": 3200,
       "tokens_in": 1850,
       "tokens_out": 920,
-      "model": "qwen/qwen3.5-plus-02-15",
+      "model": "moonshotai/kimi-k2.5",
       "distribution": { "buyers": 5, "sellers": 2, "neutral": 1 }
     },
     "correlation": {

@@ -3,6 +3,13 @@ import { ANALYSIS_TIMEFRAMES } from "@/lib/utils/chart-timeframes";
 import type { MarketSnapshot, OptionsChainSummary } from "@/types/market";
 import type { WhaleAlertRow } from "@/types/whale";
 
+// Normalizes LLM confidence values that may arrive as percentages (0–100)
+// instead of decimals (0–1). Values already ≤1 pass through unchanged.
+const confidenceField = z
+  .number()
+  .transform((v) => (v > 1 ? v / 100 : v))
+  .pipe(z.number().min(0).max(1));
+
 // ── Trigger Detection (Epic 48) ────────────────────────────────────────
 
 export const swingPointSchema = z.object({
@@ -119,7 +126,7 @@ export const correlationSchema = z.object({
     impact_score: z.number().int(),
     event_type: z.string(),
   }),
-  correlation_confidence: z.number().min(0).max(1),
+  correlation_confidence: confidenceField,
   alignment: z.enum(["confirming", "contrarian", "hedging"]),
   thesis: z.string(),
   smart_money_signal: z.enum([
@@ -185,7 +192,7 @@ export const tradeRecommendationSchema = z.object({
   ticker: z.string(),
   thesis: z.string(),
   direction: z.enum(["bullish", "bearish", "neutral"]),
-  confidence: z.number().min(0).max(1),
+  confidence: confidenceField,
   primary_strategy: z.object({
     name: z.string(),
     legs: z.array(strategyLegSchema),
@@ -243,7 +250,7 @@ export const technicalPatternSchema = z.object({
   name: z.string(),
   type: z.enum(["bullish", "bearish", "neutral"]),
   description: z.string(),
-  confidence: z.number().min(0).max(1),
+  confidence: confidenceField,
   timeframe: analysisTimeframeEnum.nullable().optional(),
   price_target: z.number().nullable().optional(),
   /** Which indicator system produced this pattern (undefined = AI/Gemini) */
@@ -395,7 +402,7 @@ export interface DeepDiveSummary {
 export const nexusDriftRemovalSchema = z.object({
   ticker: z.string(),
   reason: z.string(),
-  confidence: z.number().min(0).max(1),
+  confidence: confidenceField,
   replacement_ticker: z.string().nullable().optional(),
   replacement_rationale: z.string().nullable().optional(),
 });
@@ -407,7 +414,7 @@ export const nexusDriftAdditionSchema = z.object({
   nexus_role: z.string(),
   cascade_signal: z.string(),
   key_dependents: z.array(z.string()),
-  confidence: z.number().min(0).max(1),
+  confidence: confidenceField,
   trigger_event: z.string(),
 });
 
@@ -420,7 +427,7 @@ export const nexusDriftRelationshipChangeSchema = z.object({
     "cascade_signal_change",
   ]),
   description: z.string(),
-  confidence: z.number().min(0).max(1),
+  confidence: confidenceField,
 });
 
 export const nexusDriftRiskAlertSchema = z.object({
