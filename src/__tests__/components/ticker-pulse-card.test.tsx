@@ -1,11 +1,30 @@
 /** @vitest-environment jsdom */
 
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import TickerPulseCard from "@/components/market-pulse/TickerPulseCard";
 
 vi.mock("@/components/charts/PriceChart", () => ({
-  default: () => <div data-testid="price-chart" />,
+  default: ({
+    triggerMarkers,
+    onTriggerMarkerSelect,
+  }: {
+    triggerMarkers?: Array<{ id?: string; text: string }>;
+    onTriggerMarkerSelect?: (markerId: string | null) => void;
+  }) => (
+    <div data-testid="price-chart">
+      {triggerMarkers?.map((marker) => (
+        <button
+          key={marker.id ?? marker.text}
+          type="button"
+          onClick={() => onTriggerMarkerSelect?.(marker.id ?? null)}
+        >
+          marker {marker.text}
+        </button>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock("@/components/market-pulse/NarrativePanel", () => ({
@@ -101,5 +120,63 @@ describe("TickerPulseCard", () => {
       0,
     );
     expect(screen.getByText("Manual refresh queued for AAPL.")).toBeTruthy();
+  });
+
+  it("updates the focused event when a chart marker is selected", async () => {
+    render(
+      <TickerPulseCard
+        state={buildState({
+          classifications: [
+            {
+              id: 1,
+              candleTime: "2026-04-18T12:00:00.000Z",
+              eventBlurb: "Buyers defended the opening dip.",
+              significance: "medium",
+              tradability: "watch",
+              level: "candle",
+              classification: { control: "buyers" },
+            },
+            {
+              id: 2,
+              candleTime: "2026-04-18T12:15:00.000Z",
+              eventBlurb: "Sellers pushed back into resistance.",
+              significance: "high",
+              tradability: "actionable",
+              level: "candle",
+              classification: { control: "sellers" },
+            },
+          ],
+        })}
+        onRemove={vi.fn()}
+        onRefresh={vi.fn()}
+        removing={false}
+        refreshing={false}
+      />,
+    );
+
+    const focusedEventPanel = screen
+      .getByText("Focused Event")
+      .closest("div")?.parentElement;
+
+    expect(focusedEventPanel).toBeTruthy();
+    expect(
+      within(focusedEventPanel as HTMLElement).getByText(
+        "Sellers pushed back into resistance.",
+      ),
+    ).toBeTruthy();
+
+    act(() => {
+      screen
+        .getByRole("button", {
+          name: "marker Buyers defended the opening dip.",
+        })
+        .click();
+    });
+
+    expect(
+      within(focusedEventPanel as HTMLElement).getByText(
+        "Buyers defended the opening dip.",
+      ),
+    ).toBeTruthy();
   });
 });

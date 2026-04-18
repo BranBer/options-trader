@@ -69,6 +69,7 @@ export default function TickerPulseCard({
   refreshing: boolean;
 }) {
   const timelineItems = useMemo(() => buildTimelineItems(state), [state]);
+  const runHistoryId = `market-pulse-runs-${state.ticker.toLowerCase()}`;
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorTarget, setInspectorTarget] = useState<
@@ -105,6 +106,7 @@ export default function TickerPulseCard({
   const triggerMarkers = useMemo<TriggerMarker[]>(
     () =>
       state.classifications.map((item) => ({
+        id: `classification-${item.id}`,
         time: Math.floor(new Date(item.candleTime).getTime() / 1000),
         direction: controlToDirection(item.classification.control),
         type: item.level,
@@ -116,8 +118,9 @@ export default function TickerPulseCard({
           )?.close ?? 0,
         text: item.eventBlurb,
         primary: item.significance === "high",
+        selected: selectedTimelineId === `classification-${item.id}`,
       })),
-    [state],
+    [selectedTimelineId, state],
   );
 
   const selectedItem =
@@ -255,6 +258,11 @@ export default function TickerPulseCard({
                       height={360}
                       timeframe="1d"
                       triggerMarkers={triggerMarkers}
+                      onTriggerMarkerSelect={(markerId) => {
+                        if (markerId) {
+                          setSelectedTimelineId(markerId);
+                        }
+                      }}
                     />
                     {isBusy ? (
                       <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-[#07111b]/66 backdrop-blur-[1px]">
@@ -301,19 +309,25 @@ export default function TickerPulseCard({
                         </Button>
                       ) : null}
                     </div>
-                    <NarrativePanel narrative={state.narrative} />
+                    <NarrativePanel
+                      narrative={state.narrative}
+                      correlations={state.correlations}
+                      runHistoryHref={`#${runHistoryId}`}
+                    />
                   </div>
-                  <RunHistory
-                    ticker={state.ticker}
-                    onInspectRun={(runId) => {
-                      setInspectorTarget({
-                        type: "run",
-                        label: `${state.ticker} run ${runId.slice(0, 8)}`,
-                        runId,
-                      });
-                      setInspectorOpen(true);
-                    }}
-                  />
+                  <div id={runHistoryId}>
+                    <RunHistory
+                      ticker={state.ticker}
+                      onInspectRun={(runId) => {
+                        setInspectorTarget({
+                          type: "run",
+                          label: `${state.ticker} run ${runId.slice(0, 8)}`,
+                          runId,
+                        });
+                        setInspectorOpen(true);
+                      }}
+                    />
+                  </div>
                 </div>
                 <EventTimeline
                   items={timelineItems}

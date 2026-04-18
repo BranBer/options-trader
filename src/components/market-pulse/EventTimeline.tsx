@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +16,8 @@ export type TimelineItem = {
   detail: string;
   tone: "buyers" | "sellers" | "neutral" | "catalyst";
 };
+
+type TimelineFilter = "all" | "candle" | "sequence" | "catalyst";
 
 function toneClasses(tone: TimelineItem["tone"]) {
   if (tone === "buyers")
@@ -33,6 +36,17 @@ function formatTimeLabel(iso: string) {
     month: "short",
     day: "numeric",
   }).format(date);
+}
+
+function normalizeLevelLabel(level: string) {
+  if (level === "market_phase") return "market phase";
+  return level;
+}
+
+function itemMatchesFilter(item: TimelineItem, filter: TimelineFilter) {
+  if (filter === "all") return true;
+  if (filter === "catalyst") return item.tone === "catalyst";
+  return item.level === filter;
 }
 
 export function buildTimelineItems(state: TickerState): TimelineItem[] {
@@ -79,18 +93,62 @@ export default function EventTimeline({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all");
+
+  const filteredItems = useMemo(
+    () => items.filter((item) => itemMatchesFilter(item, activeFilter)),
+    [activeFilter, items],
+  );
+
+  useEffect(() => {
+    if (filteredItems.length === 0) return;
+    if (!selectedId || !filteredItems.some((item) => item.id === selectedId)) {
+      onSelect(filteredItems[0].id);
+    }
+  }, [filteredItems, onSelect, selectedId]);
+
   return (
     <Card size="sm" className="border-border/70 bg-background/70">
       <CardHeader>
         <CardTitle>Event Timeline</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {items.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["all", "All"],
+                ["candle", "Candle"],
+                ["sequence", "Sequence"],
+                ["catalyst", "Catalyst"],
+              ] as const
+            ).map(([filterKey, label]) => {
+              const isActive = activeFilter === filterKey;
+              return (
+                <Button
+                  key={filterKey}
+                  type="button"
+                  size="sm"
+                  variant={isActive ? "default" : "outline"}
+                  onClick={() => setActiveFilter(filterKey)}
+                  className="h-8 rounded-full px-3 text-xs"
+                >
+                  {label}
+                </Button>
+              );
+            })}
+          </div>
+        ) : null}
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No Market Pulse events have been stored for this ticker yet.
           </p>
+        ) : filteredItems.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No {activeFilter} events are available for this ticker yet.
+          </p>
         ) : (
-          items.map((item) => {
+          filteredItems.map((item) => {
             const selected = item.id === selectedId;
             return (
               <Button
@@ -102,7 +160,9 @@ export default function EventTimeline({
               >
                 <div className="w-full space-y-2">
                   <div className="flex items-center justify-between gap-3">
-                    <Badge variant="outline">{item.level}</Badge>
+                    <Badge variant="outline">
+                      {normalizeLevelLabel(item.level)}
+                    </Badge>
                     <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                       {formatTimeLabel(item.time)}
                     </span>

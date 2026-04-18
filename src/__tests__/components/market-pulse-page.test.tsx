@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MarketPulsePage from "@/components/market-pulse/MarketPulsePage";
+import { ToastProvider } from "@/components/shared/ToastProvider";
 
 const mockSubscriptionMutate = vi.fn();
 const mockRefreshMutate = vi.fn();
@@ -82,7 +83,11 @@ describe("MarketPulsePage", () => {
       },
     );
 
-    render(<MarketPulsePage />);
+    render(
+      <ToastProvider>
+        <MarketPulsePage />
+      </ToastProvider>,
+    );
 
     await user.click(screen.getByRole("button", { name: /tsla/i }));
 
@@ -101,7 +106,11 @@ describe("MarketPulsePage", () => {
       },
     );
 
-    render(<MarketPulsePage />);
+    render(
+      <ToastProvider>
+        <MarketPulsePage />
+      </ToastProvider>,
+    );
 
     await user.click(screen.getByRole("button", { name: /refresh aapl/i }));
 

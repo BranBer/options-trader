@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import QueryProvider from "@/components/shared/QueryProvider";
 import Navbar from "@/components/shared/Navbar";
 import { IndicatorModalProvider } from "@/components/charts/IndicatorExplainers";
+import { ToastProvider } from "@/components/shared/ToastProvider";
 
 const analyticsSans = IBM_Plex_Sans({
   variable: "--font-analytics-sans",
@@ -43,17 +44,19 @@ export default function RootLayout({
           Skip to main content
         </a>
         <QueryProvider>
-          <TooltipProvider>
-            <IndicatorModalProvider>
-              <Navbar />
-              <main
-                id="main-content"
-                className="flex-1 container mx-auto px-4 py-6"
-              >
-                {children}
-              </main>
-            </IndicatorModalProvider>
-          </TooltipProvider>
+          <ToastProvider>
+            <TooltipProvider>
+              <IndicatorModalProvider>
+                <Navbar />
+                <main
+                  id="main-content"
+                  className="flex-1 container mx-auto px-4 py-6"
+                >
+                  {children}
+                </main>
+              </IndicatorModalProvider>
+            </TooltipProvider>
+          </ToastProvider>
         </QueryProvider>
       </body>
     </html>

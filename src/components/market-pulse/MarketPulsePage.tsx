@@ -1,47 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { ActivitySquare, LineChart, Loader2, Radar } from "lucide-react";
 import TickerPulseCard from "@/components/market-pulse/TickerPulseCard";
 import TickerSelector from "@/components/market-pulse/TickerSelector";
+import { useToast } from "@/components/shared/ToastProvider";
 import {
   useMarketPulseRefreshMutation,
   useMarketPulseState,
   useMarketPulseSubscriptionMutation,
 } from "@/hooks/useMarketPulse";
 
-type ActionNotice = {
-  tone: "success" | "error" | "info";
-  message: string;
-};
-
-function noticeToneClasses(tone: ActionNotice["tone"]) {
-  if (tone === "success") {
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-100";
-  }
-
-  if (tone === "error") {
-    return "border-rose-500/30 bg-rose-500/10 text-rose-100";
-  }
-
-  return "border-sky-500/30 bg-sky-500/10 text-sky-100";
-}
-
 export default function MarketPulsePage() {
   const { data, isLoading, error } = useMarketPulseState();
   const subscriptionMutation = useMarketPulseSubscriptionMutation();
   const refreshMutation = useMarketPulseRefreshMutation();
-  const [notice, setNotice] = useState<ActionNotice | null>(null);
-
-  useEffect(() => {
-    if (!notice) return;
-
-    const timeoutId = window.setTimeout(() => {
-      setNotice(null);
-    }, 4000);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [notice]);
+  const { pushToast } = useToast();
 
   return (
     <div className="space-y-6">
@@ -102,26 +75,18 @@ export default function MarketPulsePage() {
             { ticker, action: "add" },
             {
               onSuccess: () => {
-                setNotice({
+                pushToast({
                   tone: "success",
                   message: `${ticker} is now tracked in Market Pulse.`,
                 });
               },
               onError: (mutationError) => {
-                setNotice({ tone: "error", message: mutationError.message });
+                pushToast({ tone: "error", message: mutationError.message });
               },
             },
           );
         }}
       />
-
-      {notice ? (
-        <div
-          className={`rounded-2xl border px-4 py-3 text-sm shadow-[0_16px_40px_rgba(2,6,23,0.18)] ${noticeToneClasses(notice.tone)}`}
-        >
-          {notice.message}
-        </div>
-      ) : null}
 
       {isLoading ? (
         <div className="flex min-h-60 items-center justify-center rounded-3xl border border-border/70 bg-card/60 text-muted-foreground">
@@ -148,13 +113,13 @@ export default function MarketPulsePage() {
                   { ticker, action: "remove" },
                   {
                     onSuccess: () => {
-                      setNotice({
+                      pushToast({
                         tone: "info",
                         message: `${ticker} was removed from Market Pulse.`,
                       });
                     },
                     onError: (mutationError) => {
-                      setNotice({
+                      pushToast({
                         tone: "error",
                         message: mutationError.message,
                       });
@@ -167,13 +132,13 @@ export default function MarketPulsePage() {
                   { ticker },
                   {
                     onSuccess: () => {
-                      setNotice({
+                      pushToast({
                         tone: "info",
                         message: `Manual refresh queued for ${ticker}.`,
                       });
                     },
                     onError: (mutationError) => {
-                      setNotice({
+                      pushToast({
                         tone: "error",
                         message: mutationError.message,
                       });

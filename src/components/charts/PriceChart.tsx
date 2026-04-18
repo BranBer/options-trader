@@ -47,6 +47,8 @@ import type {
 import { TriggerAnnotationPrimitive } from "./primitives/TriggerAnnotationPrimitive";
 
 export interface TriggerMarker {
+  /** Stable identifier used for linking chart markers back to external UI state */
+  id?: string;
   /** Candle time in seconds (lightweight-charts Time) */
   time: number;
   /** "bullish" | "bearish" | "neutral" */
@@ -59,6 +61,8 @@ export interface TriggerMarker {
   text: string;
   /** Whether this is the primary trigger (larger marker) */
   primary?: boolean;
+  /** Whether this marker is the active selection in external UI state */
+  selected?: boolean;
 }
 
 function isIntradayTimeframe(timeframe: ChartHistoryPeriod): boolean {
@@ -168,6 +172,8 @@ interface PriceChartProps {
   economicEvents?: EconomicEvent[];
   /** Trigger markers from the trigger engine */
   triggerMarkers?: TriggerMarker[];
+  /** Called when a chart marker is hovered or clicked and maps to a trigger marker id */
+  onTriggerMarkerSelect?: (markerId: string | null) => void;
   /** Trigger interaction drawings from the trigger engine */
   triggerAnnotations?: TriggerAnnotation[];
   /** Intraday-only resistance levels derived from session structure */
@@ -195,6 +201,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       onCalloutEntries,
       economicEvents,
       triggerMarkers,
+      onTriggerMarkerSelect,
       triggerAnnotations,
       intradayResistanceLevels,
       intradaySupportLevels,
@@ -787,6 +794,8 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           const isBullish = tm.direction === "bullish";
           const isBearish = tm.direction === "bearish";
 
+          const markerId = tm.id ?? `trigger-${resolvedTimeSec}-${tm.type}`;
+
           allMarkers.push({
             time: resolvedTimeSec as unknown as Time,
             position: isBearish ? "aboveBar" : "belowBar",
@@ -796,9 +805,9 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
               : isBearish
                 ? "#ef4444" // red-500
                 : "#f59e0b", // amber-500
-            size: tm.primary ? 2 : 1.5,
+            size: tm.selected ? 2.5 : tm.primary ? 2 : 1.5,
             text: `${tm.type} $${tm.level.toFixed(0)}`,
-            id: `trigger-${resolvedTimeSec}-${tm.type}`,
+            id: markerId,
           });
         }
       }
@@ -811,18 +820,35 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
 
       chart.timeScale().fitContent();
 
-      // Crosshair move for pattern hover detection
-      if (onHoveredPattern) {
+      // Crosshair move for pattern hover detection and marker linking
+      if (onHoveredPattern || onTriggerMarkerSelect) {
         chart.subscribeCrosshairMove((param) => {
           if (param.hoveredObjectId) {
             const idStr = String(param.hoveredObjectId);
             const match = idStr.match(/^pattern-(\d+)$/);
             if (match) {
-              onHoveredPattern(parseInt(match[1], 10));
+              onHoveredPattern?.(parseInt(match[1], 10));
+              return;
+            }
+
+            if (onTriggerMarkerSelect && idStr.startsWith("classification-")) {
+              onTriggerMarkerSelect(idStr);
               return;
             }
           }
-          onHoveredPattern(null);
+          onHoveredPattern?.(null);
+          onTriggerMarkerSelect?.(null);
+        });
+      }
+
+      if (onTriggerMarkerSelect) {
+        chart.subscribeClick((param) => {
+          if (!param.hoveredObjectId) return;
+
+          const idStr = String(param.hoveredObjectId);
+          if (idStr.startsWith("classification-")) {
+            onTriggerMarkerSelect(idStr);
+          }
         });
       }
 
@@ -868,6 +894,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       minConfidence,
       economicEvents,
       triggerMarkers,
+      onTriggerMarkerSelect,
       triggerAnnotations,
       intradayResistanceLevels,
       intradaySupportLevels,
