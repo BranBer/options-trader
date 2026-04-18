@@ -60,6 +60,40 @@ function resolveCollisions(items: RenderTriggerAnnotation[]): void {
   }
 }
 
+/**
+ * Draws a Lucide-style ChevronUp / ChevronDown on the canvas.
+ * The chevron is stroked (no fill) — same geometry as Lucide's icons
+ * (viewBox 0 0 24 24, centered at cx/cy, scaled to `size` px wide).
+ */
+function drawChevron(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  up: boolean,
+  color: string,
+  lineWidth: number,
+): void {
+  // Lucide chevron ratio: wing spread = full width, peak offset = 1/4 width
+  const hw = size / 2;
+  const hh = size / 4;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  if (up) {
+    ctx.moveTo(cx - hw, cy + hh);
+    ctx.lineTo(cx, cy - hh);
+    ctx.lineTo(cx + hw, cy + hh);
+  } else {
+    ctx.moveTo(cx - hw, cy - hh);
+    ctx.lineTo(cx, cy + hh);
+    ctx.lineTo(cx + hw, cy - hh);
+  }
+  ctx.stroke();
+}
+
 class TriggerAnnotationRenderer implements IPrimitivePaneRenderer {
   private _annotations: RenderTriggerAnnotation[] = [];
 
@@ -114,6 +148,19 @@ class TriggerAnnotationRenderer implements IPrimitivePaneRenderer {
         ctx.beginPath();
         ctx.arc(x, levelY, isPrimary ? 4 : 3, 0, Math.PI * 2);
         ctx.fill();
+
+        // ── Lucide chevron at anchor (candle bar) ────────────────────────
+        const isUp = annotation.direction === "bullish";
+        const chevSize = isPrimary ? 10 : 8;
+        drawChevron(
+          ctx,
+          x,
+          anchorY,
+          chevSize,
+          isUp,
+          color,
+          isPrimary ? 1.8 : 1.4,
+        );
 
         // ── Right-spine connector ─────────────────────────────────────────
         ctx.strokeStyle = color;

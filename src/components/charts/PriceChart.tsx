@@ -798,13 +798,13 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
           allMarkers.push({
             time: resolvedTimeSec as unknown as Time,
             position: isBearish ? "aboveBar" : "belowBar",
-            shape: isBearish ? "arrowDown" : "arrowUp",
+            shape: "circle",
             color: isBullish
               ? "#38bdf8" // sky-400
               : isBearish
                 ? "#fb7185" // rose-400
                 : "#fbbf24", // amber-400
-            size: tm.selected ? 2.5 : tm.primary ? 2 : 1.5,
+            size: tm.selected ? 1.5 : tm.primary ? 1 : 0.8,
             text: `${tm.type} $${tm.level.toFixed(0)}`,
             id: markerId,
           });
