@@ -9,16 +9,11 @@ import {
   crossReferenceAnalysis,
   generateRecommendation,
   generateDeepDive,
-  buildRichOptionsChainSummary,
 } from "@/lib/services/llm-analyzer";
 import {
   fetchMarketData,
-  fetchOptionsChain,
-  fetchHistoricalData,
   fetchVIX,
   fetchEarningsDate,
-  fetchEpsSurprise,
-  computeRealizedVol,
   getOrFetchShortInterest,
 } from "@/lib/services/market-fetcher";
 import { desc, gte, eq, and } from "drizzle-orm";
@@ -38,7 +33,6 @@ import {
 import { fetchSectorPerformance } from "@/lib/services/market-fetcher";
 import { computeCompositeConfidence } from "@/lib/utils/composite-confidence";
 import { isTimeframeAwareDeepDiveOutput } from "@/lib/utils/deep-dive-freshness";
-import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
 import {
   detectCascade,
   type NexusEarnings,
@@ -50,39 +44,27 @@ import type {
   DeepDiveAnalysis,
   TradeRecommendation,
   DeepDiveSummary,
+  RecommendationInput,
 } from "@/types/analysis";
 import {
   computeSignalScorecard,
   type ScorecardInput,
 } from "@/lib/utils/signal-scorecard";
-import {
-  buildTriggerReport,
-  type TriggerReport,
-} from "@/lib/utils/trigger-engine";
-import { computeAlgoSR } from "@/lib/utils/algo-sr";
-import { computeVolumeProfile } from "@/lib/utils/volume-profile";
 import { DEEP_DIVE_PIPELINE_VERSION } from "@/lib/cron/pipelines/pipeline-version";
+import { buildTickerAnalysisContext } from "@/lib/services/ticker-context-builder";
+import { buildRecommendationQueue } from "@/lib/services/recommendation-adapter";
+import { buildRichOptionsChainSummary } from "@/lib/prompts/options-chain-summary";
+import type { TickerAnalysisContext } from "@/types/ticker-context";
+import type { AnalysisTimeframe } from "@/lib/utils/chart-timeframes";
+import { getUpcomingCatalysts } from "@/lib/utils/economic-calendar";
+import {
+  getCachedNexusEarnings,
+  getNexusEarningsAge,
+} from "@/lib/services/nexus-earnings-cache";
 
 const MIN_CORRELATION_CONFIDENCE = 0.5;
 const RECOMMEND_CONCURRENCY = 2;
 const DEEP_DIVE_CONCURRENCY = 2;
-
-function getWhaleRefMetadata(
-  whales: Array<{ id: number; ticker: string; createdAt: string | null }>,
-  ticker: string,
-): { primaryWhaleId: number | null; whaleIds: number[] } {
-  const matches = whales
-    .filter((whale) => whale.ticker === ticker)
-    .sort(
-      (left, right) =>
-        Date.parse(right.createdAt ?? "") - Date.parse(left.createdAt ?? ""),
-    );
-
-  return {
-    primaryWhaleId: matches[0]?.id ?? null,
-    whaleIds: matches.slice(0, 5).map((whale) => whale.id),
-  };
-}
 
 /** Story 39.8 — extract a concise DeepDiveSummary from a full DeepDiveAnalysis */
 function extractDeepDiveSummary(dive: DeepDiveAnalysis): DeepDiveSummary {
@@ -124,15 +106,6 @@ function extractDeepDiveSummary(dive: DeepDiveAnalysis): DeepDiveSummary {
   };
 }
 
-/** Derive a simple whale direction string from a smart_money_signal value */
-function smartMoneyToDirection(
-  signal: string,
-): "bullish" | "bearish" | "neutral" {
-  if (signal.includes("bullish")) return "bullish";
-  if (signal.includes("bearish")) return "bearish";
-  return "neutral";
-}
-
 // Progress step indices (must match scheduler.ts init order)
 const STEP_CROSS_REF = 2;
 const STEP_RECOMMENDATIONS = 3;
@@ -141,6 +114,196 @@ const STEP_DEEP_DIVES = 4;
 // Story 17.2 — Reduced input limits for fallback
 const REDUCED_NEWS_LIMIT = 10;
 const REDUCED_WHALE_LIMIT = 15;
+
+async function getOrBuildContext(
+  cache: Map<string, TickerAnalysisContext>,
+  ticker: string,
+  timeframes: AnalysisTimeframe[],
+): Promise<TickerAnalysisContext> {
+  const context = await buildTickerAnalysisContext(ticker, {
+    timeframes,
+    existingContext: cache.get(ticker) ?? null,
+  });
+  cache.set(ticker, context);
+  return context;
+}
+
+function computePutCallRatio(
+  chain: TickerAnalysisContext["optionsChain"],
+): number | null {
+  if (!chain) return null;
+  const totalCallVol = chain.nearestExpiry.calls.reduce(
+    (sum, contract) => sum + contract.volume,
+    0,
+  );
+  const totalPutVol = chain.nearestExpiry.puts.reduce(
+    (sum, contract) => sum + contract.volume,
+    0,
+  );
+  return totalCallVol > 0 ? totalPutVol / totalCallVol : null;
+}
+
+async function persistMarketSnapshot(
+  ctx: TickerAnalysisContext,
+): Promise<void> {
+  const marketData = ctx.marketSnapshot;
+  if (!marketData) return;
+
+  try {
+    await db.insert(marketSnapshots).values({
+      ticker: marketData.ticker,
+      price: marketData.price,
+      volume: marketData.volume,
+      iv: ctx.atmIV ?? marketData.iv ?? null,
+      ivRank: marketData.ivRank ?? null,
+      dayChangePct: marketData.dayChangePct,
+      realizedVol: ctx.realizedVol,
+      ivRvSpread: ctx.ivRvSpread,
+    });
+  } catch {
+    /* ignore duplicate snapshot */
+  }
+}
+
+async function processRecommendationItems(args: {
+  items: RecommendationInput[];
+  contextCache: Map<string, TickerAnalysisContext>;
+  deepDiveMap: Map<string, DeepDiveAnalysis>;
+  macroBase: {
+    vixLevel: number | null;
+    vixRegime?: string;
+    fomcNextDate?: string;
+    fomcIsDecisionWeek?: boolean;
+  };
+  sectorRotationPrompt?: string;
+  recentNexusEarnings: Map<string, NexusEarnings>;
+  onProgress: (done: number, total: number) => void;
+}): Promise<number> {
+  let generated = 0;
+  let done = 0;
+
+  for (
+    let index = 0;
+    index < args.items.length;
+    index += RECOMMEND_CONCURRENCY
+  ) {
+    const chunk = args.items.slice(index, index + RECOMMEND_CONCURRENCY);
+    const results = await Promise.allSettled(
+      chunk.map(async (item) => {
+        const ticker = item.ticker;
+        const ctx = await getOrBuildContext(args.contextCache, ticker, [
+          "1W",
+          "1M",
+          "3M",
+        ]);
+        const marketData = ctx.marketSnapshot;
+        if (!marketData) {
+          console.warn(
+            `[AnalysisPipeline] No market snapshot for ${ticker}, skipping recommendation`,
+          );
+          return 0;
+        }
+
+        const chain = ctx.optionsChain;
+        const indicatorReport = ctx.indicatorsByTimeframe["3M"];
+        const indicatorReportsByTimeframe = ctx.indicatorsByTimeframe;
+        const earningsDate = await fetchEarningsDate(ticker);
+        const earningsCtx = getEarningsProximity(
+          earningsDate,
+          item.expiryForEarningsContext,
+        );
+        const cascadeContext = detectCascade(
+          ticker,
+          NEXUS_COMPANIES,
+          args.recentNexusEarnings,
+        );
+        const priorDive = args.deepDiveMap.get(ticker);
+        const deepDiveSummary = priorDive
+          ? extractDeepDiveSummary(priorDive)
+          : null;
+        const triggerReport = ctx.triggerReport;
+        const scorecardInput: ScorecardInput = {
+          whaleDirection: item.whaleDirection,
+          whalePremium: item.correlation.whale_trade.premium,
+          whaleOptionType: item.correlation.whale_trade.type,
+          indicatorReportsByTimeframe,
+          pcRatio: computePutCallRatio(chain),
+          gexPositioning: chain?.gex?.dealerPositioning ?? null,
+          shortInterest: ctx.shortInterest,
+          deepDiveSummary,
+          triggerReport,
+        };
+        const scorecard = computeSignalScorecard(scorecardInput);
+
+        const recommendation = await generateRecommendation(item.correlation, {
+          price: marketData.price ?? 0,
+          ivRank: ctx.atmIV != null ? Math.round(ctx.atmIV * 100) : undefined,
+          avgVolume: marketData.volume ?? 0,
+          todayVolume: marketData.volume ?? 0,
+          optionsChainSummary: chain
+            ? buildRichOptionsChainSummary(chain, marketData.price ?? 0)
+            : "No options chain data available",
+          macroContext: {
+            ...args.macroBase,
+            earningsDate: earningsCtx.earningsDate,
+            ivCrushRisk: earningsCtx.ivCrushRisk,
+          },
+          optionsAnalytics: chain
+            ? {
+                maxPain: chain.maxPain ?? null,
+                oiWalls: chain.oiWalls ?? null,
+                ivRvSpread: ctx.ivRvSpread,
+                realizedVol: ctx.realizedVol,
+                gex: chain.gex ?? null,
+              }
+            : undefined,
+          sectorRotationContext: args.sectorRotationPrompt,
+          indicatorReport,
+          indicatorReportsByTimeframe,
+          whaleIntentHint: item.whaleIntentHint,
+          shortInterest: ctx.shortInterest,
+          cascadeContext,
+          deepDiveSummary,
+          scorecard,
+          triggerReport,
+        });
+
+        await persistMarketSnapshot(ctx);
+        await db.insert(analyses).values({
+          type: "trade_recommendation",
+          inputRefs: JSON.stringify({
+            ...item.inputRefs,
+            triggerReport,
+          }),
+          output: JSON.stringify(recommendation),
+          confidence: recommendation.confidence,
+        });
+
+        console.log(
+          `[AnalysisPipeline] ${item.source === "whale_signal" ? "Whale-signal recommendation" : "Recommendation"} for ${ticker}: ${recommendation.direction} ` +
+            `(${recommendation.primary_strategy.name}, confidence: ${recommendation.confidence})`,
+        );
+        return 1;
+      }),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        generated += result.value;
+      } else {
+        console.error(
+          "[AnalysisPipeline] Recommendation failed:",
+          result.reason,
+        );
+      }
+    }
+
+    done += chunk.length;
+    args.onProgress(done, args.items.length);
+  }
+
+  return generated;
+}
 
 /**
  * Story 17.2 — Cross-reference with fallback: if the full call fails after
@@ -218,6 +381,7 @@ export async function runAnalysisPipeline(options?: {
   force?: boolean;
 }): Promise<number> {
   console.log("[AnalysisPipeline] Starting...");
+  const contextCache = new Map<string, TickerAnalysisContext>();
 
   // Step 0: Fetch macro context (VIX + FOMC) — used by recommendations + deep dives
   const vixLevel = await fetchVIX();
@@ -234,36 +398,12 @@ export async function runAnalysisPipeline(options?: {
       `FOMC next=${fomcCtx.nextDate} (decision week: ${fomcCtx.isDecisionWeek})`,
   );
 
-  // Step 0b: Nexus earnings monitor — check which nexus companies recently reported
-  const recentNexusEarnings = new Map<string, NexusEarnings>();
-  const CASCADE_WINDOW_MS = 72 * 60 * 60 * 1000; // 72 hours
-  for (const nexus of NEXUS_COMPANIES) {
-    try {
-      const earningsDate = await fetchEarningsDate(nexus.ticker);
-      if (!earningsDate) continue;
-      const reportedMs = new Date(earningsDate).getTime();
-      const hoursSince = (Date.now() - reportedMs) / (1000 * 60 * 60);
-      // Earnings date is in the past and within 72h = recently reported
-      if (hoursSince >= 0 && hoursSince <= 72) {
-        // Fetch real EPS surprise data (Story 43.7)
-        const epsData = await fetchEpsSurprise(nexus.ticker);
-        recentNexusEarnings.set(nexus.ticker, {
-          reportedAt: earningsDate,
-          epsSurprisePct: epsData?.epsSurprisePct ?? 0,
-        });
-        if (epsData) {
-          console.log(
-            `[AnalysisPipeline] ${nexus.ticker} EPS surprise: ${epsData.epsSurprisePct.toFixed(1)}% (actual=${epsData.epsActual}, est=${epsData.epsEstimate})`,
-          );
-        }
-      }
-    } catch {
-      // Non-critical — skip this nexus company
-    }
-  }
+  // Step 0b: Nexus earnings monitor — reuse cache populated outside the hot cycle.
+  const recentNexusEarnings = getCachedNexusEarnings();
   if (recentNexusEarnings.size > 0) {
+    const cacheAgeMinutes = Math.round(getNexusEarningsAge() / (1000 * 60));
     console.log(
-      `[AnalysisPipeline] Cascade monitor: ${recentNexusEarnings.size} nexus companies reported recently: ${[...recentNexusEarnings.keys()].join(", ")}`,
+      `[AnalysisPipeline] Cascade monitor: ${recentNexusEarnings.size} nexus companies reported recently (${cacheAgeMinutes}m old): ${[...recentNexusEarnings.keys()].join(", ")}`,
     );
   }
 
@@ -506,544 +646,35 @@ export async function runAnalysisPipeline(options?: {
   );
 
   const MIN_RECOMMENDATIONS = 3;
-  let recsGenerated = 0;
+  const recommendationItems = buildRecommendationQueue({
+    correlations: highConfCorrelations,
+    recentWhales,
+    minRecommendations: MIN_RECOMMENDATIONS,
+  });
 
   progress.activate(
     STEP_RECOMMENDATIONS,
-    highConfCorrelations.length > 0
-      ? `0/${highConfCorrelations.length} tickers`
-      : "whale signals",
+    recommendationItems.length > 0
+      ? `0/${recommendationItems.length} tickers`
+      : "none",
   );
 
-  if (highConfCorrelations.length > 0) {
+  if (recommendationItems.length > 0) {
     console.log(
-      `[AnalysisPipeline] Generating recommendations for ${highConfCorrelations.length} high-confidence correlations`,
+      `[AnalysisPipeline] Generating ${recommendationItems.length} recommendations (${highConfCorrelations.length} correlation-backed, ${recommendationItems.filter((item) => item.source === "whale_signal").length} whale-signal fallback)`,
     );
-
-    let recsDone = 0;
-    for (
-      let i = 0;
-      i < highConfCorrelations.length;
-      i += RECOMMEND_CONCURRENCY
-    ) {
-      const chunk = highConfCorrelations.slice(i, i + RECOMMEND_CONCURRENCY);
-      const results = await Promise.allSettled(
-        chunk.map(async (correlation) => {
-          const ticker = correlation.whale_trade.ticker;
-
-          // Fetch fresh market data for the ticker
-          const [marketData] = await fetchMarketData([ticker]);
-          const chain = await fetchOptionsChain(ticker);
-          const [candles1W, candles1M, candles3M] = await Promise.all([
-            fetchHistoricalData(ticker, "1wk"),
-            fetchHistoricalData(ticker, "1mo"),
-            fetchHistoricalData(ticker, "3mo"),
-          ]);
-
-          // Compute multi-timeframe indicator reports (Story 39.7)
-          const indicatorReport = detectAllIndicatorPatterns(
-            candles3M,
-            ticker,
-            "3M",
-          );
-          const indicatorReportsByTimeframe: Partial<
-            Record<string, ReturnType<typeof detectAllIndicatorPatterns>>
-          > = {
-            "1W":
-              candles1W.length > 0
-                ? detectAllIndicatorPatterns(candles1W, ticker, "1W")
-                : undefined,
-            "1M":
-              candles1M.length > 0
-                ? detectAllIndicatorPatterns(candles1M, ticker, "1M")
-                : undefined,
-            "3M": indicatorReport,
-          };
-          // Remove empty timeframes
-          for (const tf of Object.keys(
-            indicatorReportsByTimeframe,
-          ) as string[]) {
-            if (!indicatorReportsByTimeframe[tf])
-              delete indicatorReportsByTimeframe[tf];
-          }
-
-          // Compute IV-RV spread for options pricing context
-          let realizedVol: number | null = null;
-          let ivRvSpread: number | null = null;
-          let atmIV: number | null = null;
-          if (chain && marketData) {
-            const allContracts = [
-              ...chain.nearestExpiry.calls,
-              ...chain.nearestExpiry.puts,
-            ];
-            const atmContracts = allContracts.filter(
-              (c) =>
-                Math.abs(c.strike - marketData.price) / marketData.price <
-                  0.05 && c.iv > 0,
-            );
-            if (atmContracts.length > 0) {
-              atmIV =
-                atmContracts.reduce((s, c) => s + c.iv, 0) /
-                atmContracts.length;
-              realizedVol = computeRealizedVol(candles3M);
-              if (realizedVol != null && atmIV != null) {
-                ivRvSpread = atmIV - realizedVol;
-              }
-            }
-          }
-
-          // Fetch earnings date for IV crush risk context
-          const earningsDate = await fetchEarningsDate(ticker);
-          const earningsCtx = getEarningsProximity(
-            earningsDate,
-            correlation.whale_trade.expiry,
-          );
-
-          // Fetch short interest (24h cached)
-          const siData = await getOrFetchShortInterest(ticker).catch(
-            () => null,
-          );
-
-          // Cascade detection for this ticker
-          const cascadeCtx = detectCascade(
-            ticker,
-            NEXUS_COMPANIES,
-            recentNexusEarnings,
-          );
-
-          // Story 39.8 — deep dive summary from previous cycle (if available)
-          const priorDive = deepDiveMap.get(ticker);
-          const deepDiveSummary = priorDive
-            ? extractDeepDiveSummary(priorDive)
-            : null;
-
-          // Story 39.11 — compute signal scorecard
-          let pcRatio: number | null = null;
-          if (chain) {
-            const totalCallVol = chain.nearestExpiry.calls.reduce(
-              (s, c) => s + c.volume,
-              0,
-            );
-            const totalPutVol = chain.nearestExpiry.puts.reduce(
-              (s, c) => s + c.volume,
-              0,
-            );
-            pcRatio = totalCallVol > 0 ? totalPutVol / totalCallVol : null;
-          }
-          // Story 48.6 — compute trigger report from 3M daily candles
-          let triggerReport: TriggerReport | null = null;
-          if (candles3M.length >= 10 && marketData) {
-            const vp = computeVolumeProfile(candles3M);
-            const algoSRLevels = computeAlgoSR({
-              candles: candles3M,
-              currentPrice: marketData.price,
-              volumeProfile: vp,
-              oiWalls: chain?.oiWalls ?? null,
-              maxPain: chain?.maxPain ?? null,
-              gex:
-                (chain?.gex as
-                  | import("@/lib/utils/gex-calculator").GEXSummary
-                  | null) ?? null,
-            });
-            triggerReport = buildTriggerReport({
-              ticker,
-              candles: candles3M,
-              algoSRLevels,
-              volumeProfile: vp,
-              dailyPatterns: indicatorReport ?? null, // 3M daily candle patterns
-              htfPatterns: [
-                indicatorReportsByTimeframe?.["1W"],
-                indicatorReportsByTimeframe?.["1M"],
-                indicatorReportsByTimeframe?.["3M"],
-              ].filter((r): r is NonNullable<typeof r> => r != null),
-            });
-          }
-
-          const scorecardInput: ScorecardInput = {
-            whaleDirection: smartMoneyToDirection(
-              correlation.smart_money_signal,
-            ),
-            whalePremium: correlation.whale_trade.premium,
-            whaleOptionType: correlation.whale_trade.type,
-            indicatorReportsByTimeframe,
-            pcRatio,
-            gexPositioning: chain?.gex?.dealerPositioning ?? null,
-            shortInterest: siData,
-            deepDiveSummary,
-            triggerReport,
-          };
-          const scorecard = computeSignalScorecard(scorecardInput);
-
-          const recommendation = await generateRecommendation(correlation, {
-            price: marketData?.price ?? 0,
-            ivRank: atmIV != null ? Math.round(atmIV * 100) : undefined,
-            avgVolume: marketData?.volume ?? 0,
-            todayVolume: marketData?.volume ?? 0,
-            optionsChainSummary: chain
-              ? buildRichOptionsChainSummary(chain, marketData?.price ?? 0)
-              : "No options chain data available",
-            macroContext: {
-              ...macroBase,
-              earningsDate: earningsCtx.earningsDate,
-              ivCrushRisk: earningsCtx.ivCrushRisk,
-            },
-            optionsAnalytics: chain
-              ? {
-                  maxPain: chain.maxPain ?? null,
-                  oiWalls: chain.oiWalls ?? null,
-                  ivRvSpread,
-                  realizedVol,
-                  gex: chain.gex ?? null,
-                }
-              : undefined,
-            sectorRotationContext: sectorRotationPrompt,
-            indicatorReport,
-            indicatorReportsByTimeframe,
-            whaleIntentHint:
-              recentWhales.find((w) => w.ticker === ticker)?.intentHint ?? null,
-            shortInterest: siData,
-            cascadeContext: cascadeCtx,
-            deepDiveSummary,
-            scorecard,
-            triggerReport,
-          });
-          if (marketData) {
-            try {
-              await db.insert(marketSnapshots).values({
-                ticker: marketData.ticker,
-                price: marketData.price,
-                volume: marketData.volume,
-                iv: atmIV ?? marketData.iv ?? null,
-                ivRank: marketData.ivRank ?? null,
-                dayChangePct: marketData.dayChangePct,
-                realizedVol,
-                ivRvSpread,
-              });
-            } catch {
-              /* ignore duplicate snapshot */
-            }
-          }
-
-          // Store recommendation
-          const whaleRefMetadata = getWhaleRefMetadata(recentWhales, ticker);
-          await db.insert(analyses).values({
-            type: "trade_recommendation",
-            inputRefs: JSON.stringify({
-              correlationTicker: ticker,
-              correlationConfidence: correlation.correlation_confidence,
-              primaryWhaleId: whaleRefMetadata.primaryWhaleId,
-              whaleIds: whaleRefMetadata.whaleIds,
-              triggerReport,
-            }),
-            output: JSON.stringify(recommendation),
-            confidence: recommendation.confidence,
-          });
-
-          console.log(
-            `[AnalysisPipeline] Recommendation for ${ticker}: ${recommendation.direction} ` +
-              `(${recommendation.primary_strategy.name}, confidence: ${recommendation.confidence})`,
-          );
-          return 1;
-        }),
-      );
-
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          stored += result.value;
-          recsGenerated += result.value;
-        } else
-          console.error(
-            "[AnalysisPipeline] Recommendation failed:",
-            result.reason,
-          );
-      }
-      recsDone += chunk.length;
-      progress.updateDetail(
-        STEP_RECOMMENDATIONS,
-        `${recsDone}/${highConfCorrelations.length} tickers`,
-      );
-    }
-  }
-
-  // Step 4b: Fallback — generate whale-signal-only recommendations if correlations were insufficient
-  if (recsGenerated < MIN_RECOMMENDATIONS) {
-    const remaining = MIN_RECOMMENDATIONS - recsGenerated;
-    const recTickers = new Set(
-      highConfCorrelations.map((c) => c.whale_trade.ticker),
-    );
-
-    // Sort whale alerts by premium descending, deduplicate by ticker, skip already-recommended
-    const fallbackWhales: Array<{
-      ticker: string;
-      type: "call" | "put";
-      premium: number;
-      note: string;
-    }> = [];
-    const fbSeen = new Set<string>();
-    for (const w of [...recentWhales].sort(
-      (a, b) => (b.premium ?? 0) - (a.premium ?? 0),
-    )) {
-      if (fbSeen.has(w.ticker) || recTickers.has(w.ticker)) continue;
-      fbSeen.add(w.ticker);
-      fallbackWhales.push({
-        ticker: w.ticker,
-        type: w.callPut === "P" ? "put" : "call",
-        premium: w.premium ?? 0,
-        note: `${w.callPut === "P" ? "Put" : "Call"} $${((w.premium ?? 0) / 1e6).toFixed(1)}M premium`,
-      });
-      if (fallbackWhales.length >= remaining) break;
-    }
-
-    if (fallbackWhales.length > 0) {
-      console.log(
-        `[AnalysisPipeline] Generating ${fallbackWhales.length} whale-signal-only recommendations (fallback)`,
-      );
-
-      for (let i = 0; i < fallbackWhales.length; i += RECOMMEND_CONCURRENCY) {
-        const chunk = fallbackWhales.slice(i, i + RECOMMEND_CONCURRENCY);
-        const results = await Promise.allSettled(
-          chunk.map(async (uncorr) => {
-            const ticker = uncorr.ticker;
-            // Find full whale alert details
-            const whaleRow = recentWhales.find((w) => w.ticker === ticker);
-
-            // Build a synthetic correlation for the recommendation prompt
-            const syntheticCorrelation = {
-              whale_trade: {
-                ticker,
-                strike: whaleRow?.strike ?? 0,
-                expiry: whaleRow?.expiry ?? "",
-                type: uncorr.type as "call" | "put",
-                premium: uncorr.premium,
-                volume: whaleRow?.volume ?? 0,
-              },
-              related_event: {
-                headline: "No specific news catalyst — pure whale-signal trade",
-                impact_score: 0,
-                event_type: "whale_signal_only",
-              },
-              correlation_confidence: 0,
-              alignment: "confirming" as const,
-              thesis: uncorr.note,
-              smart_money_signal: "bullish" as const,
-            };
-
-            const [marketData] = await fetchMarketData([ticker]);
-            const chain = await fetchOptionsChain(ticker);
-            const [candles1W, candles1M, candles3M] = await Promise.all([
-              fetchHistoricalData(ticker, "1wk"),
-              fetchHistoricalData(ticker, "1mo"),
-              fetchHistoricalData(ticker, "3mo"),
-            ]);
-
-            let realizedVol: number | null = null;
-            let ivRvSpread: number | null = null;
-            let atmIV: number | null = null;
-            const indicatorReport = detectAllIndicatorPatterns(
-              candles3M,
-              ticker,
-              "3M",
-            );
-            const indicatorReportsByTimeframe: Partial<
-              Record<string, ReturnType<typeof detectAllIndicatorPatterns>>
-            > = {
-              "1W":
-                candles1W.length > 0
-                  ? detectAllIndicatorPatterns(candles1W, ticker, "1W")
-                  : undefined,
-              "1M":
-                candles1M.length > 0
-                  ? detectAllIndicatorPatterns(candles1M, ticker, "1M")
-                  : undefined,
-              "3M": indicatorReport,
-            };
-            for (const tf of Object.keys(
-              indicatorReportsByTimeframe,
-            ) as string[]) {
-              if (!indicatorReportsByTimeframe[tf])
-                delete indicatorReportsByTimeframe[tf];
-            }
-            if (chain && marketData) {
-              const allContracts = [
-                ...chain.nearestExpiry.calls,
-                ...chain.nearestExpiry.puts,
-              ];
-              const atmContracts = allContracts.filter(
-                (c) =>
-                  Math.abs(c.strike - marketData.price) / marketData.price <
-                    0.05 && c.iv > 0,
-              );
-              if (atmContracts.length > 0) {
-                atmIV =
-                  atmContracts.reduce((s, c) => s + c.iv, 0) /
-                  atmContracts.length;
-                realizedVol = computeRealizedVol(candles3M);
-                if (realizedVol != null && atmIV != null) {
-                  ivRvSpread = atmIV - realizedVol;
-                }
-              }
-            }
-
-            const earningsDate = await fetchEarningsDate(ticker);
-            const earningsCtx = getEarningsProximity(
-              earningsDate,
-              whaleRow?.expiry ?? "",
-            );
-
-            // Story 39.8/39.11 — deep dive context + scorecard for fallback recs
-            const priorDiveFb = deepDiveMap.get(ticker);
-            const deepDiveSummaryFb = priorDiveFb
-              ? extractDeepDiveSummary(priorDiveFb)
-              : null;
-            let pcRatioFb: number | null = null;
-            if (chain) {
-              const tcv = chain.nearestExpiry.calls.reduce(
-                (s, c) => s + c.volume,
-                0,
-              );
-              const tpv = chain.nearestExpiry.puts.reduce(
-                (s, c) => s + c.volume,
-                0,
-              );
-              pcRatioFb = tcv > 0 ? tpv / tcv : null;
-            }
-            const fbSiData = await getOrFetchShortInterest(ticker).catch(
-              () => null,
-            );
-
-            // Story 48.6 — trigger report for fallback recs
-            let triggerReportFb: TriggerReport | null = null;
-            if (candles3M.length >= 10 && marketData) {
-              const vpFb = computeVolumeProfile(candles3M);
-              const algoSRFb = computeAlgoSR({
-                candles: candles3M,
-                currentPrice: marketData.price,
-                volumeProfile: vpFb,
-                oiWalls: chain?.oiWalls ?? null,
-                maxPain: chain?.maxPain ?? null,
-                gex:
-                  (chain?.gex as
-                    | import("@/lib/utils/gex-calculator").GEXSummary
-                    | null) ?? null,
-              });
-              triggerReportFb = buildTriggerReport({
-                ticker,
-                candles: candles3M,
-                algoSRLevels: algoSRFb,
-                volumeProfile: vpFb,
-                dailyPatterns: indicatorReport ?? null, // 3M daily candle patterns
-                htfPatterns: [
-                  indicatorReportsByTimeframe?.["1W"],
-                  indicatorReportsByTimeframe?.["1M"],
-                  indicatorReportsByTimeframe?.["3M"],
-                ].filter((r): r is NonNullable<typeof r> => r != null),
-              });
-            }
-
-            const scorecardFb = computeSignalScorecard({
-              whaleDirection: uncorr.type === "put" ? "bearish" : "bullish",
-              whalePremium: uncorr.premium,
-              whaleOptionType: uncorr.type,
-              indicatorReportsByTimeframe,
-              pcRatio: pcRatioFb,
-              gexPositioning: chain?.gex?.dealerPositioning ?? null,
-              shortInterest: fbSiData,
-              deepDiveSummary: deepDiveSummaryFb,
-              triggerReport: triggerReportFb,
-            });
-
-            const recommendation = await generateRecommendation(
-              syntheticCorrelation,
-              {
-                price: marketData?.price ?? 0,
-                ivRank: atmIV != null ? Math.round(atmIV * 100) : undefined,
-                avgVolume: marketData?.volume ?? 0,
-                todayVolume: marketData?.volume ?? 0,
-                optionsChainSummary: chain
-                  ? buildRichOptionsChainSummary(chain, marketData?.price ?? 0)
-                  : "No options chain data available",
-                macroContext: {
-                  ...macroBase,
-                  earningsDate: earningsCtx.earningsDate,
-                  ivCrushRisk: earningsCtx.ivCrushRisk,
-                },
-                optionsAnalytics: chain
-                  ? {
-                      maxPain: chain.maxPain ?? null,
-                      oiWalls: chain.oiWalls ?? null,
-                      ivRvSpread,
-                      realizedVol,
-                      gex: chain.gex ?? null,
-                    }
-                  : undefined,
-                sectorRotationContext: sectorRotationPrompt,
-                indicatorReport,
-                indicatorReportsByTimeframe,
-                whaleIntentHint: whaleRow?.intentHint ?? null,
-                cascadeContext: detectCascade(
-                  ticker,
-                  NEXUS_COMPANIES,
-                  recentNexusEarnings,
-                ),
-                deepDiveSummary: deepDiveSummaryFb,
-                scorecard: scorecardFb,
-                triggerReport: triggerReportFb,
-              },
-            );
-
-            if (marketData) {
-              try {
-                await db.insert(marketSnapshots).values({
-                  ticker: marketData.ticker,
-                  price: marketData.price,
-                  volume: marketData.volume,
-                  iv: atmIV ?? marketData.iv ?? null,
-                  ivRank: marketData.ivRank ?? null,
-                  dayChangePct: marketData.dayChangePct,
-                  realizedVol,
-                  ivRvSpread,
-                });
-              } catch {
-                /* ignore duplicate snapshot */
-              }
-            }
-
-            await db.insert(analyses).values({
-              type: "trade_recommendation",
-              inputRefs: JSON.stringify({
-                whaleSignalTicker: ticker,
-                whaleSignalOnly: true,
-                primaryWhaleId: whaleRow?.id ?? null,
-                whaleIds: whaleRow?.id != null ? [whaleRow.id] : [],
-              }),
-              output: JSON.stringify(recommendation),
-              confidence: recommendation.confidence,
-            });
-
-            console.log(
-              `[AnalysisPipeline] Whale-signal recommendation for ${ticker}: ${recommendation.direction} ` +
-                `(${recommendation.primary_strategy.name}, confidence: ${recommendation.confidence})`,
-            );
-            return 1;
-          }),
-        );
-
-        for (const result of results) {
-          if (result.status === "fulfilled") {
-            stored += result.value;
-            recsGenerated += result.value;
-          } else
-            console.error(
-              "[AnalysisPipeline] Whale-signal recommendation failed:",
-              result.reason,
-            );
-        }
-        progress.updateDetail(
-          STEP_RECOMMENDATIONS,
-          `${recsGenerated} recs (${fallbackWhales.length} whale-signal)`,
-        );
-      }
-    }
+    const recsGenerated = await processRecommendationItems({
+      items: recommendationItems,
+      contextCache,
+      deepDiveMap,
+      macroBase,
+      sectorRotationPrompt,
+      recentNexusEarnings,
+      onProgress: (done, total) => {
+        progress.updateDetail(STEP_RECOMMENDATIONS, `${done}/${total} tickers`);
+      },
+    });
+    stored += recsGenerated;
   }
   progress.complete(STEP_RECOMMENDATIONS);
 
@@ -1206,56 +837,28 @@ export async function runAnalysisPipeline(options?: {
       const chunk = deepDiveQueue.slice(i, i + DEEP_DIVE_CONCURRENCY);
       const results = await Promise.allSettled(
         chunk.map(async (item) => {
-          // Fetch historical data + options chain + current price
-          const [
-            historicalData1D,
-            historicalData1W,
-            historicalData1M,
-            historicalData3M,
-            historicalData6M,
-            historicalData1Y,
-            chain,
-            [marketSnap],
-          ] = await Promise.all([
-            fetchHistoricalData(item.ticker, "1d"),
-            fetchHistoricalData(item.ticker, "1wk"),
-            fetchHistoricalData(item.ticker, "1mo"),
-            fetchHistoricalData(item.ticker, "3mo"),
-            fetchHistoricalData(item.ticker, "6mo"),
-            fetchHistoricalData(item.ticker, "1y"),
-            fetchOptionsChain(item.ticker),
-            fetchMarketData([item.ticker]),
+          const ctx = await getOrBuildContext(contextCache, item.ticker, [
+            "1D",
+            "1W",
+            "1M",
+            "3M",
+            "6M",
+            "1Y",
           ]);
+          const historicalData1D = ctx.candlesByTimeframe["1D"] ?? [];
+          const historicalData1W = ctx.candlesByTimeframe["1W"] ?? [];
+          const historicalData1M = ctx.candlesByTimeframe["1M"] ?? [];
+          const historicalData3M = ctx.candlesByTimeframe["3M"] ?? [];
+          const historicalData6M = ctx.candlesByTimeframe["6M"] ?? [];
+          const historicalData1Y = ctx.candlesByTimeframe["1Y"] ?? [];
           const historicalData = historicalData3M;
-
-          const currentPrice = marketSnap?.price ?? 0;
+          const chain = ctx.optionsChain;
+          const currentPrice = ctx.marketSnapshot?.price ?? 0;
           if (currentPrice === 0) {
             console.warn(
               `[AnalysisPipeline] No price data for ${item.ticker}, skipping deep dive`,
             );
             return 0;
-          }
-
-          // Compute IV-RV spread for deep dive options context
-          let ddRealizedVol: number | null = null;
-          let ddIvRvSpread: number | null = null;
-          if (chain && currentPrice > 0) {
-            const allC = [
-              ...chain.nearestExpiry.calls,
-              ...chain.nearestExpiry.puts,
-            ];
-            const atm = allC.filter(
-              (c) =>
-                Math.abs(c.strike - currentPrice) / currentPrice < 0.05 &&
-                c.iv > 0,
-            );
-            if (atm.length > 0) {
-              const avgIV = atm.reduce((s, c) => s + c.iv, 0) / atm.length;
-              ddRealizedVol = computeRealizedVol(historicalData);
-              if (ddRealizedVol != null) {
-                ddIvRvSpread = avgIV - ddRealizedVol;
-              }
-            }
           }
 
           const { deepDive, triggerReport: ddTriggerReport } =
@@ -1280,19 +883,28 @@ export async function runAnalysisPipeline(options?: {
                 ? {
                     maxPain: chain.maxPain ?? null,
                     oiWalls: chain.oiWalls ?? null,
-                    ivRvSpread: ddIvRvSpread,
-                    realizedVol: ddRealizedVol,
+                    ivRvSpread: ctx.ivRvSpread,
+                    realizedVol: ctx.realizedVol,
                     gex: chain.gex ?? null,
                   }
                 : undefined,
-              shortInterest: await getOrFetchShortInterest(item.ticker).catch(
-                () => null,
-              ),
+              computedIndicators: ctx.indicatorsByTimeframe,
+              shortInterest: ctx.shortInterest,
               cascadeContext: detectCascade(
                 item.ticker,
                 NEXUS_COMPANIES,
                 recentNexusEarnings,
               ),
+              signalHierarchy: {
+                currentPrice,
+                earningsDate: macroBase.earningsDate,
+                volumeProfile: ctx.volumeProfile,
+                algoSR: ctx.algoSR,
+                ivSkew: ctx.ivSkew,
+                oiSummary: ctx.oiSummary,
+                catalysts: getUpcomingCatalysts(14),
+              },
+              triggerReport: ctx.triggerReport,
             });
 
           await db.insert(analyses).values({

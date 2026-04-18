@@ -53,6 +53,7 @@ export interface WhaleAlertRow {
   detectedAt: string | null;
   qualityScore: number | null;
   createdAt: string | null;
+  intentHint?: string | null;
   // Enriched by API (not present in raw DB rows)
   shortPercentOfFloat?: number | null;
   shortRatio?: number | null;

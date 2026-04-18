@@ -5,7 +5,7 @@ import {
 } from "@/lib/services/llm-analyzer";
 import { db } from "@/lib/db/client";
 import { newsEvents } from "@/lib/db/schema";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, inArray, or } from "drizzle-orm";
 import { autoTriggerEventAnalysis } from "@/lib/services/event-ticker-analyzer";
 import type { RawNewsArticle } from "@/types/news";
 import { fetchAllTechNews } from "@/lib/services/tech-news-fetcher";
@@ -19,6 +19,44 @@ interface ClassifyAndStoreNewsOptions {
   category?: "general" | "tech";
   classifierConfig?: ClassifyNewsConfig;
   autoTriggerMinImpact?: number;
+}
+
+async function getInsertedNewsEvents(
+  rows: Array<{ headline: string; url: string | null }>,
+) {
+  const urls = rows.map((row) => row.url).filter((url): url is string => !!url);
+  const headlines = rows.filter((row) => !row.url).map((row) => row.headline);
+
+  if (urls.length > 0 && headlines.length > 0) {
+    return db
+      .select()
+      .from(newsEvents)
+      .where(
+        or(
+          inArray(newsEvents.url, urls),
+          inArray(newsEvents.headline, headlines),
+        ),
+      )
+      .orderBy(desc(newsEvents.id));
+  }
+
+  if (urls.length > 0) {
+    return db
+      .select()
+      .from(newsEvents)
+      .where(inArray(newsEvents.url, urls))
+      .orderBy(desc(newsEvents.id));
+  }
+
+  if (headlines.length > 0) {
+    return db
+      .select()
+      .from(newsEvents)
+      .where(inArray(newsEvents.headline, headlines))
+      .orderBy(desc(newsEvents.id));
+  }
+
+  return [];
 }
 
 /**
@@ -109,28 +147,16 @@ export async function classifyAndStoreNews(
   }
 
   let stored = 0;
-  const insertedEvents = [];
-  for (const row of rows) {
-    try {
-      await db.insert(newsEvents).values(row);
-      stored++;
-
-      const [inserted] = await db
-        .select()
-        .from(newsEvents)
-        .where(
-          row.url
-            ? eq(newsEvents.url, row.url)
-            : eq(newsEvents.headline, row.headline),
-        )
-        .orderBy(desc(newsEvents.id))
-        .limit(1);
-      if (inserted) {
-        insertedEvents.push(inserted);
-      }
-    } catch (error) {
-      console.warn(`[NewsPipeline] Failed to insert: ${row.headline}`, error);
-    }
+  let insertedEvents: Awaited<ReturnType<typeof getInsertedNewsEvents>> = [];
+  try {
+    await db.insert(newsEvents).values(rows);
+    stored = rows.length;
+    insertedEvents = await getInsertedNewsEvents(rows);
+  } catch (error) {
+    console.warn(
+      `[NewsPipeline:${category}] Batch insert failed for ${rows.length} article(s)`,
+      error,
+    );
   }
 
   if (insertedEvents.length > 0) {

@@ -6,9 +6,11 @@ const mockFetchAllTechNews = vi.fn();
 const mockClassifyAndStoreNews = vi.fn();
 const mockRunWhalePipeline = vi.fn();
 const mockRunAnalysisPipeline = vi.fn();
+const mockRefreshNexusEarnings = vi.fn().mockResolvedValue(new Map());
 const mockRecordPipelineRunStart = vi.fn(() => 101);
 const mockRecordPipelineRunCompletion = vi.fn(() => "2026-04-02T12:30:00.000Z");
 const mockGetLastCompletedPipelineRefreshAt = vi.fn(() => null);
+const mockCronSchedule = vi.fn();
 
 vi.mock("@/lib/services/news-fetcher", () => ({
   fetchAllNews: (...args: unknown[]) => mockFetchAllNews(...args),
@@ -36,8 +38,13 @@ vi.mock("@/lib/cron/pipelines/analysis-pipeline", () => ({
   runAnalysisPipeline: (...args: unknown[]) => mockRunAnalysisPipeline(...args),
 }));
 
+vi.mock("@/lib/services/nexus-earnings-cache", () => ({
+  refreshNexusEarnings: (...args: unknown[]) =>
+    mockRefreshNexusEarnings(...args),
+}));
+
 vi.mock("node-cron", () => ({
-  default: { schedule: vi.fn() },
+  default: { schedule: (...args: unknown[]) => mockCronSchedule(...args) },
 }));
 
 vi.mock("@/lib/cron/pipeline-run-store", () => ({
@@ -49,7 +56,7 @@ vi.mock("@/lib/cron/pipeline-run-store", () => ({
     mockGetLastCompletedPipelineRefreshAt(...args),
 }));
 
-import { runPipeline } from "@/lib/cron/scheduler";
+import { runPipeline, startScheduler } from "@/lib/cron/scheduler";
 import * as progress from "@/lib/cron/pipeline-progress";
 
 describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
@@ -61,6 +68,7 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
     mockRunWhalePipeline.mockResolvedValue(0);
     mockClassifyAndStoreNews.mockResolvedValue(0);
     mockRunAnalysisPipeline.mockResolvedValue(0);
+    mockRefreshNexusEarnings.mockResolvedValue(new Map());
     mockRecordPipelineRunStart.mockReturnValue(101);
     mockRecordPipelineRunCompletion.mockReturnValue("2026-04-02T12:30:00.000Z");
     mockGetLastCompletedPipelineRefreshAt.mockReturnValue(null);
@@ -144,5 +152,12 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
       classify: "ok",
       analysis: "error",
     });
+  });
+
+  it("warms nexus earnings cache on scheduler startup", async () => {
+    startScheduler();
+
+    expect(mockCronSchedule).toHaveBeenCalledTimes(3);
+    expect(mockRefreshNexusEarnings).toHaveBeenCalledTimes(1);
   });
 });

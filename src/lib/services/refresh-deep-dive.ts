@@ -2,16 +2,7 @@ import { db } from "@/lib/db/client";
 import { analyses, newsEvents, whaleAlerts } from "@/lib/db/schema";
 import { and, desc, gte, eq } from "drizzle-orm";
 import { generateDeepDive } from "@/lib/services/llm-analyzer";
-import {
-  fetchMarketData,
-  fetchOptionsChain,
-  fetchHistoricalData,
-  fetchVIX,
-  fetchEarningsDate,
-  computeRealizedVol,
-  getOrFetchShortInterest,
-} from "@/lib/services/market-fetcher";
-import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
+import { fetchVIX, fetchEarningsDate } from "@/lib/services/market-fetcher";
 import { buildVIXContext } from "@/lib/utils/vix-regimes";
 import { getEarningsProximity } from "@/lib/utils/earnings-proximity";
 import { getFOMCProximity } from "@/lib/utils/fomc-calendar";
@@ -23,6 +14,8 @@ import {
 import { DEEP_DIVE_PIPELINE_VERSION } from "@/lib/cron/pipelines/pipeline-version";
 import type { TriggerReport } from "@/lib/utils/trigger-engine";
 import type { DeepDiveAnalysis } from "@/types/analysis";
+import { buildTickerAnalysisContext } from "@/lib/services/ticker-context-builder";
+import { getUpcomingCatalysts } from "@/lib/utils/economic-calendar";
 
 const YAHOO_CALLS_PER_REFRESH = 9; // 8 per-ticker + 1 VIX
 
@@ -103,60 +96,23 @@ export async function refreshTickerDeepDive(
   };
 
   // Step 4: Fetch all per-ticker market data in parallel
-  const [
-    historicalData1D,
-    historicalData1W,
-    historicalData1M,
-    historicalData3M,
-    historicalData6M,
-    historicalData1Y,
-    chain,
-    marketDataResults,
-    earningsDate,
-  ] = await Promise.all([
-    fetchHistoricalData(normalizedTicker, "1d"),
-    fetchHistoricalData(normalizedTicker, "1wk"),
-    fetchHistoricalData(normalizedTicker, "1mo"),
-    fetchHistoricalData(normalizedTicker, "3mo"),
-    fetchHistoricalData(normalizedTicker, "6mo"),
-    fetchHistoricalData(normalizedTicker, "1y"),
-    fetchOptionsChain(normalizedTicker),
-    fetchMarketData([normalizedTicker]),
+  const [ctx, earningsDate] = await Promise.all([
+    buildTickerAnalysisContext(normalizedTicker, {
+      timeframes: ["1D", "1W", "1M", "3M", "6M", "1Y"],
+    }),
     fetchEarningsDate(normalizedTicker),
   ]);
   recordApiCall("yahoo", YAHOO_CALLS_PER_REFRESH);
 
-  const marketSnap = marketDataResults[0] ?? null;
-  const currentPrice = marketSnap?.price ?? 0;
+  const currentPrice = ctx.marketSnapshot?.price ?? 0;
+  const chain = ctx.optionsChain;
+  const historicalData1D = ctx.candlesByTimeframe["1D"] ?? [];
+  const historicalData1W = ctx.candlesByTimeframe["1W"] ?? [];
+  const historicalData1M = ctx.candlesByTimeframe["1M"] ?? [];
+  const historicalData3M = ctx.candlesByTimeframe["3M"] ?? [];
+  const historicalData6M = ctx.candlesByTimeframe["6M"] ?? [];
+  const historicalData1Y = ctx.candlesByTimeframe["1Y"] ?? [];
   const historicalData = historicalData3M;
-
-  // Step 5: Compute options analytics
-  let ddRealizedVol: number | null = null;
-  let ddIvRvSpread: number | null = null;
-  if (chain && currentPrice > 0) {
-    const allContracts = [
-      ...chain.nearestExpiry.calls,
-      ...chain.nearestExpiry.puts,
-    ];
-    const atmContracts = allContracts.filter(
-      (c) =>
-        Math.abs(c.strike - currentPrice) / currentPrice < 0.05 && c.iv > 0,
-    );
-    if (atmContracts.length > 0) {
-      const avgIV =
-        atmContracts.reduce((s, c) => s + c.iv, 0) / atmContracts.length;
-      ddRealizedVol = computeRealizedVol(historicalData);
-      if (ddRealizedVol != null) {
-        ddIvRvSpread = avgIV - ddRealizedVol;
-      }
-    }
-  }
-
-  const indicatorReport = detectAllIndicatorPatterns(
-    historicalData3M,
-    normalizedTicker,
-    "3M",
-  );
 
   const earningsContext = getEarningsProximity(
     earningsDate,
@@ -188,16 +144,24 @@ export async function refreshTickerDeepDive(
       ? {
           maxPain: chain.maxPain ?? null,
           oiWalls: chain.oiWalls ?? null,
-          ivRvSpread: ddIvRvSpread,
-          realizedVol: ddRealizedVol,
+          ivRvSpread: ctx.ivRvSpread,
+          realizedVol: ctx.realizedVol,
           gex: chain.gex ?? null,
         }
       : undefined,
-    shortInterest: await getOrFetchShortInterest(normalizedTicker).catch(
-      () => null,
-    ),
-    computedIndicators: { "3M": indicatorReport },
+    shortInterest: ctx.shortInterest,
+    computedIndicators: ctx.indicatorsByTimeframe,
     cascadeContext: null,
+    signalHierarchy: {
+      currentPrice,
+      earningsDate: earningsContext.earningsDate,
+      volumeProfile: ctx.volumeProfile,
+      algoSR: ctx.algoSR,
+      ivSkew: ctx.ivSkew,
+      oiSummary: ctx.oiSummary,
+      catalysts: getUpcomingCatalysts(14),
+    },
+    triggerReport: ctx.triggerReport,
   });
 
   // Step 7: Persist to DB

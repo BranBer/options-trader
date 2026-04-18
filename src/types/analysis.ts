@@ -133,6 +133,20 @@ export const correlationSchema = z.object({
 
 export type Correlation = z.infer<typeof correlationSchema>;
 
+export type RecommendationSource = "correlation" | "whale_signal";
+
+export interface RecommendationInput {
+  ticker: string;
+  source: RecommendationSource;
+  correlation: Correlation;
+  whaleDirection: "bullish" | "bearish" | "neutral";
+  whaleIntentHint: string | null;
+  expiryForEarningsContext: string;
+  primaryWhaleId: number | null;
+  whaleIds: number[];
+  inputRefs: Record<string, unknown>;
+}
+
 export const uncorrelatedWhaleSchema = z.object({
   ticker: z.string(),
   type: z.enum(["call", "put"]),

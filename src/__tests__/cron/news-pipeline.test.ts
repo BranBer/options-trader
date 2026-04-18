@@ -36,9 +36,7 @@ function createInsertedLookup(result: unknown) {
   return {
     from: vi.fn(() => ({
       where: vi.fn(() => ({
-        orderBy: vi.fn(() => ({
-          limit: vi.fn().mockResolvedValue(result),
-        })),
+        orderBy: vi.fn().mockResolvedValue(result),
       })),
     })),
   };
@@ -115,7 +113,25 @@ describe("news-pipeline auto-trigger", () => {
       },
     ] as any);
 
+    expect(mockDb.insert).toHaveBeenCalledTimes(1);
+    expect(mockDb.select).toHaveBeenCalledTimes(2);
+    expect(mockDb.insert.mock.results[0].value.values).toHaveBeenCalledTimes(1);
+    expect(mockDb.insert.mock.results[0].value.values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        headline: "Tariff pause supports semis",
+        url: "https://example.com/article",
+      }),
+    ]);
     expect(mockAutoTriggerEventAnalysis).toHaveBeenCalledOnce();
+    expect(mockAutoTriggerEventAnalysis).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 77,
+          headline: "Tariff pause supports semis",
+        }),
+      ]),
+      { minImpact: 8 },
+    );
   });
 
   it("skips auto-trigger when disabled", async () => {
@@ -132,5 +148,27 @@ describe("news-pipeline auto-trigger", () => {
     ] as any);
 
     expect(mockAutoTriggerEventAnalysis).toHaveBeenCalledOnce();
+  });
+
+  it("stores classified articles in a single batch and re-queries once", async () => {
+    await classifyAndStoreNews(
+      [
+        {
+          headline: "Tariff pause supports semis",
+          source: "marketaux",
+          url: "https://example.com/article",
+          publishedAt: "2026-04-06T12:00:00.000Z",
+        },
+      ] as any,
+      undefined,
+      { autoTriggerMinImpact: 9 },
+    );
+
+    expect(mockDb.insert).toHaveBeenCalledTimes(1);
+    expect(mockDb.select).toHaveBeenCalledTimes(2);
+    expect(mockAutoTriggerEventAnalysis).toHaveBeenCalledWith(
+      expect.any(Array),
+      { minImpact: 9 },
+    );
   });
 });

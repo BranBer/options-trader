@@ -31,6 +31,10 @@ import {
   generateDeepDive,
   getTokenUsageStats,
 } from "@/lib/services/llm-analyzer";
+import * as volumeProfileModule from "@/lib/utils/volume-profile";
+import * as algoSrModule from "@/lib/utils/algo-sr";
+import * as optionsAnalyticsModule from "@/lib/utils/options-analytics";
+import * as triggerEngineModule from "@/lib/utils/trigger-engine";
 
 // ---------------------------------------------------------------------------
 // Test fixtures — valid model responses matching each Zod schema
@@ -533,6 +537,121 @@ describe("callLLMWithRetry — via classifyNews", () => {
 
     const callArgs = mockCreate.mock.calls[0][0];
     expect(callArgs.model).toBe("qwen/qwen3.5-plus-02-15");
+  });
+});
+
+describe("generateDeepDive precomputed context reuse", () => {
+  it("uses precomputed signal hierarchy and trigger report without recomputing analytics", async () => {
+    const volumeProfileSpy = vi.spyOn(
+      volumeProfileModule,
+      "computeVolumeProfile",
+    );
+    const algoSRSpy = vi.spyOn(algoSrModule, "computeAlgoSR");
+    const ivSkewSpy = vi.spyOn(optionsAnalyticsModule, "computeIVSkew");
+    const oiSummarySpy = vi.spyOn(optionsAnalyticsModule, "computeOISummary");
+    const triggerReportSpy = vi.spyOn(
+      triggerEngineModule,
+      "buildTriggerReport",
+    );
+
+    mockLLMResponse(VALID_DEEP_DIVE_RESPONSE, 1200);
+
+    const { deepDive, triggerReport } = await generateDeepDive({
+      ticker: "AAPL",
+      whaleTrade: {
+        ticker: "AAPL",
+        strike: 200,
+        expiry: "2026-04-18",
+        callPut: "C",
+        premium: 500000,
+        volume: 1000,
+      },
+      historicalData: [
+        {
+          time: "2026-04-01",
+          open: 195,
+          high: 201,
+          low: 194,
+          close: 200,
+          volume: 1000,
+        },
+      ],
+      historicalDataByTimeframe: {
+        "1D": [],
+        "1W": [],
+        "1M": [],
+        "3M": [
+          {
+            time: "2026-04-01",
+            open: 195,
+            high: 201,
+            low: 194,
+            close: 200,
+            volume: 1000,
+          },
+        ],
+        "6M": [],
+        "1Y": [],
+      },
+      optionsChain: {
+        ticker: "AAPL",
+        expirations: ["2026-04-18"],
+        nearestExpiry: {
+          date: "2026-04-18",
+          calls: [],
+          puts: [],
+        },
+      },
+      currentPrice: 200,
+      signalHierarchy: {
+        currentPrice: 200,
+        volumeProfile: {
+          vpoc: 200,
+          valueAreaHigh: 202,
+          valueAreaLow: 198,
+          buckets: [],
+          hvn: [],
+          lvn: [],
+          totalVolume: 1000,
+        },
+        algoSR: [],
+        ivSkew: {
+          putCallSkew: 0.01,
+          avgPutIV: 0.3,
+          avgCallIV: 0.29,
+          interpretation: "Neutral skew",
+        },
+        oiSummary: {
+          totalCallOI: 100,
+          totalPutOI: 80,
+          pcOIRatio: 0.8,
+          topStrikes: [],
+        },
+      },
+      triggerReport: {
+        ticker: "AAPL",
+        computedAt: "2026-04-17T00:00:00.000Z",
+        primaryTrigger: null,
+        secondaryTriggers: [],
+        activeLevels: [],
+        swingStructure: {
+          swings: [],
+          structure: "consolidation",
+          structureShift: null,
+          lastHigherLow: null,
+          lastLowerHigh: null,
+        },
+        overallAssessment: "no_trigger",
+      },
+    });
+
+    expect(deepDive.ticker).toBe("AAPL");
+    expect(triggerReport?.ticker).toBe("AAPL");
+    expect(volumeProfileSpy).not.toHaveBeenCalled();
+    expect(algoSRSpy).not.toHaveBeenCalled();
+    expect(ivSkewSpy).not.toHaveBeenCalled();
+    expect(oiSummarySpy).not.toHaveBeenCalled();
+    expect(triggerReportSpy).not.toHaveBeenCalled();
   });
 });
 

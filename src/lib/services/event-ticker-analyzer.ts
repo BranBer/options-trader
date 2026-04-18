@@ -10,15 +10,7 @@ import {
   generateDeepDive,
   generateRecommendation,
 } from "@/lib/services/llm-analyzer";
-import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
-import {
-  computeRealizedVol,
-  fetchEarningsDate,
-  fetchHistoricalData,
-  fetchMarketData,
-  fetchOptionsChain,
-  fetchVIX,
-} from "@/lib/services/market-fetcher";
+import { fetchEarningsDate, fetchVIX } from "@/lib/services/market-fetcher";
 import {
   getRemainingBudget,
   isOverBudget,
@@ -38,6 +30,9 @@ import type {
 import type { MarketSnapshot, OptionsChainSummary } from "@/types/market";
 import type { WhaleAlertRow } from "@/types/whale";
 import type { NewsEventRow } from "@/types/news";
+import { buildTickerAnalysisContext } from "@/lib/services/ticker-context-builder";
+import { buildRichOptionsChainSummary } from "@/lib/prompts/options-chain-summary";
+import { getUpcomingCatalysts } from "@/lib/utils/economic-calendar";
 
 const CONCURRENCY = 2;
 const HOURS_TO_CACHE = 2;
@@ -171,11 +166,6 @@ function getOptionType(
   return sentiment === "bearish" ? "put" : "call";
 }
 
-function summarizeOptionsChain(chain: OptionsChainSummary | null): string {
-  if (!chain) return "No options chain data available";
-  return `${chain.expirations.length} expirations, nearest: ${chain.nearestExpiry.date} (${chain.nearestExpiry.calls.length} calls, ${chain.nearestExpiry.puts.length} puts)`;
-}
-
 function buildMarketOpenFlag(date: Date = new Date()): boolean {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -256,54 +246,6 @@ async function buildMacroContext() {
     vixRegime: vixContext?.regime,
     fomcNextDate: fomc.nextDate,
     fomcIsDecisionWeek: fomc.isDecisionWeek,
-  };
-}
-
-function computeOptionsAnalytics(args: {
-  chain: OptionsChainSummary | null;
-  marketData: MarketSnapshot | null;
-  candles3M: Awaited<ReturnType<typeof fetchHistoricalData>>;
-}) {
-  const { chain, marketData, candles3M } = args;
-  let atmIV: number | null = null;
-  let realizedVol: number | null = null;
-  let ivRvSpread: number | null = null;
-
-  if (chain && marketData && marketData.price > 0) {
-    const allContracts = [
-      ...chain.nearestExpiry.calls,
-      ...chain.nearestExpiry.puts,
-    ];
-    const atmContracts = allContracts.filter(
-      (contract) =>
-        contract.iv > 0 &&
-        Math.abs(contract.strike - marketData.price) / marketData.price < 0.05,
-    );
-
-    if (atmContracts.length > 0) {
-      atmIV =
-        atmContracts.reduce((sum, contract) => sum + contract.iv, 0) /
-        atmContracts.length;
-      realizedVol = computeRealizedVol(candles3M);
-      if (realizedVol != null) {
-        ivRvSpread = atmIV - realizedVol;
-      }
-    }
-  }
-
-  return {
-    atmIV,
-    realizedVol,
-    ivRvSpread,
-    optionsAnalytics: chain
-      ? {
-          maxPain: chain.maxPain ?? null,
-          oiWalls: chain.oiWalls ?? null,
-          ivRvSpread,
-          realizedVol,
-          gex: chain.gex ?? null,
-        }
-      : undefined,
   };
 }
 
@@ -557,37 +499,24 @@ async function analyzeSingleTicker(args: {
 }): Promise<EventTickerAnalysis | null> {
   const { ticker, eventId, eventContext, macroBase } = args;
 
-  const [
-    whaleMatch,
-    marketDataResults,
-    chain,
-    earningsDate,
-    candles1W,
-    candles1M,
-    candles3M,
-    candles6M,
-    candles1Y,
-  ] = await Promise.all([
+  const [whaleMatch, ctx, earningsDate] = await Promise.all([
     lookupWhaleActivity(ticker),
-    fetchMarketData([ticker]),
-    fetchOptionsChain(ticker),
+    buildTickerAnalysisContext(ticker, {
+      timeframes: ["1W", "1M", "3M", "6M", "1Y"],
+    }),
     fetchEarningsDate(ticker),
-    fetchHistoricalData(ticker, "1wk"),
-    fetchHistoricalData(ticker, "1mo"),
-    fetchHistoricalData(ticker, "3mo"),
-    fetchHistoricalData(ticker, "6mo"),
-    fetchHistoricalData(ticker, "1y"),
   ]);
 
   recordApiCall("yahoo", YAHOO_CALLS_PER_TICKER);
 
-  const marketData = marketDataResults[0] ?? null;
-  const optionsData = computeOptionsAnalytics({
-    chain,
-    marketData,
-    candles3M,
-  });
-  const indicatorReport = detectAllIndicatorPatterns(candles3M, ticker, "3M");
+  const marketData = ctx.marketSnapshot;
+  const chain = ctx.optionsChain;
+  const indicatorReport = ctx.indicatorsByTimeframe["3M"];
+  const candles1W = ctx.candlesByTimeframe["1W"] ?? [];
+  const candles1M = ctx.candlesByTimeframe["1M"] ?? [];
+  const candles3M = ctx.candlesByTimeframe["3M"] ?? [];
+  const candles6M = ctx.candlesByTimeframe["6M"] ?? [];
+  const candles1Y = ctx.candlesByTimeframe["1Y"] ?? [];
   const primaryWhale = whaleMatch.alerts[0] ?? null;
   const syntheticCorrelation = buildSyntheticCorrelation({
     ticker,
@@ -601,16 +530,27 @@ async function analyzeSingleTicker(args: {
 
   const recommendation = await generateRecommendation(syntheticCorrelation, {
     price: marketData?.price ?? 0,
-    ivRank: marketData?.ivRank,
+    ivRank:
+      ctx.atmIV != null ? Math.round(ctx.atmIV * 100) : marketData?.ivRank,
     avgVolume: marketData?.volume ?? 0,
     todayVolume: marketData?.volume ?? 0,
-    optionsChainSummary: summarizeOptionsChain(chain),
+    optionsChainSummary: chain
+      ? buildRichOptionsChainSummary(chain, marketData?.price ?? 0)
+      : "No options chain data available",
     macroContext: {
       ...macroBase,
       earningsDate: earningsContext.earningsDate,
       ivCrushRisk: earningsContext.ivCrushRisk,
     },
-    optionsAnalytics: optionsData.optionsAnalytics,
+    optionsAnalytics: chain
+      ? {
+          maxPain: chain.maxPain ?? null,
+          oiWalls: chain.oiWalls ?? null,
+          ivRvSpread: ctx.ivRvSpread,
+          realizedVol: ctx.realizedVol,
+          gex: chain.gex ?? null,
+        }
+      : undefined,
     indicatorReport,
   });
   const normalizedRecommendation = enrichWhaleAlignment({
@@ -659,8 +599,26 @@ async function analyzeSingleTicker(args: {
       earningsDate: earningsContext.earningsDate,
       ivCrushRisk: earningsContext.ivCrushRisk,
     },
-    optionsAnalytics: optionsData.optionsAnalytics,
-    computedIndicators: { "3M": indicatorReport },
+    optionsAnalytics: chain
+      ? {
+          maxPain: chain.maxPain ?? null,
+          oiWalls: chain.oiWalls ?? null,
+          ivRvSpread: ctx.ivRvSpread,
+          realizedVol: ctx.realizedVol,
+          gex: chain.gex ?? null,
+        }
+      : undefined,
+    computedIndicators: ctx.indicatorsByTimeframe,
+    signalHierarchy: {
+      currentPrice: marketData?.price ?? 0,
+      earningsDate: earningsContext.earningsDate,
+      volumeProfile: ctx.volumeProfile,
+      algoSR: ctx.algoSR,
+      ivSkew: ctx.ivSkew,
+      oiSummary: ctx.oiSummary,
+      catalysts: getUpcomingCatalysts(14),
+    },
+    triggerReport: ctx.triggerReport,
   });
 
   const eventAnalysis: EventTickerAnalysis = {
@@ -670,9 +628,9 @@ async function analyzeSingleTicker(args: {
     marketSnapshot: marketData
       ? {
           ...marketData,
-          iv: optionsData.atmIV ?? undefined,
-          realizedVol: optionsData.realizedVol ?? undefined,
-          ivRvSpread: optionsData.ivRvSpread ?? undefined,
+          iv: ctx.atmIV ?? undefined,
+          realizedVol: ctx.realizedVol ?? undefined,
+          ivRvSpread: ctx.ivRvSpread ?? undefined,
           marketOpen: buildMarketOpenFlag(),
         }
       : null,
