@@ -837,13 +837,16 @@ export async function runAnalysisPipeline(options?: {
       const chunk = deepDiveQueue.slice(i, i + DEEP_DIVE_CONCURRENCY);
       const results = await Promise.allSettled(
         chunk.map(async (item) => {
-          const ctx = await getOrBuildContext(contextCache, item.ticker, [
-            "1D",
-            "1W",
-            "1M",
-            "3M",
-            "6M",
-            "1Y",
+          const [ctx, earningsDate] = await Promise.all([
+            getOrBuildContext(contextCache, item.ticker, [
+              "1D",
+              "1W",
+              "1M",
+              "3M",
+              "6M",
+              "1Y",
+            ]),
+            fetchEarningsDate(item.ticker),
           ]);
           const historicalData1D = ctx.candlesByTimeframe["1D"] ?? [];
           const historicalData1W = ctx.candlesByTimeframe["1W"] ?? [];
@@ -853,6 +856,10 @@ export async function runAnalysisPipeline(options?: {
           const historicalData1Y = ctx.candlesByTimeframe["1Y"] ?? [];
           const historicalData = historicalData3M;
           const chain = ctx.optionsChain;
+          const earningsCtx = getEarningsProximity(
+            earningsDate,
+            item.whaleTrade.expiry,
+          );
           const currentPrice = ctx.marketSnapshot?.price ?? 0;
           if (currentPrice === 0) {
             console.warn(
@@ -878,7 +885,11 @@ export async function runAnalysisPipeline(options?: {
               currentPrice,
               correlatedEvent: item.correlatedEvent,
               newsContext,
-              macroContext: macroBase,
+              macroContext: {
+                ...macroBase,
+                earningsDate: earningsCtx.earningsDate,
+                ivCrushRisk: earningsCtx.ivCrushRisk,
+              },
               optionsAnalytics: chain
                 ? {
                     maxPain: chain.maxPain ?? null,
@@ -897,7 +908,7 @@ export async function runAnalysisPipeline(options?: {
               ),
               signalHierarchy: {
                 currentPrice,
-                earningsDate: macroBase.earningsDate,
+                earningsDate: earningsCtx.earningsDate,
                 volumeProfile: ctx.volumeProfile,
                 algoSR: ctx.algoSR,
                 ivSkew: ctx.ivSkew,

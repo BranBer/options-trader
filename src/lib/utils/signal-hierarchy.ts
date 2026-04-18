@@ -57,21 +57,21 @@ The data below is organized by actionability. Follow these rules strictly:
   // Tier 1 — Primary / Actionable
   const tier1Parts: string[] = [];
 
-  if (input.volumeProfile) {
+  if (input.volumeProfile && input.currentPrice != null) {
     tier1Parts.push(
       `### Volume Profile\n${formatVolumeProfileForPrompt(input.volumeProfile, input.currentPrice)}`,
     );
   }
 
-  if (input.algoSR && input.algoSR.length > 0) {
+  if (input.algoSR && input.algoSR.length > 0 && input.currentPrice != null) {
     tier1Parts.push(
       `### Algorithmic Support/Resistance\n${formatAlgoSRForPrompt(input.algoSR, input.currentPrice)}`,
     );
   }
 
-  if (input.ivSkew || input.oiSummary) {
+  if ((input.ivSkew || input.oiSummary) && input.currentPrice != null) {
     tier1Parts.push(
-      `### Enhanced Options Context\n${formatEnhancedOptionsForPrompt(input.ivSkew ?? null, input.oiSummary ?? null)}`,
+      `### Enhanced Options Context\n${formatEnhancedOptionsForPrompt(input.ivSkew ?? null, input.oiSummary ?? null, input.currentPrice)}`,
     );
   }
 

@@ -1,0 +1,9 @@
+{
+  "price_event": "...",
+  "external_event": {
+    "type": "news | macro | earnings",
+    "timestamp": "...",
+    "sentiment": "bullish | bearish | neutral"
+  },
+  "correlation_confidence": 0-1
+}

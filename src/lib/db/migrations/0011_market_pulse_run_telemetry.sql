@@ -1,0 +1,1 @@
+ALTER TABLE `market_pulse_runs` ADD COLUMN `stages` text;

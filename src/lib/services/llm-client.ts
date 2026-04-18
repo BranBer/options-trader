@@ -182,6 +182,22 @@ export function getTokenUsageStats(): {
   return { recentCalls: tokenUsageLog.slice(-20), byCallType: summary };
 }
 
+export function getTokenUsageSnapshot(): Record<
+  string,
+  { count: number; totalTokens: number }
+> {
+  const snapshot: Record<string, { count: number; totalTokens: number }> = {};
+
+  for (const record of tokenUsageLog) {
+    const entry = snapshot[record.callType] ?? { count: 0, totalTokens: 0 };
+    entry.count += 1;
+    entry.totalTokens += record.outputTokens;
+    snapshot[record.callType] = entry;
+  }
+
+  return snapshot;
+}
+
 export async function callLlmWithRetry<T>(
   systemInstruction: string,
   userPrompt: string,

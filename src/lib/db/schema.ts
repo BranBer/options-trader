@@ -144,3 +144,128 @@ export const pipelineRuns = sqliteTable(
     index("idx_pipeline_runs_status").on(table.status),
   ],
 );
+
+export const marketPulseSubscriptions = sqliteTable(
+  "market_pulse_subscriptions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ticker: text("ticker").notNull(),
+    addedAt: text("added_at").notNull(),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_market_pulse_subscriptions_ticker").on(table.ticker),
+    index("idx_market_pulse_subscriptions_active_added").on(
+      table.isActive,
+      table.addedAt,
+    ),
+  ],
+);
+
+export const marketPulseRuns = sqliteTable(
+  "market_pulse_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id").notNull(),
+    ticker: text("ticker").notNull(),
+    status: text("status").notNull().default("running"),
+    trigger: text("trigger").notNull().default("manual"),
+    candleWindow: text("candle_window").notNull(),
+    llmTokensUsed: integer("llm_tokens_used"),
+    durationMs: integer("duration_ms"),
+    stages: text("stages"),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+    errorMessage: text("error_message"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_market_pulse_runs_run_id").on(table.runId),
+    index("idx_market_pulse_runs_ticker_created").on(
+      table.ticker,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const marketPulseClassifications = sqliteTable(
+  "market_pulse_classifications",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id").notNull(),
+    ticker: text("ticker").notNull(),
+    candleTime: text("candle_time").notNull(),
+    candleData: text("candle_data").notNull(),
+    indicators: text("indicators").notNull(),
+    classification: text("classification").notNull(),
+    eventBlurb: text("event_blurb").notNull(),
+    significance: text("significance").notNull(),
+    tradability: text("tradability").notNull(),
+    level: text("level").notNull().default("candle"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_market_pulse_classifications_run").on(table.runId),
+    index("idx_market_pulse_classifications_ticker_time").on(
+      table.ticker,
+      table.candleTime,
+    ),
+  ],
+);
+
+export const marketPulseCorrelations = sqliteTable(
+  "market_pulse_correlations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id").notNull(),
+    ticker: text("ticker").notNull(),
+    priceEvent: text("price_event").notNull(),
+    candleTime: text("candle_time").notNull(),
+    externalEventType: text("external_event_type").notNull(),
+    externalEventId: integer("external_event_id"),
+    externalEventSummary: text("external_event_summary").notNull(),
+    externalEventPayload: text("external_event_payload"),
+    sentiment: text("sentiment").notNull(),
+    correlationConfidence: real("correlation_confidence").notNull(),
+    reasoning: text("reasoning"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_market_pulse_correlations_run").on(table.runId),
+    index("idx_market_pulse_correlations_ticker_created").on(
+      table.ticker,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const marketPulseNarratives = sqliteTable(
+  "market_pulse_narratives",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id").notNull(),
+    ticker: text("ticker").notNull(),
+    currentControl: text("current_control").notNull(),
+    controlStrength: integer("control_strength").notNull(),
+    marketPhase: text("market_phase").notNull(),
+    expectedBehavior: text("expected_behavior").notNull(),
+    narrativeSummary: text("narrative_summary").notNull(),
+    keyConflicts: text("key_conflicts"),
+    confidenceInAssessment: real("confidence_in_assessment"),
+    structuredOutput: text("structured_output"),
+    inputEventCount: integer("input_event_count").notNull(),
+    priorRunId: text("prior_run_id"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_market_pulse_narratives_run_ticker").on(
+      table.runId,
+      table.ticker,
+    ),
+    index("idx_market_pulse_narratives_ticker_created").on(
+      table.ticker,
+      table.createdAt,
+    ),
+  ],
+);

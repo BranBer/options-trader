@@ -22,7 +22,10 @@ import {
   CHART_HISTORY_TO_ANALYSIS_TIMEFRAME,
 } from "@/lib/utils/chart-timeframes";
 import { getTechnicalPatternsForTimeframe } from "@/lib/utils/deep-dive-patterns";
-import { detectAllIndicatorPatterns } from "@/lib/utils/indicator-patterns";
+import {
+  detectAllIndicatorPatterns,
+  type IndicatorPattern,
+} from "@/lib/utils/indicator-patterns";
 import { computeVolumeProfile } from "@/lib/utils/volume-profile";
 import { computeAlgoSR } from "@/lib/utils/algo-sr";
 import { computeIVSkew, computeOISummary } from "@/lib/utils/options-analytics";
@@ -69,21 +72,13 @@ export async function fetchAllTimeframeCandles(
   );
 
   for (const [period, candles] of entries) {
-    results[period] = candles;
+    results[period] = [...candles];
   }
   return results;
 }
 
 function indicatorPatternsToOverlays(
-  patterns: {
-    indicator: string;
-    name: string;
-    signal: string;
-    description: string;
-    confidence: number;
-    isRecent: boolean;
-    detectedAt: number;
-  }[],
+  patterns: IndicatorPattern[],
   candles: Candle[],
 ): TechnicalPattern[] {
   return patterns
@@ -225,7 +220,7 @@ function computeEnrichedData(
   // Current price — try candles first, then fall back to deep dive S/R mid-point
   let currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
   if (currentPrice <= 0 && deepDive.support_resistance.length > 0) {
-    currentPrice = deepDive.support_resistance[0].price;
+    currentPrice = deepDive.support_resistance[0].level;
   }
 
   // Volume profile — needs candles; null if unavailable

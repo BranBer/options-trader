@@ -124,7 +124,7 @@ function clusterLevels(
   const sorted = [...levels].sort((a, b) => a.price - b.price);
   const clusters = new Map<
     number,
-    { sources: Set<string>; type: "support" | "resistance"; prices: number[] }
+    { sources: Set<string>; type: "support" | "resistance" }
   >();
 
   let currentCluster = {

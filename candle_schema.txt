@@ -1,0 +1,21 @@
+{
+  "candle": {
+    "open": float,
+    "high": float,
+    "low": float,
+    "close": float,
+    "volume": float
+  },
+  "indicators": {
+    "rsi": float,
+    "bb_upper": float,
+    "bb_lower": float,
+    "bb_position": "upper | mid | lower",
+    "volume_vs_avg": float
+  },
+  "context": {
+    "trend": "uptrend | downtrend | range",
+    "key_levels": [float],
+    "timeframe": "15m"
+  }
+}

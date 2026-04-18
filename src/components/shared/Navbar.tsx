@@ -8,6 +8,7 @@ import {
   Globe,
   BarChart3,
   Home,
+  Radar,
   RefreshCw,
   Menu,
   X,
@@ -58,6 +59,7 @@ const navLinks = [
   { href: "/globe", label: "Globe", icon: Globe },
   { href: "/tech-globe", label: "Tech Globe", icon: Cpu },
   { href: "/analysis", label: "Analysis", icon: BarChart3 },
+  { href: "/market-pulse", label: "Market Pulse", icon: Radar },
 ];
 
 function NavItems({

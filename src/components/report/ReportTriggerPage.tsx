@@ -3,6 +3,8 @@ import type { TriggerReport } from "@/lib/utils/trigger-engine";
 import ReportPage from "./ReportPage";
 import { colors, fontSize, baseStyles, signalColors } from "./styles";
 
+type SignalColor = (typeof signalColors)[keyof typeof signalColors];
+
 const s = StyleSheet.create({
   assessmentBadge: {
     fontSize: fontSize.badge,
@@ -147,7 +149,7 @@ function assessmentLabel(assessment: TriggerReport["overallAssessment"]) {
 
 function interactionLabel(type: string): {
   text: string;
-  color: typeof signalColors.bullish;
+  color: SignalColor;
 } {
   switch (type) {
     case "reclaim":

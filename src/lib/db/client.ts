@@ -67,6 +67,83 @@ sqlite.exec(`
     fetched_at text NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_short_interest_ticker ON short_interest (ticker);
+  CREATE TABLE IF NOT EXISTS market_pulse_subscriptions (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    ticker text NOT NULL,
+    added_at text NOT NULL,
+    is_active integer NOT NULL DEFAULT 1,
+    created_at text DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_market_pulse_subscriptions_ticker ON market_pulse_subscriptions (ticker);
+  CREATE INDEX IF NOT EXISTS idx_market_pulse_subscriptions_active_added ON market_pulse_subscriptions (is_active, added_at);
+  CREATE TABLE IF NOT EXISTS market_pulse_runs (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    run_id text NOT NULL,
+    ticker text NOT NULL,
+    status text NOT NULL DEFAULT 'running',
+    trigger text NOT NULL DEFAULT 'manual',
+    candle_window text NOT NULL,
+    llm_tokens_used integer,
+    duration_ms integer,
+    stages text,
+    started_at text NOT NULL,
+    completed_at text,
+    error_message text,
+    created_at text DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_market_pulse_runs_run_id ON market_pulse_runs (run_id);
+  CREATE INDEX IF NOT EXISTS idx_market_pulse_runs_ticker_created ON market_pulse_runs (ticker, created_at);
+  CREATE TABLE IF NOT EXISTS market_pulse_classifications (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    run_id text NOT NULL,
+    ticker text NOT NULL,
+    candle_time text NOT NULL,
+    candle_data text NOT NULL,
+    indicators text NOT NULL,
+    classification text NOT NULL,
+    event_blurb text NOT NULL,
+    significance text NOT NULL,
+    tradability text NOT NULL,
+    level text NOT NULL DEFAULT 'candle',
+    created_at text DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_market_pulse_classifications_run ON market_pulse_classifications (run_id);
+  CREATE INDEX IF NOT EXISTS idx_market_pulse_classifications_ticker_time ON market_pulse_classifications (ticker, candle_time);
+  CREATE TABLE IF NOT EXISTS market_pulse_correlations (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    run_id text NOT NULL,
+    ticker text NOT NULL,
+    price_event text NOT NULL,
+    candle_time text NOT NULL,
+    external_event_type text NOT NULL,
+    external_event_id integer,
+    external_event_summary text NOT NULL,
+    sentiment text NOT NULL,
+    correlation_confidence real NOT NULL,
+    external_event_payload text,
+    reasoning text,
+    created_at text DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_market_pulse_correlations_run ON market_pulse_correlations (run_id);
+  CREATE INDEX IF NOT EXISTS idx_market_pulse_correlations_ticker_created ON market_pulse_correlations (ticker, created_at);
+  CREATE TABLE IF NOT EXISTS market_pulse_narratives (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    run_id text NOT NULL,
+    ticker text NOT NULL,
+    current_control text NOT NULL,
+    control_strength integer NOT NULL,
+    market_phase text NOT NULL,
+    expected_behavior text NOT NULL,
+    narrative_summary text NOT NULL,
+    key_conflicts text,
+    confidence_in_assessment real,
+    structured_output text,
+    input_event_count integer NOT NULL,
+    prior_run_id text,
+    created_at text DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_market_pulse_narratives_run_ticker ON market_pulse_narratives (run_id, ticker);
+  CREATE INDEX IF NOT EXISTS idx_market_pulse_narratives_ticker_created ON market_pulse_narratives (ticker, created_at);
 `);
 
 const newsEventColumns = sqlite
@@ -97,6 +174,76 @@ if (analysisColumns.some((column) => column.name === "source")) {
     ALTER TABLE analyses ADD COLUMN source text;
     CREATE INDEX IF NOT EXISTS idx_analyses_source_created ON analyses (source, created_at);
   `);
+}
+
+const marketPulseCorrelationColumns = sqlite
+  .prepare("PRAGMA table_info(market_pulse_correlations)")
+  .all() as Array<{ name: string }>;
+
+const marketPulseRunColumns = sqlite
+  .prepare("PRAGMA table_info(market_pulse_runs)")
+  .all() as Array<{ name: string }>;
+
+if (
+  marketPulseRunColumns.length > 0 &&
+  !marketPulseRunColumns.some((column) => column.name === "stages")
+) {
+  sqlite.exec("ALTER TABLE market_pulse_runs ADD COLUMN stages text;");
+}
+
+if (
+  marketPulseCorrelationColumns.length > 0 &&
+  !marketPulseCorrelationColumns.some(
+    (column) => column.name === "external_event_payload",
+  )
+) {
+  sqlite.exec(
+    "ALTER TABLE market_pulse_correlations ADD COLUMN external_event_payload text;",
+  );
+}
+
+if (
+  marketPulseCorrelationColumns.length > 0 &&
+  !marketPulseCorrelationColumns.some((column) => column.name === "reasoning")
+) {
+  sqlite.exec(
+    "ALTER TABLE market_pulse_correlations ADD COLUMN reasoning text;",
+  );
+}
+
+const marketPulseNarrativeColumns = sqlite
+  .prepare("PRAGMA table_info(market_pulse_narratives)")
+  .all() as Array<{ name: string }>;
+
+if (
+  marketPulseNarrativeColumns.length > 0 &&
+  !marketPulseNarrativeColumns.some((column) => column.name === "key_conflicts")
+) {
+  sqlite.exec(
+    "ALTER TABLE market_pulse_narratives ADD COLUMN key_conflicts text;",
+  );
+}
+
+if (
+  marketPulseNarrativeColumns.length > 0 &&
+  !marketPulseNarrativeColumns.some(
+    (column) => column.name === "confidence_in_assessment",
+  )
+) {
+  sqlite.exec(
+    "ALTER TABLE market_pulse_narratives ADD COLUMN confidence_in_assessment real;",
+  );
+}
+
+if (
+  marketPulseNarrativeColumns.length > 0 &&
+  !marketPulseNarrativeColumns.some(
+    (column) => column.name === "structured_output",
+  )
+) {
+  sqlite.exec(
+    "ALTER TABLE market_pulse_narratives ADD COLUMN structured_output text;",
+  );
 }
 
 export const db = drizzle(sqlite, { schema });

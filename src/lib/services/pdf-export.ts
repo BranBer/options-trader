@@ -1,5 +1,5 @@
-import { pdf } from "@react-pdf/renderer";
-import { createElement } from "react";
+import { pdf, type DocumentProps } from "@react-pdf/renderer";
+import { createElement, type ReactElement } from "react";
 import type { ReportData } from "@/types/report";
 import ReportDocument from "@/components/report/ReportDocument";
 
@@ -14,7 +14,9 @@ import ReportDocument from "@/components/report/ReportDocument";
 export async function generateDeepDiveReport(
   reportData: ReportData,
 ): Promise<Blob> {
-  const doc = createElement(ReportDocument, { data: reportData });
+  const doc = createElement(ReportDocument, {
+    data: reportData,
+  }) as unknown as ReactElement<DocumentProps>;
   const blob = await pdf(doc).toBlob();
   return blob;
 }
