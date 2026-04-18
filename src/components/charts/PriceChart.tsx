@@ -700,7 +700,8 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         );
         overlaysRef.current = overlays;
 
-        // Callout annotation layer: numbered chart markers + spines
+        // Callout annotation layer — attached AFTER trigger annotations so it
+        // renders on top (both use zOrder "top", last-attached wins).
         if (overlays.callouts.length > 0) {
           const calloutPrimitive = new CalloutAnnotationPrimitive();
           calloutPrimitive.setEntries(overlays.callouts);
@@ -712,6 +713,8 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         onCalloutEntries?.(overlays.callouts);
       }
 
+      // Trigger annotation drawings — attached BEFORE pattern overlays so they
+      // render underneath the technical-analysis callout layer.
       if (triggerAnnotations && triggerAnnotations.length > 0) {
         const resolvedAnnotations = triggerAnnotations
           .map((annotation) => {
@@ -721,11 +724,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
               timeframe,
             );
             if (resolvedTimeSec == null) return null;
-
-            return {
-              ...annotation,
-              time: resolvedTimeSec,
-            };
+            return { ...annotation, time: resolvedTimeSec };
           })
           .filter(
             (annotation): annotation is TriggerAnnotation => annotation != null,
@@ -801,10 +800,10 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
             position: isBearish ? "aboveBar" : "belowBar",
             shape: isBearish ? "arrowDown" : "arrowUp",
             color: isBullish
-              ? "#22c55e" // green-500
+              ? "#38bdf8" // sky-400
               : isBearish
-                ? "#ef4444" // red-500
-                : "#f59e0b", // amber-500
+                ? "#fb7185" // rose-400
+                : "#fbbf24", // amber-400
             size: tm.selected ? 2.5 : tm.primary ? 2 : 1.5,
             text: `${tm.type} $${tm.level.toFixed(0)}`,
             id: markerId,

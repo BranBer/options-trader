@@ -11,18 +11,53 @@ import type {
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { TriggerAnnotation } from "@/lib/utils/trigger-annotations";
 
+// ── Layout constants ─────────────────────────────────────────────────────────
+const PILL_HEIGHT = 16;
+const PILL_RADIUS = 6;
+const PILL_PAD_X = 10;
+const PILL_MIN_WIDTH = 48;
+const SPINE_MARGIN = 6; // px from right edge of canvas
+const MIN_LABEL_SPACING = PILL_HEIGHT + 4;
+
 interface RenderTriggerAnnotation {
   annotation: TriggerAnnotation;
+  /** X of the candle where the event occurred */
   x: number;
+  /** Y of the price level */
   levelY: number;
+  /** Y of the anchor price (candle close) */
   anchorY: number;
+  /** De-collided Y for the spine pill */
   labelY: number;
 }
 
 function annotationColor(annotation: TriggerAnnotation): string {
-  if (annotation.direction === "bullish") return "rgb(34, 197, 94)";
-  if (annotation.direction === "bearish") return "rgb(239, 68, 68)";
-  return "rgb(245, 158, 11)";
+  // Distinct from candle green/red so they don't blend
+  if (annotation.direction === "bullish") return "rgb(56, 189, 248)"; // sky-400
+  if (annotation.direction === "bearish") return "rgb(251, 113, 133)"; // rose-400
+  return "rgb(251, 191, 36)"; // amber-400
+}
+
+/**
+ * Spring de-collision: pushes label Ys apart until no two are closer than
+ * MIN_LABEL_SPACING. Mutates in-place.
+ */
+function resolveCollisions(items: RenderTriggerAnnotation[]): void {
+  if (items.length < 2) return;
+  items.sort((a, b) => a.levelY - b.levelY);
+  for (let iter = 0; iter < 80; iter++) {
+    let settled = true;
+    for (let i = 1; i < items.length; i++) {
+      const gap = items[i].labelY - items[i - 1].labelY;
+      if (gap < MIN_LABEL_SPACING) {
+        const push = (MIN_LABEL_SPACING - gap) / 2;
+        items[i - 1].labelY -= push;
+        items[i].labelY += push;
+        settled = false;
+      }
+    }
+    if (settled) break;
+  }
 }
 
 class TriggerAnnotationRenderer implements IPrimitivePaneRenderer {
@@ -35,52 +70,79 @@ class TriggerAnnotationRenderer implements IPrimitivePaneRenderer {
   draw(target: CanvasRenderingTarget2D): void {
     if (this._annotations.length === 0) return;
 
-    target.useMediaCoordinateSpace(({ context: ctx }) => {
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       ctx.save();
       ctx.font = "600 10px sans-serif";
       ctx.textBaseline = "middle";
 
+      const spineX = mediaSize.width - SPINE_MARGIN;
+
       for (const item of this._annotations) {
         const { annotation, x, levelY, anchorY, labelY } = item;
         const color = annotationColor(annotation);
-        const segmentHalfWidth = annotation.primary ? 26 : 20;
-        const lineDash = annotation.primary ? [] : [4, 3];
+        const isPrimary = annotation.primary;
+        const segHalf = isPrimary ? 26 : 20;
+        const lineDash = isPrimary ? [] : [4, 3];
+
         const pillText = annotation.label;
-        const pillWidth = Math.max(44, ctx.measureText(pillText).width + 12);
-        const pillHeight = 16;
-        const pillX = x - pillWidth / 2;
-        const pillTop = labelY - pillHeight / 2;
+        const pillWidth = Math.max(
+          PILL_MIN_WIDTH,
+          ctx.measureText(pillText).width + PILL_PAD_X * 2,
+        );
+        const pillX = spineX - pillWidth;
+        const pillTop = labelY - PILL_HEIGHT / 2;
 
+        // ── Candle-site tick mark ─────────────────────────────────────────
         ctx.strokeStyle = color;
-        ctx.lineWidth = annotation.primary ? 2 : 1.5;
+        ctx.lineWidth = isPrimary ? 2 : 1.5;
         ctx.setLineDash(lineDash);
-
         ctx.beginPath();
-        ctx.moveTo(x - segmentHalfWidth, levelY);
-        ctx.lineTo(x + segmentHalfWidth, levelY);
+        ctx.moveTo(x - segHalf, levelY);
+        ctx.lineTo(x + segHalf, levelY);
         ctx.stroke();
 
+        // ── Vertical stem from tick to anchor ────────────────────────────
         ctx.beginPath();
         ctx.moveTo(x, levelY);
         ctx.lineTo(x, anchorY);
         ctx.stroke();
 
         ctx.setLineDash([]);
+
+        // ── Dot at the level ──────────────────────────────────────────────
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(x, levelY, annotation.primary ? 4 : 3, 0, Math.PI * 2);
+        ctx.arc(x, levelY, isPrimary ? 4 : 3, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = "rgba(10, 10, 12, 0.9)";
+        // ── Right-spine connector ─────────────────────────────────────────
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.5;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(spineX + SPINE_MARGIN, levelY);
+        ctx.lineTo(spineX, levelY);
+        if (Math.abs(labelY - levelY) > 1) {
+          ctx.lineTo(spineX, labelY);
+        }
+        ctx.lineTo(pillX + pillWidth, labelY);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+
+        // ── Pill ──────────────────────────────────────────────────────────
+        ctx.fillStyle = "rgba(10, 10, 12, 0.92)";
         ctx.strokeStyle = color;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.roundRect(pillX, pillTop, pillWidth, pillHeight, 6);
+        ctx.roundRect(pillX, pillTop, pillWidth, PILL_HEIGHT, PILL_RADIUS);
         ctx.fill();
         ctx.stroke();
 
         ctx.fillStyle = color;
-        ctx.fillText(pillText, pillX + 6, labelY);
+        ctx.fillText(pillText, pillX + PILL_PAD_X, labelY);
       }
 
       ctx.restore();
@@ -106,8 +168,9 @@ class TriggerAnnotationPaneView implements IPrimitivePaneView {
     this._annotations = annotations;
   }
 
-  zOrder(): "top" {
-    return "top";
+  // "normal" renders behind "top"-zOrder primitives (CalloutAnnotationPrimitive)
+  zOrder(): "normal" {
+    return "normal";
   }
 
   renderer(): IPrimitivePaneRenderer | null {
@@ -117,39 +180,17 @@ class TriggerAnnotationPaneView implements IPrimitivePaneView {
     }
 
     const timeScale = this._chart.timeScale();
-    const sorted = [...this._annotations].sort((a, b) =>
-      a.time === b.time ? a.level - b.level : a.time - b.time,
-    );
     const renderable: RenderTriggerAnnotation[] = [];
-    let prevX: number | null = null;
-    let stackedCount = 0;
 
-    for (const annotation of sorted) {
+    for (const annotation of this._annotations) {
       const x = timeScale.timeToCoordinate(annotation.time as unknown as Time);
       const levelY = this._series.priceToCoordinate(annotation.level);
       const anchorY = this._series.priceToCoordinate(annotation.anchorPrice);
-
       if (x === null || levelY === null || anchorY === null) continue;
-
-      if (prevX !== null && Math.abs(x - prevX) < 28) {
-        stackedCount += 1;
-      } else {
-        stackedCount = 0;
-      }
-      prevX = x;
-
-      const labelOffset = annotation.direction === "bearish" ? -24 : 24;
-      const stackOffset =
-        stackedCount * 18 * (annotation.direction === "bearish" ? -1 : 1);
-
-      renderable.push({
-        annotation,
-        x,
-        levelY,
-        anchorY,
-        labelY: levelY + labelOffset + stackOffset,
-      });
+      renderable.push({ annotation, x, levelY, anchorY, labelY: levelY });
     }
+
+    resolveCollisions(renderable);
 
     this._renderer.setAnnotations(renderable);
     return this._renderer;
