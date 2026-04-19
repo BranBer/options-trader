@@ -233,6 +233,16 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       null,
     );
     const extendedHoursRef = useRef<ExtendedHoursPrimitive | null>(null);
+    // Persist user's zoom/scroll position across chart re-initializations
+    const savedRangeRef = useRef<{ from: Time; to: Time } | null>(null);
+    // Stable ref for the marker-select callback so crosshair/click handlers
+    // always see the latest without being in initChart deps.
+    const triggerMarkerSelectRef = useRef(onTriggerMarkerSelect);
+    useEffect(() => {
+      triggerMarkerSelectRef.current = onTriggerMarkerSelect;
+    }, [onTriggerMarkerSelect]);
+    // Track whether chart has been initialized at least once (for viewport)
+    const hasSetInitialViewport = useRef(false);
 
     const initChart = useCallback(() => {
       if (!containerRef.current || candles.length === 0) return;
@@ -271,6 +281,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         timeScale: {
           borderColor: "rgba(255,255,255,0.1)",
           timeVisible: typeof candles[0]?.time === "number",
+          minBarSpacing: 4,
         },
       });
 
@@ -755,119 +766,50 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         }
       }
 
-      // Economic event markers (Story 47.8)
-      const allMarkers: SeriesMarker<Time>[] = [];
-
-      if (economicEvents && economicEvents.length > 0 && candles.length > 0) {
-        // Build a lookup: YYYY-MM-DD → candle Time value
-        const dateToTime = new Map<string, Time>();
-        for (const c of candles) {
-          let dateKey: string;
-          if (typeof c.time === "number") {
-            dateKey = new Date(c.time * 1000).toISOString().slice(0, 10);
-          } else {
-            dateKey = String(c.time).slice(0, 10);
-          }
-          if (!dateToTime.has(dateKey)) {
-            dateToTime.set(dateKey, c.time as Time);
-          }
+      // Set initial viewport (only on first mount or structural rebuild)
+      if (!hasSetInitialViewport.current) {
+        const VISIBLE_BAR_COUNT = 30;
+        if (isIntraday && candles.length > VISIBLE_BAR_COUNT) {
+          const from = candles[candles.length - VISIBLE_BAR_COUNT].time as Time;
+          const to = candles[candles.length - 1].time as Time;
+          chart.timeScale().setVisibleRange({ from, to });
+        } else {
+          chart.timeScale().fitContent();
         }
-
-        for (const event of economicEvents) {
-          const t = dateToTime.get(event.date);
-          if (!t) continue; // event date not in visible range
-
-          const color =
-            event.impact === "high"
-              ? "#ef4444" // red-500
-              : event.impact === "medium"
-                ? "#f59e0b" // amber-500
-                : "#6b7280"; // gray-500
-
-          allMarkers.push({
-            time: t,
-            position: "aboveBar",
-            shape: "circle",
-            color,
-            size: event.impact === "high" ? 1.5 : 1,
-            text: event.name,
-            id: `econ-${event.date}-${event.name}`,
-          });
-        }
+        hasSetInitialViewport.current = true;
+      } else if (savedRangeRef.current) {
+        chart.timeScale().setVisibleRange(savedRangeRef.current);
+      } else {
+        chart.timeScale().fitContent();
       }
 
-      // Trigger markers (Epic 48)
-      if (triggerMarkers && triggerMarkers.length > 0 && candles.length > 0) {
-        const candleTimesSec = candles.map((c) => candleTimeToSeconds(c.time));
-
-        for (const tm of triggerMarkers) {
-          const resolvedTimeSec = resolveTriggerMarkerTime(
-            tm.time,
-            candleTimesSec,
-            timeframe,
-          );
-          if (resolvedTimeSec == null) continue;
-
-          const isBullish = tm.direction === "bullish";
-          const isBearish = tm.direction === "bearish";
-
-          const markerId = tm.id ?? `trigger-${resolvedTimeSec}-${tm.type}`;
-
-          allMarkers.push({
-            time: resolvedTimeSec as unknown as Time,
-            position: isBearish ? "aboveBar" : "belowBar",
-            shape: "circle",
-            color: isBullish
-              ? "#38bdf8" // sky-400
-              : isBearish
-                ? "#fb7185" // rose-400
-                : "#fbbf24", // amber-400
-            size: tm.selected ? 1.5 : tm.primary ? 1 : 0.8,
-            text: `${tm.type} $${tm.level.toFixed(0)}`,
-            id: markerId,
-          });
-        }
-      }
-
-      if (allMarkers.length > 0) {
-        // Sort by time ascending — required by lightweight-charts
-        allMarkers.sort((a, b) => String(a.time).localeCompare(String(b.time)));
-        createSeriesMarkers(candleSeries, allMarkers);
-      }
-
-      chart.timeScale().fitContent();
-
-      // Crosshair move for pattern hover detection and marker linking
-      if (onHoveredPattern || onTriggerMarkerSelect) {
-        chart.subscribeCrosshairMove((param) => {
-          if (param.hoveredObjectId) {
-            const idStr = String(param.hoveredObjectId);
-            const match = idStr.match(/^pattern-(\d+)$/);
-            if (match) {
-              onHoveredPattern?.(parseInt(match[1], 10));
-              return;
-            }
-
-            if (onTriggerMarkerSelect && idStr.startsWith("classification-")) {
-              onTriggerMarkerSelect(idStr);
-              return;
-            }
-          }
-          onHoveredPattern?.(null);
-          onTriggerMarkerSelect?.(null);
-        });
-      }
-
-      if (onTriggerMarkerSelect) {
-        chart.subscribeClick((param) => {
-          if (!param.hoveredObjectId) return;
-
+      // Crosshair move for pattern hover detection and marker linking.
+      // Uses refs so the handlers stay current without being deps.
+      chart.subscribeCrosshairMove((param) => {
+        if (param.hoveredObjectId) {
           const idStr = String(param.hoveredObjectId);
-          if (idStr.startsWith("classification-")) {
-            onTriggerMarkerSelect(idStr);
+          const match = idStr.match(/^pattern-(\d+)$/);
+          if (match) {
+            onHoveredPattern?.(parseInt(match[1], 10));
+            return;
           }
-        });
-      }
+
+          if (idStr.startsWith("classification-")) {
+            triggerMarkerSelectRef.current?.(idStr);
+            return;
+          }
+        }
+        onHoveredPattern?.(null);
+        triggerMarkerSelectRef.current?.(null);
+      });
+
+      chart.subscribeClick((param) => {
+        if (!param.hoveredObjectId) return;
+        const idStr = String(param.hoveredObjectId);
+        if (idStr.startsWith("classification-")) {
+          triggerMarkerSelectRef.current?.(idStr);
+        }
+      });
 
       // Resize observer
       const ro = new ResizeObserver(() => {
@@ -881,6 +823,13 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
 
       return () => {
         ro.disconnect();
+        // Persist the user's zoom/scroll position before tearing down
+        try {
+          const range = chart.timeScale().getVisibleRange();
+          if (range) savedRangeRef.current = range;
+        } catch {
+          /* chart already disposed */
+        }
         if (overlaysRef.current && candleSeriesRef.current) {
           detachPatternOverlays(overlaysRef.current, candleSeriesRef.current);
           overlaysRef.current = null;
@@ -909,9 +858,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       indicators,
       timeframe,
       minConfidence,
-      economicEvents,
-      triggerMarkers,
-      onTriggerMarkerSelect,
+      onCalloutEntries,
       triggerAnnotations,
       intradayResistanceLevels,
       intradaySupportLevels,
@@ -950,6 +897,89 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       const cleanup = initChart();
       return () => cleanup?.();
     }, [initChart]);
+
+    // -----------------------------------------------------------------------
+    // Marker effect — updates economic + trigger markers in-place without
+    // rebuilding the chart.  Runs when markers or candle data change.
+    // -----------------------------------------------------------------------
+    useEffect(() => {
+      const candleSeries = candleSeriesRef.current;
+      if (!candleSeries || candles.length === 0) return;
+
+      const allMarkers: SeriesMarker<Time>[] = [];
+
+      // Economic event markers
+      if (economicEvents && economicEvents.length > 0) {
+        const dateToTime = new Map<string, Time>();
+        for (const c of candles) {
+          let dateKey: string;
+          if (typeof c.time === "number") {
+            dateKey = new Date(c.time * 1000).toISOString().slice(0, 10);
+          } else {
+            dateKey = String(c.time).slice(0, 10);
+          }
+          if (!dateToTime.has(dateKey)) {
+            dateToTime.set(dateKey, c.time as Time);
+          }
+        }
+
+        for (const event of economicEvents) {
+          const t = dateToTime.get(event.date);
+          if (!t) continue;
+
+          const color =
+            event.impact === "high"
+              ? "#ef4444"
+              : event.impact === "medium"
+                ? "#f59e0b"
+                : "#6b7280";
+
+          allMarkers.push({
+            time: t,
+            position: "aboveBar",
+            shape: "circle",
+            color,
+            size: event.impact === "high" ? 1.5 : 1,
+            text: event.name,
+            id: `econ-${event.date}-${event.name}`,
+          });
+        }
+      }
+
+      // Trigger markers (Market Pulse classifications)
+      if (triggerMarkers && triggerMarkers.length > 0) {
+        const candleTimesSec = candles.map((c) => candleTimeToSeconds(c.time));
+
+        for (const tm of triggerMarkers) {
+          const resolvedTimeSec = resolveTriggerMarkerTime(
+            tm.time,
+            candleTimesSec,
+            timeframe,
+          );
+          if (resolvedTimeSec == null) continue;
+
+          const isBullish = tm.direction === "bullish";
+          const isBearish = tm.direction === "bearish";
+
+          const markerId = tm.id ?? `trigger-${resolvedTimeSec}-${tm.type}`;
+
+          allMarkers.push({
+            time: resolvedTimeSec as unknown as Time,
+            position: isBearish ? "aboveBar" : "belowBar",
+            shape: "circle",
+            color: isBullish ? "#38bdf8" : isBearish ? "#fb7185" : "#fbbf24",
+            size: tm.selected ? 1.5 : tm.primary ? 1 : 0.8,
+            text: `${tm.type} $${tm.level.toFixed(0)}`,
+            id: markerId,
+          });
+        }
+      }
+
+      if (allMarkers.length > 0) {
+        allMarkers.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+      }
+      createSeriesMarkers(candleSeries, allMarkers);
+    }, [candles, economicEvents, triggerMarkers, timeframe]);
 
     if (candles.length === 0) {
       return (

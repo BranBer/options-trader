@@ -346,3 +346,73 @@ export async function fetchCandleWindow(
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Cached raw 15-minute candles for chart display (full 24h context)
+// ---------------------------------------------------------------------------
+
+type CachedIntraday = {
+  candles: Array<{
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>;
+  fetchedAt: number;
+};
+
+const intradayCache = new Map<string, CachedIntraday>();
+const INTRADAY_CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes
+
+/**
+ * Fetch the most recent ~96 bars (≈24 h of extended-hours 15-min candles) for
+ * chart display.  Results are cached in-memory for 3 minutes to avoid
+ * hammering Yahoo Finance on every API poll.
+ */
+export async function fetchIntraday15mCandles(
+  ticker: string,
+): Promise<CachedIntraday["candles"]> {
+  const key = ticker.trim().toUpperCase();
+  const cached = intradayCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < INTRADAY_CACHE_TTL_MS) {
+    return cached.candles;
+  }
+
+  const now = new Date();
+  const period1 = new Date(now.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+
+  try {
+    const result = await yf.chart(key, {
+      period1,
+      period2: now,
+      interval: MARKET_PULSE_TIMEFRAME,
+      includePrePost: true,
+    });
+
+    const all = normalizeCandles(result?.quotes ?? []);
+    // Keep the last ~96 bars (full extended-hours day)
+    const candles = all.slice(-LOOKBACK_CANDLE_COUNT).map((c) => ({
+      time:
+        typeof c.time === "number"
+          ? c.time
+          : Math.floor(new Date(String(c.time)).getTime() / 1000),
+      open: round(c.open),
+      high: round(c.high),
+      low: round(c.low),
+      close: round(c.close),
+      volume: round(c.volume, 0),
+    }));
+
+    intradayCache.set(key, { candles, fetchedAt: Date.now() });
+    return candles;
+  } catch (error) {
+    console.error(
+      `[market-pulse-candles] Failed to fetch intraday candles for ${key}:`,
+      error,
+    );
+    // Return stale cache if available, otherwise empty
+    return cached?.candles ?? [];
+  }
+}

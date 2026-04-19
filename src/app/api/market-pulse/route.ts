@@ -14,6 +14,7 @@ import {
   MARKET_PULSE_INTERVAL_MS,
 } from "@/lib/services/market-pulse-scheduler";
 import { fetchHistoricalData } from "@/lib/services/market-fetcher";
+import { fetchIntraday15mCandles } from "@/lib/services/market-pulse-candles";
 import { getTickerProgress } from "@/lib/services/market-pulse-progress";
 
 export const dynamic = "force-dynamic";
@@ -199,7 +200,7 @@ async function buildTickerState(
     };
   }
 
-  const [classificationRows, correlationRows, narrativeRows] =
+  const [classificationRows, correlationRows, narrativeRows, candles] =
     await Promise.all([
       db
         .select()
@@ -214,33 +215,8 @@ async function buildTickerState(
         .from(marketPulseNarratives)
         .where(eq(marketPulseNarratives.runId, latestRun.runId))
         .limit(1),
+      fetchIntraday15mCandles(ticker),
     ]);
-
-  const candleRows = classificationRows
-    .filter((row) => row.level === "candle")
-    .sort((left, right) => left.candleTime.localeCompare(right.candleTime));
-
-  const candles = candleRows
-    .map((row) => {
-      const candleData = parseJson<{
-        open: number;
-        high: number;
-        low: number;
-        close: number;
-        volume: number;
-      }>(row.candleData);
-
-      if (!candleData) return null;
-      return {
-        time: candleTimeToSeconds(row.candleTime),
-        open: candleData.open,
-        high: candleData.high,
-        low: candleData.low,
-        close: candleData.close,
-        volume: candleData.volume,
-      };
-    })
-    .filter((row): row is NonNullable<typeof row> => row != null);
 
   const classifications = classificationRows
     .map((row) => ({
