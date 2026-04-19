@@ -45,6 +45,7 @@ import type {
   IntradaySupportLevel,
 } from "@/lib/utils/intraday-resistance";
 import { TriggerAnnotationPrimitive } from "./primitives/TriggerAnnotationPrimitive";
+import { ExtendedHoursPrimitive } from "./primitives/ExtendedHoursPrimitive";
 
 export interface TriggerMarker {
   /** Stable identifier used for linking chart markers back to external UI state */
@@ -231,6 +232,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
     const triggerAnnotationRef = useRef<TriggerAnnotationPrimitive | null>(
       null,
     );
+    const extendedHoursRef = useRef<ExtendedHoursPrimitive | null>(null);
 
     const initChart = useCallback(() => {
       if (!containerRef.current || candles.length === 0) return;
@@ -711,6 +713,22 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
 
         // Fire the legend callback so the DOM legend can render
         onCalloutEntries?.(overlays.callouts);
+      }
+
+      // Extended-hours shading + session boundary lines (Stories 3.1 + 3.2).
+      // Uses zOrder "bottom" so it sits under every other primitive.
+      // Only meaningful for intraday timeframes (unix-second candle timestamps).
+      const isIntraday = timeframe === "1d" || timeframe === "1wk";
+      if (isIntraday && candles.length > 0) {
+        const candlesForSession = candles.map((c) => ({
+          time:
+            typeof c.time === "number"
+              ? c.time
+              : Math.floor(new Date(c.time).getTime() / 1000),
+        }));
+        const extendedPrimitive = new ExtendedHoursPrimitive(candlesForSession);
+        candleSeries.attachPrimitive(extendedPrimitive);
+        extendedHoursRef.current = extendedPrimitive;
       }
 
       // Trigger annotation drawings — attached BEFORE pattern overlays so they

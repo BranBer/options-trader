@@ -21,6 +21,7 @@ vi.mock("@/lib/services/market-pulse-candles", () => ({
 vi.mock("@/lib/services/llm-client", () => ({
   callLlmWithRetry: (...args: unknown[]) => mockCallLlmWithRetry(...args),
   getTokenUsageSnapshot: () => mockGetTokenUsageSnapshot(),
+  getMarketPulseModel: () => "test-model",
 }));
 vi.mock("@/lib/services/live-economic-calendar", () => ({
   getCachedCalendar: () => mockGetCachedCalendar(),
@@ -42,24 +43,33 @@ function makeUpdateChain() {
 }
 
 function makeSelectChain(result: unknown, withLimit = false) {
+  // orderBy resolves directly (for queries without .limit()) AND exposes .limit() for chaining
+  const makeOrderBy = () => {
+    const orderByPromise = Promise.resolve(result);
+    const orderByFn = vi.fn(() => {
+      const p = orderByPromise as Promise<unknown> & {
+        limit: ReturnType<typeof vi.fn>;
+      };
+      p.limit = vi.fn().mockResolvedValue(result);
+      return p;
+    });
+    return orderByFn;
+  };
+
   return {
     from: vi.fn(() => ({
       where: vi.fn(() =>
         withLimit
           ? {
-              orderBy: vi.fn(() => ({
-                limit: vi.fn().mockResolvedValue(result),
-              })),
+              orderBy: makeOrderBy(),
               limit: vi.fn().mockResolvedValue(result),
             }
           : {
-              orderBy: vi.fn(() => ({
-                limit: vi.fn().mockResolvedValue(result),
-              })),
+              orderBy: makeOrderBy(),
               limit: vi.fn().mockResolvedValue(result),
             },
       ),
-      orderBy: vi.fn(() => ({ limit: vi.fn().mockResolvedValue(result) })),
+      orderBy: makeOrderBy(),
     })),
   };
 }
@@ -151,19 +161,28 @@ describe("market-pulse Sprint 4 orchestration", () => {
   });
 
   it("runs classification, correlation, and narrative with one shared runId", async () => {
-    mockGetCachedCalendar.mockReturnValue([
-      {
-        date: "2026-04-18",
-        name: "Fed speaker",
-        impact: "medium",
-        description: "Fed commentary",
-        source: "calendar",
-      },
-    ]);
+    mockGetCachedCalendar.mockReturnValue([]);
 
+    // Select ordering:
+    //   1. fetchTodaysClassifications → [] (no prior classifications today)
+    //   2. recentNewsForTicker → 1 news item (forces correlation LLM call)
+    //   3. previousNarrative → [] (no prior narrative)
     mockDb.select
       .mockImplementationOnce(() => makeSelectChain([], true))
-      .mockImplementationOnce(() => makeSelectChain([], true))
+      .mockImplementationOnce(() =>
+        makeSelectChain(
+          [
+            {
+              id: 1,
+              headline: "AAPL rally",
+              tickers: '["AAPL"]',
+              impactScore: 5,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          true,
+        ),
+      )
       .mockImplementationOnce(() => makeSelectChain([], true));
 
     mockCallLlmWithRetry

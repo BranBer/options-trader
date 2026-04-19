@@ -28,6 +28,7 @@ const { mockDb } = vi.hoisted(() => ({
     select: vi.fn(),
     update: vi.fn(),
     insert: vi.fn(),
+    transaction: vi.fn(),
   },
 }));
 
@@ -41,11 +42,13 @@ const mockIsMarketOpen = vi.fn();
 vi.mock("@/lib/db/client", () => ({ db: mockDb }));
 vi.mock("@/lib/services/market-pulse-candles", () => ({
   MARKET_PULSE_DEFAULT_WINDOW_SIZE: 8,
+  LOOKBACK_CANDLE_COUNT: 96,
   fetchCandleWindow: (...args: unknown[]) => mockFetchCandleWindow(...args),
 }));
 vi.mock("@/lib/services/llm-client", () => ({
   callLlmWithRetry: (...args: unknown[]) => mockCallLlmWithRetry(...args),
   getTokenUsageSnapshot: () => mockGetTokenUsageSnapshot(),
+  getMarketPulseModel: () => "test-model",
 }));
 vi.mock("@/lib/services/live-economic-calendar", () => ({
   getCachedCalendar: () => mockGetCachedCalendar(),
@@ -74,11 +77,24 @@ import {
 // ─── Helper factories ────────────────────────────────────────────────────────
 
 function makeInsertChain() {
-  return { values: vi.fn().mockResolvedValue(undefined) };
+  return {
+    values: vi.fn(() => ({
+      run: vi.fn(),
+      then: (onfulfilled?: ((v: unknown) => unknown) | null) =>
+        Promise.resolve(undefined).then(onfulfilled ?? undefined),
+      catch: vi.fn(() => Promise.resolve()),
+    })),
+  };
 }
 
 function makeUpdateChain() {
-  const set = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
+  const makeWhereResult = () => ({
+    run: vi.fn(),
+    then: (onfulfilled?: ((v: unknown) => unknown) | null) =>
+      Promise.resolve(undefined).then(onfulfilled ?? undefined),
+    catch: vi.fn(() => Promise.resolve()),
+  });
+  const set = vi.fn(() => ({ where: vi.fn(makeWhereResult) }));
   return { set };
 }
 
@@ -103,14 +119,36 @@ function makeSelectChain(result: unknown) {
         onrejected ?? undefined,
       ),
     // `.limit()` for callers that chain further after `.orderBy()`.
-    limit: vi.fn().mockResolvedValue(result),
+    limit: vi.fn(() => ({
+      all: vi.fn(() => result),
+      then: (
+        onfulfilled?: ((v: unknown) => unknown) | null,
+        onrejected?: ((r: unknown) => unknown) | null,
+      ) =>
+        Promise.resolve(result).then(
+          onfulfilled ?? undefined,
+          onrejected ?? undefined,
+        ),
+    })),
+    // `.all()` for synchronous transaction usage.
+    all: vi.fn(() => result),
   });
 
   return {
     from: vi.fn(() => ({
       where: vi.fn(() => ({
         orderBy: vi.fn(makeOrderByResult),
-        limit: vi.fn().mockResolvedValue(result),
+        limit: vi.fn(() => ({
+          all: vi.fn(() => result),
+          then: (
+            onfulfilled?: ((v: unknown) => unknown) | null,
+            onrejected?: ((r: unknown) => unknown) | null,
+          ) =>
+            Promise.resolve(result).then(
+              onfulfilled ?? undefined,
+              onrejected ?? undefined,
+            ),
+        })),
       })),
       orderBy: vi.fn(() => ({ limit: vi.fn().mockResolvedValue(result) })),
     })),
@@ -282,11 +320,17 @@ describe("orchestrateTickerPulse — graceful degradation on downstream failures
     // recentNewsForTicker filters with `parseStringArray(row.tickers).includes(ticker)`.
     // Without the field the filter removes the row, news=[],  macro=[], and
     // correlateCatalysts short-circuits to [] without calling the LLM.
-    mockDb.select.mockImplementationOnce(() =>
-      makeSelectChain([
-        { id: 1, headline: "AAPL beats earnings", tickers: '["AAPL"]' },
-      ]),
-    ); // recentNewsForTicker → 1 item survives filter → correlateCatalysts calls LLM
+    //
+    // Select ordering:
+    //   1. fetchTodaysClassifications → [] (no prior classifications)
+    //   2. recentNewsForTicker → 1 news item
+    mockDb.select
+      .mockImplementationOnce(() => makeSelectChain([]))
+      .mockImplementationOnce(() =>
+        makeSelectChain([
+          { id: 1, headline: "AAPL beats earnings", tickers: '["AAPL"]' },
+        ]),
+      );
 
     mockCallLlmWithRetry
       .mockResolvedValueOnce(
@@ -346,6 +390,8 @@ describe("addTicker — subscription capacity enforcement", () => {
     mockDb.insert.mockImplementation(() => makeInsertChain());
     // Default: all selects return empty (safe fallback).
     mockDb.select.mockImplementation(() => makeSelectChain([]));
+    // Pass-through transaction: callback receives mockDb as the tx argument.
+    mockDb.transaction.mockImplementation((fn: Function) => fn(mockDb));
   });
 
   it("rejects tickers with invalid format before touching the DB", async () => {
@@ -370,11 +416,8 @@ describe("addTicker — subscription capacity enforcement", () => {
       makeSubscriptionRow("MSFT", 4),
     ];
 
-    // select 1: existing-row check for "AMZN" → not in DB.
-    // select 2: getMarketPulseSubscriptions → 4 active subs → triggers capacity check.
-    mockDb.select
-      .mockImplementationOnce(() => makeSelectChain([]))
-      .mockImplementationOnce(() => makeSelectChain(fourActiveSubs));
+    // Inside the transaction, the first tx.select returns active subs → triggers capacity check.
+    mockDb.select.mockImplementationOnce(() => makeSelectChain(fourActiveSubs));
 
     await expect(addTicker("AMZN")).rejects.toMatchObject({
       status: 409,
@@ -383,8 +426,8 @@ describe("addTicker — subscription capacity enforcement", () => {
   });
 
   it("is idempotent when the ticker is already being tracked", async () => {
-    // select 1: existing check → row found.
-    // select 2: subscriptions → [AAPL] → activeTickers includes AAPL → early return.
+    // tx.select 1 (inside transaction): activeSubscriptions → [AAPL] → early return true.
+    // db.select 2 (getTrackedTickers after transaction): subscriptions → [AAPL].
     mockDb.select
       .mockImplementationOnce(() =>
         makeSelectChain([makeSubscriptionRow("AAPL")]),
@@ -486,6 +529,8 @@ describe("runMarketPulseCycle — scheduler pipeline orchestration", () => {
     vi.resetAllMocks();
     mockDb.update.mockImplementation(() => makeUpdateChain());
     mockDb.insert.mockImplementation(() => makeInsertChain());
+    // Pass-through transaction: callback receives mockDb as the tx argument.
+    mockDb.transaction.mockImplementation((fn: Function) => fn(mockDb));
     // Default: open market, all selects return empty.
     mockIsMarketOpen.mockReturnValue({ isOpen: true });
     mockDb.select.mockImplementation(() => makeSelectChain([]));

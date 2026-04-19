@@ -13,6 +13,8 @@ import {
   getTrackedTickers,
   MARKET_PULSE_INTERVAL_MS,
 } from "@/lib/services/market-pulse-scheduler";
+import { fetchHistoricalData } from "@/lib/services/market-fetcher";
+import { getTickerProgress } from "@/lib/services/market-pulse-progress";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +24,24 @@ export type MarketPulseApiTickerState = {
   lastRunId: string | null;
   lastRunAt: string | null;
   nextRunAt: string | null;
+  /** Progress info — non-null only while status === "running" */
+  progress: {
+    pct: number;
+    currentStage: string | null;
+  } | null;
+  /** Error message from the last run — non-null only when status is "error" or "partial" */
+  errorMessage: string | null;
   candles: Array<{
     time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>;
+  /** Daily candles shown while status === "pending" (no pulse run yet) */
+  fallbackCandles: Array<{
+    time: string | number;
     open: number;
     high: number;
     low: number;
@@ -163,13 +181,18 @@ async function buildTickerState(
 
   const latestRun = runs[0] ?? null;
   if (!latestRun) {
+    // Fetch 30 days of daily candles as a chart placeholder while pending
+    const fallbackCandles = await fetchHistoricalData(ticker, "1mo");
     return {
       ticker,
       status: "pending",
       lastRunId: null,
       lastRunAt: null,
       nextRunAt: null,
+      progress: null,
+      errorMessage: null,
       candles: [],
+      fallbackCandles,
       classifications: [],
       correlations: [],
       narrative: null,
@@ -263,9 +286,52 @@ async function buildTickerState(
           createdAt: narrativeRow.createdAt,
         };
 
+  // Safety net: if the DB says "running" but the run started more than 15 min
+  // ago, the process that owned it is gone.  Report "error" to the client so
+  // the user can retry instead of staring at a stuck spinner.
+  let effectiveStatus = latestRun.status as MarketPulseApiTickerState["status"];
+  if (effectiveStatus === "running") {
+    const startedMs = new Date(latestRun.startedAt).getTime();
+    const ageMs = Date.now() - startedMs;
+    if (ageMs > 15 * 60 * 1000) {
+      effectiveStatus = "error";
+    }
+  }
+
+  // Build progress info for running tickers.
+  // Prefer the in-memory store (sub-second updates) and fall back to DB columns.
+  let progress: MarketPulseApiTickerState["progress"] = null;
+  if (effectiveStatus === "running") {
+    const mem = getTickerProgress(ticker);
+    if (mem) {
+      progress = {
+        pct: mem.pct,
+        currentStage: mem.stages.find((s) => s.status === "active")?.id ?? null,
+      };
+    } else {
+      // In-memory store was lost (restart) — use DB columns
+      progress = {
+        pct: latestRun.progressPct ?? 0,
+        currentStage: latestRun.currentStage ?? null,
+      };
+    }
+  }
+
+  // Derive error message — include a user-friendly note when the safety net
+  // upgraded a stale "running" to "error".
+  let errorMessage: string | null = latestRun.errorMessage;
+  if (
+    effectiveStatus === "error" &&
+    latestRun.status === "running" &&
+    !errorMessage
+  ) {
+    errorMessage =
+      "Run interrupted — server restarted. Click Refresh to retry.";
+  }
+
   return {
     ticker,
-    status: latestRun.status as MarketPulseApiTickerState["status"],
+    status: effectiveStatus,
     lastRunId: latestRun.runId,
     lastRunAt: latestRun.completedAt ?? latestRun.startedAt,
     nextRunAt:
@@ -275,7 +341,10 @@ async function buildTickerState(
               MARKET_PULSE_INTERVAL_MS,
           ).toISOString()
         : null,
+    progress,
+    errorMessage,
     candles,
+    fallbackCandles: [],
     classifications,
     correlations,
     narrative,

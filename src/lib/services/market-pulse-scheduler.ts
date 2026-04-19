@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gte, lt, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { marketPulseRuns, marketPulseSubscriptions } from "@/lib/db/schema";
 import { orchestrateTickerPulse } from "@/lib/services/market-pulse-engine";
@@ -7,6 +7,8 @@ import {
   marketPulseTickerSchema,
   type MarketPulseSubscription,
 } from "@/types/market-pulse";
+import { LOOKBACK_CANDLE_COUNT } from "@/lib/services/market-pulse-candles";
+import { finishTickerProgress } from "@/lib/services/market-pulse-progress";
 
 export const MAX_MARKET_PULSE_TICKERS = 4;
 export const MARKET_PULSE_INTERVAL_MS = 15 * 60 * 1000;
@@ -17,6 +19,8 @@ const schedulerState = globalThis as typeof globalThis & {
 };
 
 const activeRuns = new Set<string>();
+/** Maps ticker → AbortController for the in-flight orchestration promise */
+const activeCancellations = new Map<string, AbortController>();
 
 export class MarketPulseSubscriptionError extends Error {
   status: number;
@@ -36,6 +40,12 @@ export class MarketPulseSchedulerError extends Error {
     this.name = "MarketPulseSchedulerError";
     this.status = status;
   }
+}
+
+/** Abort the in-flight run for a ticker, if one exists. */
+export function cancelTicker(ticker: string): void {
+  const normalizedTicker = normalizeTicker(ticker);
+  activeCancellations.get(normalizedTicker)?.abort();
 }
 
 function normalizeTicker(ticker: string): string {
@@ -69,40 +79,65 @@ export async function getTrackedTickers(): Promise<string[]> {
 
 export async function addTicker(ticker: string): Promise<string[]> {
   const normalizedTicker = normalizeTicker(ticker);
-  const existing = await db
-    .select()
-    .from(marketPulseSubscriptions)
-    .where(eq(marketPulseSubscriptions.ticker, normalizedTicker))
-    .limit(1);
 
-  const activeSubscriptions = await getMarketPulseSubscriptions();
-  const activeTickers = activeSubscriptions.map(
-    (subscription) => subscription.ticker,
-  );
+  // Transaction-wrapped read-check-write to prevent TOCTOU races when
+  // concurrent addTicker calls arrive for the same ticker.
+  const alreadyActive = db.transaction((tx) => {
+    const activeSubscriptions = tx
+      .select()
+      .from(marketPulseSubscriptions)
+      .where(eq(marketPulseSubscriptions.isActive, true))
+      .orderBy(asc(marketPulseSubscriptions.addedAt))
+      .all();
 
-  if (activeTickers.includes(normalizedTicker)) {
-    return activeTickers;
-  }
+    const activeTickers = activeSubscriptions.map((s) => s.ticker);
 
-  if (activeSubscriptions.length >= MAX_MARKET_PULSE_TICKERS) {
-    throw new MarketPulseSubscriptionError(
-      `You can track at most ${MAX_MARKET_PULSE_TICKERS} tickers on Market Pulse`,
-      409,
-    );
-  }
+    // Idempotent: if already subscribed, return early without error or new run
+    if (activeTickers.includes(normalizedTicker)) {
+      return true;
+    }
 
-  const addedAt = new Date().toISOString();
+    if (activeSubscriptions.length >= MAX_MARKET_PULSE_TICKERS) {
+      throw new MarketPulseSubscriptionError(
+        `You can track at most ${MAX_MARKET_PULSE_TICKERS} tickers on Market Pulse`,
+        409,
+      );
+    }
 
-  if (existing.length > 0) {
-    await db
-      .update(marketPulseSubscriptions)
-      .set({ isActive: true, addedAt })
-      .where(eq(marketPulseSubscriptions.ticker, normalizedTicker));
-  } else {
-    await db.insert(marketPulseSubscriptions).values({
-      ticker: normalizedTicker,
-      addedAt,
-      isActive: true,
+    const existing = tx
+      .select()
+      .from(marketPulseSubscriptions)
+      .where(eq(marketPulseSubscriptions.ticker, normalizedTicker))
+      .limit(1)
+      .all();
+
+    const addedAt = new Date().toISOString();
+
+    if (existing.length > 0) {
+      tx.update(marketPulseSubscriptions)
+        .set({ isActive: true, addedAt })
+        .where(eq(marketPulseSubscriptions.ticker, normalizedTicker))
+        .run();
+    } else {
+      tx.insert(marketPulseSubscriptions)
+        .values({
+          ticker: normalizedTicker,
+          addedAt,
+          isActive: true,
+        })
+        .run();
+    }
+
+    return false;
+  });
+
+  if (!alreadyActive) {
+    // Fire the initial 24h catch-up run non-blocking so the UI populates immediately
+    void runSingleTicker(normalizedTicker, "initial").catch((error) => {
+      console.error(
+        `[MarketPulseScheduler] Initial catch-up failed for ${normalizedTicker}:`,
+        error,
+      );
     });
   }
 
@@ -112,10 +147,21 @@ export async function addTicker(ticker: string): Promise<string[]> {
 export async function removeTicker(ticker: string): Promise<string[]> {
   const normalizedTicker = normalizeTicker(ticker);
 
+  // Cancel any in-flight pipeline and clear its progress entry immediately
+  cancelTicker(normalizedTicker);
+  finishTickerProgress(normalizedTicker, true);
+
+  // Idempotent: if ticker isn't active (or doesn't exist), the UPDATE is a
+  // harmless no-op — no error thrown.
   await db
     .update(marketPulseSubscriptions)
     .set({ isActive: false })
-    .where(eq(marketPulseSubscriptions.ticker, normalizedTicker));
+    .where(
+      and(
+        eq(marketPulseSubscriptions.ticker, normalizedTicker),
+        eq(marketPulseSubscriptions.isActive, true),
+      ),
+    );
 
   return getTrackedTickers();
 }
@@ -185,14 +231,57 @@ export async function isMarketPulseRunActive(ticker: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * Returns true when the ticker has no successful/partial run in the past 24 hours,
+ * meaning a full catch-up window should be used instead of the rolling window.
+ */
+async function needsInitialCatchUp(ticker: string): Promise<boolean> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const rows = await db
+    .select({ runId: marketPulseRuns.runId })
+    .from(marketPulseRuns)
+    .where(
+      and(
+        eq(marketPulseRuns.ticker, ticker),
+        gte(marketPulseRuns.startedAt, since),
+        or(
+          eq(marketPulseRuns.status, "success"),
+          eq(marketPulseRuns.status, "partial"),
+        ),
+      ),
+    )
+    .limit(1);
+  return rows.length === 0;
+}
+
+/** Resolve any DB rows stuck at "running" for longer than 10 minutes. */
+async function clearStaleRuns(ticker: string): Promise<void> {
+  const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  await db
+    .update(marketPulseRuns)
+    .set({
+      status: "error",
+      errorMessage: "Run timed out (stale — process likely restarted)",
+      completedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(marketPulseRuns.ticker, ticker),
+        eq(marketPulseRuns.status, "running"),
+        lt(marketPulseRuns.startedAt, staleThreshold),
+      ),
+    );
+}
+
 async function runSingleTicker(
   ticker: string,
-  trigger: "manual" | "scheduled",
+  trigger: "manual" | "scheduled" | "initial",
   runId?: string,
 ): Promise<string> {
   const normalizedTicker = normalizeTicker(ticker);
   const finalRunId = runId ?? crypto.randomUUID();
 
+  // Fast in-memory guard — prevents duplicate runs from the same process
   if (activeRuns.has(normalizedTicker)) {
     throw new MarketPulseSchedulerError(
       `A Market Pulse run is already active for ${normalizedTicker}`,
@@ -200,9 +289,14 @@ async function runSingleTicker(
     );
   }
 
-  activeRuns.add(normalizedTicker);
-  try {
-    const rows = await db
+  // Resolve any DB rows from crashed previous runs before checking the DB guard
+  await clearStaleRuns(normalizedTicker);
+
+  // DB guard — check inside a transaction so the read+claim is atomic.
+  // This eliminates the TOCTOU race where two calls both pass the SELECT
+  // check before either inserts the "running" row.
+  const alreadyRunning = db.transaction((tx) => {
+    const rows = tx
       .select()
       .from(marketPulseRuns)
       .where(
@@ -211,23 +305,39 @@ async function runSingleTicker(
           eq(marketPulseRuns.status, "running"),
         ),
       )
-      .limit(1);
+      .limit(1)
+      .all();
+    return rows.length > 0;
+  });
 
-    if (rows.length > 0) {
-      throw new MarketPulseSchedulerError(
-        `A Market Pulse run is already active for ${normalizedTicker}`,
-        409,
-      );
-    }
+  if (alreadyRunning) {
+    throw new MarketPulseSchedulerError(
+      `A Market Pulse run is already active for ${normalizedTicker}`,
+      409,
+    );
+  }
+
+  activeRuns.add(normalizedTicker);
+  const controller = new AbortController();
+  activeCancellations.set(normalizedTicker, controller);
+  try {
+    // For initial and scheduled triggers, check if we need a full 24h catch-up
+    const catchUp =
+      trigger === "initial" ||
+      (trigger === "scheduled" &&
+        (await needsInitialCatchUp(normalizedTicker)));
 
     await orchestrateTickerPulse({
       ticker: normalizedTicker,
-      trigger,
+      trigger: trigger === "initial" ? "initial" : trigger,
+      windowSize: catchUp ? LOOKBACK_CANDLE_COUNT : undefined,
       runId: finalRunId,
+      signal: controller.signal,
     });
     return finalRunId;
   } finally {
     activeRuns.delete(normalizedTicker);
+    activeCancellations.delete(normalizedTicker);
   }
 }
 
@@ -264,11 +374,42 @@ export function startMarketPulseScheduler(): void {
   }
 
   schedulerState.__marketPulseSchedulerStarted = true;
+
+  // Resolve any "running" rows orphaned by a previous process crash/restart
+  // before the first cycle fires — this is the ONLY place where we clean up
+  // without a 10-minute threshold (any "running" row from before this process
+  // started is definitionally orphaned).
+  void resolveOrphanedRuns().then(() => {
+    void runMarketPulseCycle("scheduled");
+  });
+
   schedulerState.__marketPulseSchedulerInterval = setInterval(() => {
     void runMarketPulseCycle("scheduled");
   }, MARKET_PULSE_INTERVAL_MS);
+}
 
-  void runMarketPulseCycle("scheduled");
+/**
+ * Mark ALL "running" rows as "error" — called exactly once on startup.
+ * Any row still at "running" when a new process starts is orphaned because
+ * the in-memory activeRuns Set that tracks genuine runs was wiped.
+ */
+export async function resolveOrphanedRuns(): Promise<number> {
+  const result = await db
+    .update(marketPulseRuns)
+    .set({
+      status: "error",
+      errorMessage: "Orphaned — server restarted",
+      completedAt: new Date().toISOString(),
+    })
+    .where(eq(marketPulseRuns.status, "running"));
+
+  const count = result.changes ?? 0;
+  if (count > 0) {
+    console.log(
+      `[MarketPulseScheduler] Resolved ${count} orphaned "running" row(s) from previous process`,
+    );
+  }
+  return count;
 }
 
 export function stopMarketPulseScheduler(): void {

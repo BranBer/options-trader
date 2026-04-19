@@ -8,6 +8,14 @@ import {
   marketPulseRuns,
 } from "@/lib/db/schema";
 import {
+  activateStage,
+  completeStage,
+  failStage,
+  finishTickerProgress,
+  initTickerProgress,
+  updateStageProgress,
+} from "@/lib/services/market-pulse-progress";
+import {
   buildClassifierPrompt,
   MARKET_PULSE_CLASSIFIER_RESPONSE_SCHEMA,
   MARKET_PULSE_CLASSIFIER_SYSTEM_INSTRUCTION,
@@ -31,6 +39,7 @@ import {
 } from "@/lib/services/market-pulse-candles";
 import {
   callLlmWithRetry,
+  getMarketPulseModel,
   getTokenUsageSnapshot,
 } from "@/lib/services/llm-client";
 import { getCachedCalendar } from "@/lib/services/live-economic-calendar";
@@ -47,7 +56,7 @@ import {
   type MarketPulsePreparedCandle,
 } from "@/types/market-pulse";
 
-const CLASSIFICATION_BATCH_SIZE = 8;
+const CLASSIFICATION_BATCH_SIZE = 16;
 const CLASSIFICATION_CALL_TYPE = "marketPulseClassify";
 const CORRELATION_CALL_TYPE = "marketPulseCorrelate";
 const SYNTHESIS_CALL_TYPE = "marketPulseNarrative";
@@ -108,9 +117,12 @@ function getCallTypeTokens(callType: string): number {
 }
 
 function summarizeWindow(candles: MarketPulsePreparedCandle[]): string {
+  const now = new Date();
+  const cadenceMs = 15 * 60 * 1000; // 15-minute candles
+  const start = new Date(now.getTime() - candles.length * cadenceMs);
   return JSON.stringify({
-    start: candles[0]?.candleTime ?? null,
-    end: candles.at(-1)?.candleTime ?? null,
+    start: start.toISOString(),
+    end: now.toISOString(),
     count: candles.length,
   });
 }
@@ -138,6 +150,32 @@ function buildAverageConfidence(
     0,
   );
   return Number((total / correlations.length).toFixed(4));
+}
+
+const SIGNIFICANCE_RANK: Record<string, number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
+
+/**
+ * Return the top `limit` classifications ranked by significance (high > medium
+ * > low), preserving chronological order within each tier.
+ */
+function capBySignificance(
+  classifications: MarketPulseClassificationPayload[],
+  limit: number,
+): MarketPulseClassificationPayload[] {
+  if (classifications.length <= limit) return classifications;
+
+  const sorted = [...classifications].sort(
+    (a, b) =>
+      (SIGNIFICANCE_RANK[a.significance] ?? 3) -
+      (SIGNIFICANCE_RANK[b.significance] ?? 3),
+  );
+  const kept = new Set(sorted.slice(0, limit));
+  // Return in original order
+  return classifications.filter((c) => kept.has(c));
 }
 
 function normalizeNarrativePayload(
@@ -291,18 +329,23 @@ async function persistClassifications(
 
 export async function classifyCandles(options: {
   ticker: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: "manual" | "scheduled" | "initial";
   windowSize?: number;
   runId?: string;
+  signal?: AbortSignal;
 }): Promise<MarketPulseClassificationRunResult> {
   const ticker = marketPulseTickerSchema.parse(options.ticker);
   const trigger = options.trigger ?? "manual";
   const windowSize = options.windowSize ?? MARKET_PULSE_DEFAULT_WINDOW_SIZE;
+
+  activateStage(ticker, "candles");
   const candles = await fetchCandleWindow(ticker, windowSize);
 
   if (candles.length === 0) {
+    failStage(ticker, "candles");
     throw new Error(`No 15-minute candle data available for ${ticker}`);
   }
+  completeStage(ticker, "candles");
 
   const runId = options.runId ?? crypto.randomUUID();
   const startedAt = new Date().toISOString();
@@ -322,7 +365,10 @@ export async function classifyCandles(options: {
   const stageStartedAt = Date.now();
 
   const batches = batchCandles(candles, CLASSIFICATION_BATCH_SIZE);
-  for (const batch of batches) {
+  activateStage(ticker, "classification", 0);
+  for (const [batchIndex, batch] of batches.entries()) {
+    // Check for cancellation before starting each LLM call
+    if (options.signal?.aborted) break;
     try {
       const prompt = buildClassifierPrompt(batch);
       const response = await callLlmWithRetry(
@@ -332,8 +378,10 @@ export async function classifyCandles(options: {
         marketPulseClassifierZodSchema,
         {
           callType: CLASSIFICATION_CALL_TYPE,
+          model: getMarketPulseModel(),
           temperature: 0,
-          maxOutputTokens: 4096,
+          maxOutputTokens: 16384,
+          signal: options.signal,
         },
       );
 
@@ -346,6 +394,31 @@ export async function classifyCandles(options: {
       );
       errors.push(message);
     }
+    updateStageProgress(
+      ticker,
+      "classification",
+      (batchIndex + 1) / batches.length,
+    );
+  }
+
+  // If the run was cancelled mid-classification, clean up and stop
+  if (options.signal?.aborted) {
+    await db
+      .update(marketPulseRuns)
+      .set({
+        status: "error",
+        errorMessage: "Cancelled",
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - new Date(startedAt).getTime(),
+      })
+      .where(
+        and(
+          eq(marketPulseRuns.runId, runId),
+          eq(marketPulseRuns.ticker, ticker),
+        ),
+      );
+    failStage(ticker, "classification");
+    throw new DOMException("Market Pulse run cancelled", "AbortError");
   }
 
   const sequenceEvents = buildSequenceEvents(successfulClassifications);
@@ -358,6 +431,7 @@ export async function classifyCandles(options: {
       sequenceEvents,
     );
   }
+  completeStage(ticker, "classification");
 
   const completedAt = new Date().toISOString();
   const llmTokensUsed =
@@ -416,9 +490,10 @@ export async function classifyCandles(options: {
 
 export async function orchestrateTickerPulse(options: {
   ticker: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: "manual" | "scheduled" | "initial";
   windowSize?: number;
   runId?: string;
+  signal?: AbortSignal;
 }): Promise<MarketPulseOrchestrationResult> {
   const ticker = marketPulseTickerSchema.parse(options.ticker);
   const runId = options.runId ?? crypto.randomUUID();
@@ -426,16 +501,47 @@ export async function orchestrateTickerPulse(options: {
   const beforeNarrativeTokens = getCallTypeTokens(SYNTHESIS_CALL_TYPE);
   const runStartedAtMs = Date.now();
 
-  const classificationRun = await classifyCandles({
-    ticker,
-    trigger: options.trigger,
-    windowSize: options.windowSize,
-    runId,
-  });
+  initTickerProgress(ticker, runId, options.trigger ?? "manual");
 
-  const allEvents = [
+  let classificationRun: MarketPulseClassificationRunResult;
+  try {
+    classificationRun = await classifyCandles({
+      ticker,
+      trigger: options.trigger,
+      windowSize: options.windowSize,
+      runId,
+      signal: options.signal,
+    });
+  } catch (err) {
+    finishTickerProgress(ticker, true);
+    throw err;
+  }
+
+  const currentRunEvents = [
     ...classificationRun.classifications,
     ...classificationRun.sequenceEvents,
+  ];
+
+  // Fetch all of today's prior classifications (from earlier rolling runs) and
+  // merge them with the current window so correlators and synthesizers have the
+  // full-day narrative context, not just the last 12 candles.
+  const priorTodayEvents = await fetchTodaysClassifications(ticker, runId);
+
+  // Dedup by (candle_time, level): current-run events take precedence.
+  const currentRunKeys = new Set(
+    currentRunEvents.map((e) => `${e.candle_time}|${e.level}`),
+  );
+  const dedupedPrior = priorTodayEvents.filter(
+    (e) => !currentRunKeys.has(`${e.candle_time}|${e.level}`),
+  );
+
+  // enrichedEvents = full day oldest → newest; current-run events at the tail
+  const enrichedEvents: MarketPulseClassificationPayload[] = [
+    ...dedupedPrior.sort(
+      (a, b) =>
+        new Date(a.candle_time).getTime() - new Date(b.candle_time).getTime(),
+    ),
+    ...currentRunEvents,
   ];
 
   let correlations: MarketPulseCorrelationPayload[] = [];
@@ -449,12 +555,34 @@ export async function orchestrateTickerPulse(options: {
   };
 
   const correlationStartedAt = Date.now();
+
+  // Bail out before the next LLM stage if the run was cancelled
+  if (options.signal?.aborted) {
+    finishTickerProgress(ticker, true);
+    return {
+      runId,
+      ticker,
+      status: "error",
+      classifications: classificationRun.classifications,
+      sequenceEvents: classificationRun.sequenceEvents,
+      correlations: [],
+      narrative: null,
+      errorMessages: ["Cancelled"],
+    };
+  }
+
+  activateStage(ticker, "correlation");
   try {
+    // Cap correlator input to the 20 most significant events to keep the
+    // prompt within reasonable token bounds on high-volume days.
+    const correlatorEvents = capBySignificance(enrichedEvents, 20);
     correlations = await correlateCatalysts({
       runId,
       ticker,
-      classifications: allEvents,
+      classifications: correlatorEvents,
+      signal: options.signal,
     });
+    completeStage(ticker, "correlation");
     const correlationTokens =
       getCallTypeTokens(CORRELATION_CALL_TYPE) - beforeCorrelationTokens;
     telemetry.stages.correlation = {
@@ -464,20 +592,40 @@ export async function orchestrateTickerPulse(options: {
       averageConfidence: buildAverageConfidence(correlations),
     };
   } catch (error) {
+    failStage(ticker, "correlation");
     const message = error instanceof Error ? error.message : String(error);
     errors.push(`correlation: ${message}`);
   }
 
   const priorNarrative = await previousNarrative(ticker);
   const narrativeStartedAt = Date.now();
+
+  // Bail out before narrative if the run was cancelled
+  if (options.signal?.aborted) {
+    finishTickerProgress(ticker, true);
+    return {
+      runId,
+      ticker,
+      status: errors.length > 0 ? "partial" : "success",
+      classifications: classificationRun.classifications,
+      sequenceEvents: classificationRun.sequenceEvents,
+      correlations,
+      narrative: null,
+      errorMessages: [...errors, "Cancelled before narrative"],
+    };
+  }
+
+  activateStage(ticker, "narrative");
   try {
     narrative = await synthesizeNarrative({
       runId,
       ticker,
-      classifications: allEvents,
+      classifications: enrichedEvents,
       correlations,
       priorNarrative: priorNarrative?.payload ?? null,
+      signal: options.signal,
     });
+    completeStage(ticker, "narrative");
     const narrativeTokens =
       getCallTypeTokens(SYNTHESIS_CALL_TYPE) - beforeNarrativeTokens;
     telemetry.stages.narrative = {
@@ -492,6 +640,7 @@ export async function orchestrateTickerPulse(options: {
             ) !== JSON.stringify(normalizeNarrativePayload(narrative)),
     };
   } catch (error) {
+    failStage(ticker, "narrative");
     const message = error instanceof Error ? error.message : String(error);
     errors.push(`narrative: ${message}`);
   }
@@ -523,6 +672,8 @@ export async function orchestrateTickerPulse(options: {
       and(eq(marketPulseRuns.runId, runId), eq(marketPulseRuns.ticker, ticker)),
     );
 
+  finishTickerProgress(ticker, finalStatus === "error");
+
   return {
     runId,
     ticker,
@@ -550,6 +701,43 @@ function parseStringArray(value: string | null | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Pulls all candle-level and sequence-level classifications stored for this
+ * ticker in the past 24 hours, excluding the current run's rows.
+ * Used to enrich the correlator and synthesizer with full-day context.
+ */
+async function fetchTodaysClassifications(
+  ticker: string,
+  excludeRunId: string,
+): Promise<MarketPulseClassificationPayload[]> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const rows = await db
+    .select()
+    .from(marketPulseClassifications)
+    .where(
+      and(
+        eq(marketPulseClassifications.ticker, ticker),
+        gte(marketPulseClassifications.createdAt, since),
+      ),
+    )
+    .orderBy(marketPulseClassifications.candleTime);
+
+  return rows
+    .filter((row) => row.runId !== excludeRunId)
+    .map((row) => ({
+      candle_time: row.candleTime,
+      classification: parseJson<
+        MarketPulseClassificationPayload["classification"]
+      >(row.classification) ?? { control: "neutral", control_strength: 5 },
+      event: row.eventBlurb,
+      significance:
+        row.significance as MarketPulseClassificationPayload["significance"],
+      tradability:
+        row.tradability as MarketPulseClassificationPayload["tradability"],
+      level: row.level as MarketPulseClassificationPayload["level"],
+    }));
 }
 
 function recentMacroEvents(now: Date = new Date()): EconomicEvent[] {
@@ -592,9 +780,7 @@ async function recentNewsForTicker(ticker: string): Promise<NewsEventRow[]> {
   return rows.filter((row) => parseStringArray(row.tickers).includes(ticker));
 }
 
-async function previousNarrative(
-  ticker: string,
-): Promise<{
+async function previousNarrative(ticker: string): Promise<{
   runId: string | null;
   payload: MarketPulseNarrativePayload;
 } | null> {
@@ -635,6 +821,7 @@ export async function correlateCatalysts(options: {
   runId: string;
   ticker: string;
   classifications: MarketPulseClassificationPayload[];
+  signal?: AbortSignal;
 }): Promise<MarketPulseCorrelationPayload[]> {
   const ticker = marketPulseTickerSchema.parse(options.ticker);
   const news = await recentNewsForTicker(ticker);
@@ -651,10 +838,16 @@ export async function correlateCatalysts(options: {
     marketPulseCorrelatorZodSchema,
     {
       callType: CORRELATION_CALL_TYPE,
+      model: getMarketPulseModel(),
       temperature: 0,
       maxOutputTokens: 3072,
+      signal: options.signal,
     },
   );
+
+  if (response.correlations.length === 0) {
+    return [];
+  }
 
   const newsByHeadline = new Map(news.map((event) => [event.headline, event]));
   await db.insert(marketPulseCorrelations).values(
@@ -689,6 +882,7 @@ export async function synthesizeNarrative(options: {
   classifications: MarketPulseClassificationPayload[];
   correlations: MarketPulseCorrelationPayload[];
   priorNarrative?: MarketPulseNarrativePayload | null;
+  signal?: AbortSignal;
 }): Promise<MarketPulseNarrativePayload> {
   const ticker = marketPulseTickerSchema.parse(options.ticker);
   const prior =
@@ -707,8 +901,10 @@ export async function synthesizeNarrative(options: {
     marketPulseSynthesizerZodSchema,
     {
       callType: SYNTHESIS_CALL_TYPE,
+      model: getMarketPulseModel(),
       temperature: 0.3,
       maxOutputTokens: 2048,
+      signal: options.signal,
     },
   );
 

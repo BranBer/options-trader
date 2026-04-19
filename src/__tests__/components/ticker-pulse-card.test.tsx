@@ -58,6 +58,7 @@ function buildState(
         volume: 1000,
       },
     ],
+    fallbackCandles: [],
     classifications: [
       {
         id: 1,

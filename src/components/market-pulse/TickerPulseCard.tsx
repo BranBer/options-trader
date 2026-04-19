@@ -16,6 +16,17 @@ import type { MarketPulseApiTickerState } from "@/app/api/market-pulse/route";
 
 type TickerState = MarketPulseApiTickerState;
 
+const STAGE_LABELS: Record<string, string> = {
+  candles: "Fetching candles",
+  classification: "Classifying candles",
+  correlation: "Correlating catalysts",
+  narrative: "Synthesizing narrative",
+};
+
+function stageLabel(stageId: string): string {
+  return STAGE_LABELS[stageId] ?? "Processing…";
+}
+
 function statusTone(status: TickerState["status"]) {
   if (status === "success") return "border-emerald-500/30 text-emerald-400";
   if (status === "partial") return "border-amber-500/30 text-amber-400";
@@ -136,6 +147,7 @@ export default function TickerPulseCard({
       ) ?? null)
     : null;
   const isBusy = refreshing || state.status === "running";
+
   const nextRefreshLabel = useMemo(() => {
     if (isBusy) return "Refresh in progress";
     if (!state.nextRunAt) return "Awaiting next cycle";
@@ -163,7 +175,11 @@ export default function TickerPulseCard({
                 </Badge>
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span>Updated {formatDateTime(state.lastRunAt)}</span>
+                <span>
+                  {state.lastRunAt
+                    ? `Updated ${formatDateTime(state.lastRunAt)}`
+                    : "Waiting for first run"}
+                </span>
                 <span>Next refresh in {nextRefreshLabel}</span>
               </div>
             </div>
@@ -195,10 +211,53 @@ export default function TickerPulseCard({
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
           {isBusy ? (
-            <div className="rounded-xl border border-sky-500/20 bg-sky-500/6 px-3 py-2 text-xs font-medium text-sky-100">
-              {refreshing
-                ? `Manual refresh queued for ${state.ticker}.`
-                : `${state.ticker} is processing the latest Market Pulse cycle.`}
+            <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 px-3 py-2.5 space-y-2">
+              {refreshing ? (
+                <p className="text-xs font-medium text-sky-100">
+                  Manual refresh queued for {state.ticker}.
+                </p>
+              ) : state.progress ? (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-sky-100">
+                      {state.progress.currentStage
+                        ? stageLabel(state.progress.currentStage)
+                        : "Processing…"}
+                    </p>
+                    <span className="text-[11px] tabular-nums text-sky-300/80">
+                      {state.progress.pct}%
+                    </span>
+                  </div>
+                  <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-sky-950/60">
+                    <div
+                      className="absolute inset-y-0 left-0 rounded-full bg-sky-400 transition-[width] duration-500 ease-out"
+                      style={{ width: `${state.progress.pct}%` }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs font-medium text-sky-100">
+                  {state.ticker} is processing the latest Market Pulse cycle.
+                </p>
+              )}
+            </div>
+          ) : null}
+          {state.status === "error" && state.errorMessage ? (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 px-3 py-2.5 space-y-2">
+              <p className="text-xs font-medium text-rose-200">
+                {state.errorMessage}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-rose-500/30 text-rose-300 hover:bg-rose-500/10"
+                disabled={refreshing}
+                onClick={() => onRefresh(state.ticker)}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Retry
+              </Button>
             </div>
           ) : null}
           {selectedItem ? (
@@ -248,93 +307,104 @@ export default function TickerPulseCard({
             </div>
           ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-border/70 bg-[#07111b] p-3">
-                {state.candles.length > 0 ? (
-                  <div className="relative">
-                    <PriceChart
-                      candles={state.candles}
-                      height={360}
-                      timeframe="1d"
-                      triggerMarkers={triggerMarkers}
-                      onTriggerMarkerSelect={(markerId) => {
-                        if (markerId) {
-                          setSelectedTimelineId(markerId);
-                        }
-                      }}
-                    />
-                    {isBusy ? (
-                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-[#07111b]/66 backdrop-blur-[1px]">
-                        <div className="rounded-full border border-sky-500/30 bg-slate-950/80 px-4 py-2 text-xs font-medium tracking-[0.16em] text-sky-100 uppercase">
-                          Refresh in progress
-                        </div>
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-border/70 bg-[#07111b] p-3">
+              {state.candles.length > 0 ? (
+                <div className="relative">
+                  <PriceChart
+                    candles={state.candles}
+                    height={360}
+                    timeframe="1d"
+                    triggerMarkers={triggerMarkers}
+                    onTriggerMarkerSelect={(markerId) => {
+                      if (markerId) {
+                        setSelectedTimelineId(markerId);
+                      }
+                    }}
+                  />
+                  {isBusy ? (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-[#07111b]/66 backdrop-blur-[1px]">
+                      <div className="rounded-full border border-sky-500/30 bg-slate-950/80 px-4 py-2 text-xs font-medium tracking-[0.16em] text-sky-100 uppercase">
+                        Refresh in progress
                       </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : state.fallbackCandles.length > 0 ? (
+                <>
+                  <PriceChart
+                    candles={state.fallbackCandles}
+                    height={352}
+                    timeframe="1mo"
+                  />
+                  <div className="mt-2 flex justify-center">
+                    <div className="rounded-full border border-amber-500/30 bg-slate-950/90 px-3 py-1 text-[10px] font-medium tracking-[0.14em] text-amber-300/80 uppercase">
+                      Daily candles &mdash; pulse classification pending
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex h-90 items-center justify-center rounded-xl border border-dashed border-border/60 text-sm text-muted-foreground">
+                  Waiting for the first candle window to be classified.
+                </div>
+              )}
+            </div>
+            <div className="space-y-4 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)] xl:gap-4 xl:space-y-0">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                        Narrative
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Rolling synthesis for the current run.
+                      </p>
+                    </div>
+                    {state.narrative && state.lastRunId ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setInspectorTarget({
+                            type: "narrative",
+                            label: `${state.ticker} narrative`,
+                            runId: state.lastRunId!,
+                          });
+                          setInspectorOpen(true);
+                        }}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        Inspect
+                      </Button>
                     ) : null}
                   </div>
-                ) : (
-                  <div className="flex h-90 items-center justify-center rounded-xl border border-dashed border-border/60 text-sm text-muted-foreground">
-                    Waiting for the first candle window to be classified.
-                  </div>
-                )}
-              </div>
-              <div className="space-y-4 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)] xl:gap-4 xl:space-y-0">
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                          Narrative
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Rolling synthesis for the current run.
-                        </p>
-                      </div>
-                      {state.narrative && state.lastRunId ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setInspectorTarget({
-                              type: "narrative",
-                              label: `${state.ticker} narrative`,
-                              runId: state.lastRunId!,
-                            });
-                            setInspectorOpen(true);
-                          }}
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          Inspect
-                        </Button>
-                      ) : null}
-                    </div>
-                    <NarrativePanel
-                      narrative={state.narrative}
-                      correlations={state.correlations}
-                      runHistoryHref={`#${runHistoryId}`}
-                    />
-                  </div>
-                  <div id={runHistoryId}>
-                    <RunHistory
-                      ticker={state.ticker}
-                      onInspectRun={(runId) => {
-                        setInspectorTarget({
-                          type: "run",
-                          label: `${state.ticker} run ${runId.slice(0, 8)}`,
-                          runId,
-                        });
-                        setInspectorOpen(true);
-                      }}
-                    />
-                  </div>
+                  <NarrativePanel
+                    narrative={state.narrative}
+                    correlations={state.correlations}
+                    runHistoryHref={`#${runHistoryId}`}
+                  />
                 </div>
-                <EventTimeline
-                  items={timelineItems}
-                  selectedId={selectedTimelineId}
-                  onSelect={setSelectedTimelineId}
-                />
+                <div id={runHistoryId}>
+                  <RunHistory
+                    ticker={state.ticker}
+                    onInspectRun={(runId) => {
+                      setInspectorTarget({
+                        type: "run",
+                        label: `${state.ticker} run ${runId.slice(0, 8)}`,
+                        runId,
+                      });
+                      setInspectorOpen(true);
+                    }}
+                  />
+                </div>
               </div>
+              <EventTimeline
+                items={timelineItems}
+                selectedId={selectedTimelineId}
+                onSelect={setSelectedTimelineId}
+              />
             </div>
           </div>
         </CardContent>

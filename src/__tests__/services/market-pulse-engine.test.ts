@@ -21,6 +21,7 @@ vi.mock("@/lib/services/market-pulse-candles", () => ({
 vi.mock("@/lib/services/llm-client", () => ({
   callLlmWithRetry: (...args: unknown[]) => mockCallLlmWithRetry(...args),
   getTokenUsageSnapshot: () => mockGetTokenUsageSnapshot(),
+  getMarketPulseModel: () => "test-model",
 }));
 
 import {
@@ -76,11 +77,9 @@ describe("market-pulse-engine", () => {
     vi.clearAllMocks();
     mockDb.insert.mockImplementation(() => makeInsertChain());
     mockDb.update.mockImplementation(() => makeUpdateChain());
-    mockGetTokenUsageSnapshot
-      .mockReturnValueOnce({})
-      .mockReturnValueOnce({
-        marketPulseClassify: { count: 1, totalTokens: 321 },
-      });
+    mockGetTokenUsageSnapshot.mockReturnValueOnce({}).mockReturnValueOnce({
+      marketPulseClassify: { count: 1, totalTokens: 321 },
+    });
   });
 
   it("classifies candles, persists rows, and creates a sequence event", async () => {

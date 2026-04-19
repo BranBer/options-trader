@@ -12,8 +12,11 @@ import {
 const yf = new YahooFinance() as any;
 
 export const MARKET_PULSE_TIMEFRAME = "15m";
-export const MARKET_PULSE_DEFAULT_WINDOW_SIZE = 8;
-const LOOKBACK_CANDLE_COUNT = 40;
+// Bumped from 8→12 to capture a full extended-hours session (pre + regular + post ≈ 64 bars)
+export const MARKET_PULSE_DEFAULT_WINDOW_SIZE = 12;
+// Bumped from 40→96 so RSI-14 / BB-20 / vol-20 have full indicator history across extended bars
+// Also used as the catch-up window size for the initial 24h run
+export const LOOKBACK_CANDLE_COUNT = 96;
 const LOOKBACK_DAYS = 7;
 const RSI_PERIOD = 14;
 const BOLLINGER_PERIOD = 20;
@@ -45,6 +48,35 @@ function toIsoCandleTime(time: CandleData["time"]): string {
   return new Date(time).toISOString();
 }
 
+/** ET hour boundaries for session tagging (inclusive start, exclusive end). */
+const ET_TIMEZONE = "America/New_York";
+
+function getCandleSession(
+  unixSec: number,
+): "pre" | "regular" | "post" | "outside" {
+  const d = new Date(unixSec * 1000);
+  const etFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: ET_TIMEZONE,
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  });
+  const parts = etFormatter.formatToParts(d);
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const minute = parseInt(
+    parts.find((p) => p.type === "minute")?.value ?? "0",
+    10,
+  );
+  const totalMinutes = hour * 60 + minute;
+  // Pre-market: 4:00 AM – 9:29 AM ET
+  if (totalMinutes >= 4 * 60 && totalMinutes < 9 * 60 + 30) return "pre";
+  // Regular: 9:30 AM – 3:59 PM ET
+  if (totalMinutes >= 9 * 60 + 30 && totalMinutes < 16 * 60) return "regular";
+  // After-hours: 4:00 PM – 8:00 PM ET
+  if (totalMinutes >= 16 * 60 && totalMinutes < 20 * 60) return "post";
+  return "outside";
+}
+
 function normalizeCandles(
   quotes: Array<{
     date?: Date | string | number;
@@ -54,7 +86,7 @@ function normalizeCandles(
     close?: number | null;
     volume?: number | null;
   }>,
-): CandleData[] {
+): (CandleData & { session: "pre" | "regular" | "post" | "outside" })[] {
   return quotes
     .filter(
       (quote) =>
@@ -64,14 +96,18 @@ function normalizeCandles(
         quote.close != null &&
         quote.date != null,
     )
-    .map((quote) => ({
-      time: Math.floor(new Date(quote.date as Date).getTime() / 1000),
-      open: Number(quote.open),
-      high: Number(quote.high),
-      low: Number(quote.low),
-      close: Number(quote.close),
-      volume: Number(quote.volume ?? 0),
-    }))
+    .map((quote) => {
+      const unixSec = Math.floor(new Date(quote.date as Date).getTime() / 1000);
+      return {
+        time: unixSec,
+        open: Number(quote.open),
+        high: Number(quote.high),
+        low: Number(quote.low),
+        close: Number(quote.close),
+        volume: Number(quote.volume ?? 0),
+        session: getCandleSession(unixSec),
+      };
+    })
     .sort((left, right) => Number(left.time) - Number(right.time));
 }
 
@@ -226,7 +262,9 @@ export function deriveKeyLevels(candles: CandleData[]): number[] {
 
 function buildPreparedCandles(
   ticker: string,
-  candles: CandleData[],
+  candles: (CandleData & {
+    session?: "pre" | "regular" | "post" | "outside";
+  })[],
   windowSize: number,
 ): MarketPulsePreparedCandle[] {
   const indicators = computeIndicators(candles);
@@ -246,6 +284,12 @@ function buildPreparedCandles(
           low: round(candle.low),
           close: round(candle.close),
           volume: round(candle.volume),
+          session: (candle as { session?: string }).session as
+            | "pre"
+            | "regular"
+            | "post"
+            | "outside"
+            | undefined,
         },
         indicators: {
           rsi: selectedIndicators[index].rsi,
@@ -277,6 +321,8 @@ export async function fetchCandleWindow(
       period1,
       period2: now,
       interval: MARKET_PULSE_TIMEFRAME,
+      // Include pre-market (4 AM – 9:30 AM ET) and after-hours (4 PM – 8 PM ET) bars
+      includePrePost: true,
     });
 
     const candles = normalizeCandles(result?.quotes ?? []);

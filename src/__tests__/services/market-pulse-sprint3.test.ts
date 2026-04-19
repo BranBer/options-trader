@@ -17,6 +17,7 @@ vi.mock("@/lib/db/client", () => ({ db: mockDb }));
 vi.mock("@/lib/services/llm-client", () => ({
   callLlmWithRetry: (...args: unknown[]) => mockCallLlmWithRetry(...args),
   getTokenUsageSnapshot: () => ({}),
+  getMarketPulseModel: () => "test-model",
 }));
 vi.mock("@/lib/services/live-economic-calendar", () => ({
   getCachedCalendar: () => mockCalendar.getCachedCalendar(),

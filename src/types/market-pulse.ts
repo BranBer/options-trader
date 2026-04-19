@@ -34,7 +34,11 @@ export const marketPulseRunStatusSchema = z.enum([
   "error",
 ]);
 
-export const marketPulseRunTriggerSchema = z.enum(["scheduled", "manual"]);
+export const marketPulseRunTriggerSchema = z.enum([
+  "scheduled",
+  "manual",
+  "initial",
+]);
 
 export const marketPulseCandleCoreSchema = z.object({
   open: z.number(),
@@ -42,6 +46,7 @@ export const marketPulseCandleCoreSchema = z.object({
   low: z.number(),
   close: z.number(),
   volume: z.number(),
+  session: z.enum(["pre", "regular", "post", "outside"]).optional(),
 });
 
 export const marketPulseIndicatorSchema = z.object({

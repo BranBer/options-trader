@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Copy, Loader2 } from "lucide-react";
+import { Copy, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
   SheetHeader,
@@ -64,31 +65,49 @@ export default function InspectorDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-3xl">
+      <SheetContent
+        side="right"
+        className="w-full gap-0 p-0 sm:max-w-3xl"
+        showCloseButton={false}
+      >
         <SheetHeader className="border-b border-border/70">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
               <SheetTitle>Inspector</SheetTitle>
               <SheetDescription>
                 {target?.label ??
                   "Select an event, narrative, or run to inspect the stored structured output."}
               </SheetDescription>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!payload}
-              onClick={async () => {
-                if (!payload) return;
-                await navigator.clipboard.writeText(jsonText);
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              <Copy className="h-3.5 w-3.5" />
-              {copied ? "Copied" : "Copy JSON"}
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!payload}
+                onClick={async () => {
+                  if (!payload) return;
+                  await navigator.clipboard.writeText(jsonText);
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {copied ? "Copied" : "Copy JSON"}
+              </Button>
+              <SheetClose
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Close inspector"
+                  />
+                }
+              >
+                <X className="h-4 w-4" />
+              </SheetClose>
+            </div>
           </div>
         </SheetHeader>
 

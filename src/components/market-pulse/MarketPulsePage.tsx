@@ -103,7 +103,11 @@ export default function MarketPulsePage() {
             <TickerPulseCard
               key={state.ticker}
               state={state}
-              removing={subscriptionMutation.isPending}
+              removing={
+                subscriptionMutation.isPending &&
+                subscriptionMutation.variables?.action === "remove" &&
+                subscriptionMutation.variables?.ticker === state.ticker
+              }
               refreshing={
                 refreshMutation.isPending &&
                 refreshMutation.variables?.ticker === state.ticker

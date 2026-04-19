@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 
 const DEFAULT_OPEN_ROUTER_MODEL = "moonshotai/kimi-k2.5";
+// Used when the primary/default model repeatedly returns empty responses
+const EMPTY_RESPONSE_FALLBACK_MODEL = "google/gemini-2.0-flash-001";
 
 let client: OpenAI | null = null;
 
@@ -107,6 +109,11 @@ export function getModel(): string {
   return process.env.OPEN_ROUTER_MODEL ?? DEFAULT_OPEN_ROUTER_MODEL;
 }
 
+/** Model used exclusively for Market Pulse pipeline calls. */
+export function getMarketPulseModel(): string {
+  return process.env.MARKET_PULSE_MODEL ?? getModel();
+}
+
 function getStableModelOverride(
   override: string | undefined,
   label: string,
@@ -210,6 +217,7 @@ export async function callLlmWithRetry<T>(
     maxOutputTokens?: number;
     maxRetries?: number;
     preprocessParsedJson?: (data: unknown) => unknown;
+    signal?: AbortSignal;
   } = {},
 ): Promise<T> {
   const {
@@ -219,16 +227,23 @@ export async function callLlmWithRetry<T>(
     maxOutputTokens = 8192,
     maxRetries = 3,
     preprocessParsedJson,
+    signal,
   } = options;
 
   const openai = getClient();
   let activeModel = requestedModel ?? getModel();
+  let emptyResponseCount = 0;
 
   const schemaGuidance = `\n\nYou MUST respond with ONLY a valid JSON object matching this exact schema — no markdown, no commentary, no explanation:\n${JSON.stringify(responseSchema, null, 2)}`;
   const fullSystemPrompt = systemInstruction + schemaGuidance;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     let rawText = "";
+
+    // Check abort signal before each attempt
+    if (signal?.aborted) {
+      throw new DOMException("LLM call cancelled", "AbortError");
+    }
 
     try {
       const params: Record<string, unknown> = {
@@ -256,8 +271,25 @@ export async function callLlmWithRetry<T>(
 
       rawText = result.choices[0]?.message?.content ?? "";
       if (!rawText || rawText.trim().length === 0) {
+        emptyResponseCount++;
+        // If we've gotten 2+ empty responses in a row, switch to a fallback.
+        // If already on the default model, escalate to the secondary fallback.
+        if (emptyResponseCount >= 2) {
+          const nextModel =
+            activeModel !== DEFAULT_OPEN_ROUTER_MODEL
+              ? DEFAULT_OPEN_ROUTER_MODEL
+              : EMPTY_RESPONSE_FALLBACK_MODEL;
+          if (activeModel !== nextModel) {
+            console.warn(
+              `[LLM] ${callType} got ${emptyResponseCount} empty responses from ${activeModel}; switching to ${nextModel}`,
+            );
+            activeModel = nextModel;
+          }
+        }
         throw new Error("Empty response from model — retrying");
       }
+      // Reset on a successful non-empty response
+      emptyResponseCount = 0;
 
       const outputTokens =
         result.usage?.completion_tokens ?? Math.round(rawText.length / 4);
@@ -318,10 +350,32 @@ export async function callLlmWithRetry<T>(
       }
       if (attempt === maxRetries - 1) throw error;
 
-      const baseDelayMs = isRateLimitError(error) ? 5000 : 2000;
-      await new Promise((resolve) =>
-        setTimeout(resolve, baseDelayMs * Math.pow(2, attempt)),
-      );
+      const isEmptyResponse =
+        error instanceof Error &&
+        error.message.includes("Empty response from model");
+      // Empty responses: retry fast (500ms flat) since the issue is the model,
+      // not rate-limiting. Rate limits: 5s base with exponential backoff.
+      // Other errors: 2s base with exponential backoff.
+      const delayMs = isEmptyResponse
+        ? 500
+        : isRateLimitError(error)
+          ? 5000 * Math.pow(2, attempt)
+          : 2000 * Math.pow(2, attempt);
+
+      // Abort-aware sleep: don't burn seconds waiting if the caller cancelled
+      if (signal?.aborted)
+        throw new DOMException("LLM call cancelled", "AbortError");
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, delayMs);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(new DOMException("LLM call cancelled", "AbortError"));
+          },
+          { once: true },
+        );
+      });
     }
   }
 

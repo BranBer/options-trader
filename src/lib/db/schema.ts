@@ -175,6 +175,10 @@ export const marketPulseRuns = sqliteTable(
     llmTokensUsed: integer("llm_tokens_used"),
     durationMs: integer("duration_ms"),
     stages: text("stages"),
+    /** Current pipeline stage name (candles | classification | correlation | narrative) */
+    currentStage: text("current_stage"),
+    /** 0–100 overall progress percentage */
+    progressPct: integer("progress_pct").default(0),
     startedAt: text("started_at").notNull(),
     completedAt: text("completed_at"),
     errorMessage: text("error_message"),

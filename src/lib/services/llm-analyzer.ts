@@ -129,6 +129,73 @@ export async function classifyNews(
   let totalInput = 0;
   let batchesDone = 0;
 
+  // Normalise a raw LLM response before Zod validation to tolerate:
+  //  - missing `processing_metadata` (truncated responses)
+  //  - missing/invalid fields on individual articles (partial completion)
+  const VALID_EVENT_TYPES = new Set([
+    "geopolitical",
+    "economic",
+    "regulatory",
+    "earnings",
+    "supply_chain",
+    "technology",
+    "natural_disaster",
+    "central_bank",
+    "other",
+    "ai_ml",
+    "semiconductors",
+    "cloud_saas",
+    "cybersecurity",
+    "fintech",
+    "hardware",
+    "open_source",
+    "social_media",
+    "regulatory_tech",
+    "biotech_health_tech",
+    "ev_cleantech",
+    "other_tech",
+  ]);
+
+  function preprocessClassificationResponse(data: unknown): unknown {
+    if (!data || typeof data !== "object") return data;
+    const obj = data as Record<string, unknown>;
+
+    // Repair articles array
+    const rawArticles = Array.isArray(obj.articles) ? obj.articles : [];
+    const articles = rawArticles.map((a: unknown) => {
+      if (!a || typeof a !== "object") return a;
+      const art = { ...(a as Record<string, unknown>) };
+      if (!Array.isArray(art.affected_sectors)) art.affected_sectors = [];
+      if (!Array.isArray(art.affected_tickers)) art.affected_tickers = [];
+      if (!art.country_code || typeof art.country_code !== "string")
+        art.country_code = "US";
+      if (!art.region || typeof art.region !== "string") art.region = "Global";
+      if (!art.one_line_summary || typeof art.one_line_summary !== "string")
+        art.one_line_summary =
+          typeof art.original_headline === "string"
+            ? art.original_headline
+            : "";
+      if (!art.reasoning || typeof art.reasoning !== "string")
+        art.reasoning = "";
+      if (!art.event_type || !VALID_EVENT_TYPES.has(art.event_type as string))
+        art.event_type = "other";
+      return art;
+    });
+
+    // Repair missing processing_metadata
+    const meta =
+      obj.processing_metadata && typeof obj.processing_metadata === "object"
+        ? obj.processing_metadata
+        : {
+            total_input: articles.length,
+            total_relevant: articles.length,
+            total_discarded: 0,
+            processing_timestamp: new Date().toISOString(),
+          };
+
+    return { ...obj, articles, processing_metadata: meta };
+  }
+
   // Process batches with limited concurrency
   for (let i = 0; i < batches.length; i += concurrency) {
     const chunk = batches.slice(i, i + concurrency);
@@ -144,7 +211,8 @@ export async function classifyNews(
             callType: "classifyNews",
             model,
             temperature: 0.1,
-            maxOutputTokens: 8192,
+            maxOutputTokens: 16384,
+            preprocessParsedJson: preprocessClassificationResponse,
           },
         );
       }),
@@ -442,9 +510,7 @@ function sanitizeDeepDiveResponse(data: unknown): unknown {
   return candidate;
 }
 
-export async function generateDeepDive(
-  input: DeepDiveInput,
-): Promise<{
+export async function generateDeepDive(input: DeepDiveInput): Promise<{
   deepDive: DeepDiveAnalysis;
   triggerReport: TriggerReport | null;
 }> {

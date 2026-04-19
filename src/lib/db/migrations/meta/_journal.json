@@ -71,6 +71,13 @@
       "when": 1775841474497,
       "tag": "0009_sad_golden_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1776550127168,
+      "tag": "0010_add-progress-columns",
+      "breakpoints": true
     }
   ]
 }

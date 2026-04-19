@@ -243,6 +243,8 @@ export async function fetchHistoricalData(
         period1,
         period2: now,
         interval,
+        // Include pre-market + after-hours bars for intraday timeframes
+        ...(interval !== "1d" && { includePrePost: true }),
       });
 
       if (!result?.quotes?.length) {
