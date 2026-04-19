@@ -337,6 +337,7 @@ export async function crossReferenceAnalysis(
 export async function generateRecommendation(
   correlation: Correlation,
   marketData: RecommendationMarketData,
+  options?: { signal?: AbortSignal },
 ): Promise<TradeRecommendation> {
   const ticker = correlation.whale_trade.ticker;
 
@@ -353,6 +354,7 @@ export async function generateRecommendation(
       callType: "recommendation",
       temperature: 0.3,
       maxOutputTokens: 8192,
+      signal: options?.signal,
     },
   );
 
@@ -510,7 +512,10 @@ function sanitizeDeepDiveResponse(data: unknown): unknown {
   return candidate;
 }
 
-export async function generateDeepDive(input: DeepDiveInput): Promise<{
+export async function generateDeepDive(
+  input: DeepDiveInput,
+  options?: { signal?: AbortSignal },
+): Promise<{
   deepDive: DeepDiveAnalysis;
   triggerReport: TriggerReport | null;
 }> {
@@ -528,6 +533,7 @@ export async function generateDeepDive(input: DeepDiveInput): Promise<{
       temperature: 0.25,
       maxOutputTokens: 16384,
       preprocessParsedJson: sanitizeDeepDiveResponse,
+      signal: options?.signal,
     },
   );
   const normalized = normalizeDeepDivePatterns(

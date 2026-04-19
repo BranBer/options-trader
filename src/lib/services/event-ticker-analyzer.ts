@@ -45,6 +45,7 @@ export interface EventTickerAnalysisParams {
   eventId: number;
   tickers: string[];
   eventContext: EventTickerAnalysisEventContext;
+  signal?: AbortSignal;
 }
 
 function uniqueTickers(tickers: string[]): string[] {
@@ -123,7 +124,10 @@ async function triggerEligibleEventAnalyses(
   }
 
   let triggered = 0;
-  const timeoutMs = Number(process.env.EVENT_ANALYSIS_TIMEOUT_MS ?? 120000);
+  const baseTimeoutMs = Number(
+    process.env.EVENT_ANALYSIS_TIMEOUT_MS ?? 120_000,
+  );
+  const perTickerMs = 60_000; // allow 60s extra per ticker beyond the first
 
   for (const event of eligibleEvents) {
     const cached = await getEventTickerAnalysesByEventId(event.id, {
@@ -133,20 +137,32 @@ async function triggerEligibleEventAnalyses(
       continue;
     }
 
-    await Promise.race([
-      analyzeEventTickers({
+    // Scale timeout: base + 60s per extra ticker
+    const timeoutMs =
+      baseTimeoutMs + Math.max(0, event.parsedTickers.length - 1) * perTickerMs;
+
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+
+    try {
+      await analyzeEventTickers({
         eventId: event.id,
         tickers: event.parsedTickers,
         eventContext: toEventContext(event),
-      }),
-      new Promise((_, reject) => {
-        setTimeout(
-          () => reject(new Error("Event analysis auto-trigger timed out")),
-          timeoutMs,
+        signal: ac.signal,
+      });
+      triggered += 1;
+    } catch (error) {
+      if (ac.signal.aborted) {
+        console.warn(
+          `[EventTickerAnalyzer] Event ${event.id} timed out after ${timeoutMs}ms (${event.parsedTickers.length} tickers)`,
         );
-      }),
-    ]);
-    triggered += 1;
+      } else {
+        throw error;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   return triggered;
@@ -496,8 +512,11 @@ async function analyzeSingleTicker(args: {
   eventId: number;
   eventContext: EventTickerAnalysisEventContext;
   macroBase: Awaited<ReturnType<typeof buildMacroContext>>;
+  signal?: AbortSignal;
 }): Promise<EventTickerAnalysis | null> {
-  const { ticker, eventId, eventContext, macroBase } = args;
+  const { ticker, eventId, eventContext, macroBase, signal } = args;
+
+  if (signal?.aborted) return null;
 
   const [whaleMatch, ctx, earningsDate] = await Promise.all([
     lookupWhaleActivity(ticker),
@@ -528,98 +547,105 @@ async function analyzeSingleTicker(args: {
     primaryWhale?.expiry ?? undefined,
   );
 
-  const recommendation = await generateRecommendation(syntheticCorrelation, {
-    price: marketData?.price ?? 0,
-    ivRank:
-      ctx.atmIV != null ? Math.round(ctx.atmIV * 100) : marketData?.ivRank,
-    avgVolume: marketData?.volume ?? 0,
-    todayVolume: marketData?.volume ?? 0,
-    optionsChainSummary: chain
-      ? buildRichOptionsChainSummary(chain, marketData?.price ?? 0)
-      : "No options chain data available",
-    macroContext: {
-      ...macroBase,
-      earningsDate: earningsContext.earningsDate,
-      ivCrushRisk: earningsContext.ivCrushRisk,
+  const recommendation = await generateRecommendation(
+    syntheticCorrelation,
+    {
+      price: marketData?.price ?? 0,
+      ivRank:
+        ctx.atmIV != null ? Math.round(ctx.atmIV * 100) : marketData?.ivRank,
+      avgVolume: marketData?.volume ?? 0,
+      todayVolume: marketData?.volume ?? 0,
+      optionsChainSummary: chain
+        ? buildRichOptionsChainSummary(chain, marketData?.price ?? 0)
+        : "No options chain data available",
+      macroContext: {
+        ...macroBase,
+        earningsDate: earningsContext.earningsDate,
+        ivCrushRisk: earningsContext.ivCrushRisk,
+      },
+      optionsAnalytics: chain
+        ? {
+            maxPain: chain.maxPain ?? null,
+            oiWalls: chain.oiWalls ?? null,
+            ivRvSpread: ctx.ivRvSpread,
+            realizedVol: ctx.realizedVol,
+            gex: chain.gex ?? null,
+          }
+        : undefined,
+      indicatorReport,
     },
-    optionsAnalytics: chain
-      ? {
-          maxPain: chain.maxPain ?? null,
-          oiWalls: chain.oiWalls ?? null,
-          ivRvSpread: ctx.ivRvSpread,
-          realizedVol: ctx.realizedVol,
-          gex: chain.gex ?? null,
-        }
-      : undefined,
-    indicatorReport,
-  });
+    { signal },
+  );
   const normalizedRecommendation = enrichWhaleAlignment({
     recommendation,
     whaleMatch,
     whaleAlert: primaryWhale,
   });
 
-  const { deepDive, triggerReport: ddTriggerReport } = await generateDeepDive({
-    ticker,
-    whaleTrade: {
+  const { deepDive, triggerReport: ddTriggerReport } = await generateDeepDive(
+    {
       ticker,
-      strike: primaryWhale?.strike ?? undefined,
-      expiry: primaryWhale?.expiry ?? undefined,
-      callPut:
-        primaryWhale?.callPut ??
-        (getOptionType(eventContext.sentiment) === "put" ? "P" : "C"),
-      premium: primaryWhale?.premium ?? undefined,
-      volume: primaryWhale?.volume ?? undefined,
-      openInterest: primaryWhale?.openInterest ?? undefined,
-      sentiment: primaryWhale?.sentiment ?? eventContext.sentiment,
-    },
-    historicalData: candles3M,
-    historicalDataByTimeframe: {
-      "1W": candles1W,
-      "1M": candles1M,
-      "3M": candles3M,
-      "6M": candles6M,
-      "1Y": candles1Y,
-    },
-    optionsChain: chain,
-    currentPrice: marketData?.price ?? 0,
-    correlatedEvent: {
-      headline: eventContext.headline,
-      impact_score: Math.round(eventContext.impactScore),
-      event_type: eventContext.eventType ?? "macro_event",
-    },
-    newsContext: [
-      {
-        headline: eventContext.headline,
-        sentiment: eventContext.sentiment,
+      whaleTrade: {
+        ticker,
+        strike: primaryWhale?.strike ?? undefined,
+        expiry: primaryWhale?.expiry ?? undefined,
+        callPut:
+          primaryWhale?.callPut ??
+          (getOptionType(eventContext.sentiment) === "put" ? "P" : "C"),
+        premium: primaryWhale?.premium ?? undefined,
+        volume: primaryWhale?.volume ?? undefined,
+        openInterest: primaryWhale?.openInterest ?? undefined,
+        sentiment: primaryWhale?.sentiment ?? eventContext.sentiment,
       },
-    ],
-    macroContext: {
-      ...macroBase,
-      earningsDate: earningsContext.earningsDate,
-      ivCrushRisk: earningsContext.ivCrushRisk,
-    },
-    optionsAnalytics: chain
-      ? {
-          maxPain: chain.maxPain ?? null,
-          oiWalls: chain.oiWalls ?? null,
-          ivRvSpread: ctx.ivRvSpread,
-          realizedVol: ctx.realizedVol,
-          gex: chain.gex ?? null,
-        }
-      : undefined,
-    computedIndicators: ctx.indicatorsByTimeframe,
-    signalHierarchy: {
+      historicalData: candles3M,
+      historicalDataByTimeframe: {
+        "1W": candles1W,
+        "1M": candles1M,
+        "3M": candles3M,
+        "6M": candles6M,
+        "1Y": candles1Y,
+      },
+      optionsChain: chain,
       currentPrice: marketData?.price ?? 0,
-      earningsDate: earningsContext.earningsDate,
-      volumeProfile: ctx.volumeProfile,
-      algoSR: ctx.algoSR,
-      ivSkew: ctx.ivSkew,
-      oiSummary: ctx.oiSummary,
-      catalysts: getUpcomingCatalysts(14),
+      correlatedEvent: {
+        headline: eventContext.headline,
+        impact_score: Math.round(eventContext.impactScore),
+        event_type: eventContext.eventType ?? "macro_event",
+      },
+      newsContext: [
+        {
+          headline: eventContext.headline,
+          sentiment: eventContext.sentiment,
+        },
+      ],
+      macroContext: {
+        ...macroBase,
+        earningsDate: earningsContext.earningsDate,
+        ivCrushRisk: earningsContext.ivCrushRisk,
+      },
+      optionsAnalytics: chain
+        ? {
+            maxPain: chain.maxPain ?? null,
+            oiWalls: chain.oiWalls ?? null,
+            ivRvSpread: ctx.ivRvSpread,
+            realizedVol: ctx.realizedVol,
+            gex: chain.gex ?? null,
+          }
+        : undefined,
+      computedIndicators: ctx.indicatorsByTimeframe,
+      signalHierarchy: {
+        currentPrice: marketData?.price ?? 0,
+        earningsDate: earningsContext.earningsDate,
+        volumeProfile: ctx.volumeProfile,
+        algoSR: ctx.algoSR,
+        ivSkew: ctx.ivSkew,
+        oiSummary: ctx.oiSummary,
+        catalysts: getUpcomingCatalysts(14),
+      },
+      triggerReport: ctx.triggerReport,
     },
-    triggerReport: ctx.triggerReport,
-  });
+    { signal },
+  );
 
   const eventAnalysis: EventTickerAnalysis = {
     ticker,
@@ -665,10 +691,15 @@ export async function analyzeEventTickers(
     );
   }
 
+  const signal = params.signal;
+  if (signal?.aborted) return [];
+
   const macroBase = await buildMacroContext();
   const results: EventTickerAnalysis[] = [];
 
   for (let index = 0; index < tickers.length; index += CONCURRENCY) {
+    if (signal?.aborted) break;
+
     const chunk = tickers.slice(index, index + CONCURRENCY);
     const settled = await Promise.allSettled(
       chunk.map((ticker) =>
@@ -677,6 +708,7 @@ export async function analyzeEventTickers(
           eventId: params.eventId,
           eventContext: params.eventContext,
           macroBase,
+          signal,
         }),
       ),
     );
