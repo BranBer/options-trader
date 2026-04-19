@@ -247,7 +247,18 @@ export async function fetchNewsApiTechNews(): Promise<RawNewsArticle[]> {
   }
 }
 
+// GDELT free API has a strict rate limit — only poll once every 15 minutes.
+let gdeltLastFetchAt = 0;
+const GDELT_MIN_INTERVAL_MS = 15 * 60 * 1000;
+
 export async function fetchGdeltTechEvents(): Promise<RawNewsArticle[]> {
+  const now = Date.now();
+  if (now - gdeltLastFetchAt < GDELT_MIN_INTERVAL_MS) {
+    const waitSec = Math.ceil((GDELT_MIN_INTERVAL_MS - (now - gdeltLastFetchAt)) / 1000);
+    console.log(`[TechNews:GDELT] Skipping — rate-limit cooldown (${waitSec}s remaining)`);
+    return [];
+  }
+
   const query = encodeURIComponent(
     '"artificial intelligence" OR semiconductor OR cybersecurity OR "cloud computing" OR Apple OR Google OR Microsoft OR NVIDIA OR Tesla OR AWS OR "chip shortage" OR "data breach" OR "AI regulation" OR "open source"',
   );
@@ -258,6 +269,12 @@ export async function fetchGdeltTechEvents(): Promise<RawNewsArticle[]> {
 
     if (!res.ok) {
       const text = await res.text();
+      if (res.status === 429) {
+        // Don't reset the timer — back off for an extra 15 min on top of current cooldown
+        gdeltLastFetchAt = Date.now();
+        console.warn("[TechNews:GDELT] Rate-limited (429); backing off 15 min");
+        return [];
+      }
       if (text.includes("<html") || text.includes("<!DOCTYPE")) {
         console.warn("[TechNews:GDELT] Received HTML error page, skipping");
         return [];
@@ -274,6 +291,9 @@ export async function fetchGdeltTechEvents(): Promise<RawNewsArticle[]> {
 
     const data: GdeltResponse = await res.json();
     const articles = Array.isArray(data.articles) ? data.articles : [];
+
+    // Stamp success time only after a valid response
+    gdeltLastFetchAt = Date.now();
 
     return articles.map((article) => {
       const countryCode =

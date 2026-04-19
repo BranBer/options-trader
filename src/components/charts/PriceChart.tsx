@@ -46,6 +46,10 @@ import type {
 } from "@/lib/utils/intraday-resistance";
 import { TriggerAnnotationPrimitive } from "./primitives/TriggerAnnotationPrimitive";
 import { ExtendedHoursPrimitive } from "./primitives/ExtendedHoursPrimitive";
+import {
+  EventMarkerPrimitive,
+  type EventMarkerEntry,
+} from "./primitives/EventMarkerPrimitive";
 
 export interface TriggerMarker {
   /** Stable identifier used for linking chart markers back to external UI state */
@@ -233,6 +237,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       null,
     );
     const extendedHoursRef = useRef<ExtendedHoursPrimitive | null>(null);
+    const eventMarkerRef = useRef<EventMarkerPrimitive | null>(null);
     // Persist user's zoom/scroll position across chart re-initializations
     const savedRangeRef = useRef<{ from: Time; to: Time } | null>(null);
     // Stable ref for the marker-select callback so crosshair/click handlers
@@ -766,6 +771,15 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         }
       }
 
+      // Event marker primitive — renders numbered, collision-resolved
+      // circles for Market Pulse classifications.  Attached here so the
+      // primitive is ready; entries are updated in the marker effect.
+      {
+        const eventPrimitive = new EventMarkerPrimitive();
+        candleSeries.attachPrimitive(eventPrimitive);
+        eventMarkerRef.current = eventPrimitive;
+      }
+
       // Set initial viewport (only on first mount or structural rebuild)
       if (!hasSetInitialViewport.current) {
         const VISIBLE_BAR_COUNT = 30;
@@ -841,6 +855,10 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         if (triggerAnnotationRef.current && candleSeriesRef.current) {
           candleSeriesRef.current.detachPrimitive(triggerAnnotationRef.current);
           triggerAnnotationRef.current = null;
+        }
+        if (eventMarkerRef.current && candleSeriesRef.current) {
+          candleSeriesRef.current.detachPrimitive(eventMarkerRef.current);
+          eventMarkerRef.current = null;
         }
         chart.remove();
         chartRef.current = null;
@@ -946,33 +964,43 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
         }
       }
 
-      // Trigger markers (Market Pulse classifications)
-      if (triggerMarkers && triggerMarkers.length > 0) {
-        const candleTimesSec = candles.map((c) => candleTimeToSeconds(c.time));
+      // Trigger markers (Market Pulse classifications) — rendered via
+      // EventMarkerPrimitive with collision detection & spine stacking.
+      if (eventMarkerRef.current) {
+        const entries: EventMarkerEntry[] = [];
 
-        for (const tm of triggerMarkers) {
-          const resolvedTimeSec = resolveTriggerMarkerTime(
-            tm.time,
-            candleTimesSec,
-            timeframe,
+        if (triggerMarkers && triggerMarkers.length > 0) {
+          const candleTimesSec = candles.map((c) =>
+            candleTimeToSeconds(c.time),
           );
-          if (resolvedTimeSec == null) continue;
 
-          const isBullish = tm.direction === "bullish";
-          const isBearish = tm.direction === "bearish";
+          for (const tm of triggerMarkers) {
+            const resolvedTimeSec = resolveTriggerMarkerTime(
+              tm.time,
+              candleTimesSec,
+              timeframe,
+            );
+            if (resolvedTimeSec == null) continue;
 
-          const markerId = tm.id ?? `trigger-${resolvedTimeSec}-${tm.type}`;
+            const isBullish = tm.direction === "bullish";
+            const isBearish = tm.direction === "bearish";
 
-          allMarkers.push({
-            time: resolvedTimeSec as unknown as Time,
-            position: isBearish ? "aboveBar" : "belowBar",
-            shape: "circle",
-            color: isBullish ? "#38bdf8" : isBearish ? "#fb7185" : "#fbbf24",
-            size: tm.selected ? 1.5 : tm.primary ? 1 : 0.8,
-            text: `${tm.type} $${tm.level.toFixed(0)}`,
-            id: markerId,
-          });
+            entries.push({
+              id: tm.id ?? `trigger-${resolvedTimeSec}-${tm.type}`,
+              time: resolvedTimeSec as unknown as Time,
+              price: tm.level,
+              color: isBullish ? "#38bdf8" : isBearish ? "#fb7185" : "#fbbf24",
+              direction: isBullish
+                ? "bullish"
+                : isBearish
+                  ? "bearish"
+                  : "neutral",
+              selected: tm.selected,
+            });
+          }
         }
+
+        eventMarkerRef.current.setEntries(entries);
       }
 
       if (allMarkers.length > 0) {
