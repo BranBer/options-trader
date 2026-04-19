@@ -92,7 +92,7 @@ export const marketPulseClassificationStateSchema = z.object({
     "both_sides",
     "none",
   ]),
-  rejection_strength: z.number().int().min(1).max(10),
+  rejection_strength: z.number().int().min(0).max(10),
   absorption_detected: z.boolean(),
   momentum_state: z.enum(["expanding", "weakening", "stable"]),
   structure_state: z.enum([
@@ -101,7 +101,7 @@ export const marketPulseClassificationStateSchema = z.object({
     "consolidation",
     "reversal_attempt",
   ]),
-  volatility_state: z.enum(["expansion", "compression"]),
+  volatility_state: z.enum(["expansion", "compression", "neutral"]),
 });
 
 export const marketPulseClassificationPayloadSchema = z.object({

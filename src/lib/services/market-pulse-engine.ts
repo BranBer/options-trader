@@ -117,12 +117,9 @@ function getCallTypeTokens(callType: string): number {
 }
 
 function summarizeWindow(candles: MarketPulsePreparedCandle[]): string {
-  const now = new Date();
-  const cadenceMs = 15 * 60 * 1000; // 15-minute candles
-  const start = new Date(now.getTime() - candles.length * cadenceMs);
   return JSON.stringify({
-    start: start.toISOString(),
-    end: now.toISOString(),
+    start: candles[0]?.candleTime ?? null,
+    end: candles.at(-1)?.candleTime ?? null,
     count: candles.length,
   });
 }

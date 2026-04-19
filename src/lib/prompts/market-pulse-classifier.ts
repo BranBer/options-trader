@@ -37,7 +37,11 @@ export const MARKET_PULSE_CLASSIFIER_RESPONSE_SCHEMA = {
                 type: "string" as const,
                 enum: ["buyers", "sellers", "neutral"],
               },
-              control_strength: { type: "integer" as const },
+              control_strength: {
+                type: "integer" as const,
+                minimum: 1,
+                maximum: 10,
+              },
               rejection_type: {
                 type: "string" as const,
                 enum: [
@@ -47,7 +51,11 @@ export const MARKET_PULSE_CLASSIFIER_RESPONSE_SCHEMA = {
                   "none",
                 ],
               },
-              rejection_strength: { type: "integer" as const },
+              rejection_strength: {
+                type: "integer" as const,
+                minimum: 0,
+                maximum: 10,
+              },
               absorption_detected: { type: "boolean" as const },
               momentum_state: {
                 type: "string" as const,
@@ -64,7 +72,7 @@ export const MARKET_PULSE_CLASSIFIER_RESPONSE_SCHEMA = {
               },
               volatility_state: {
                 type: "string" as const,
-                enum: ["expansion", "compression"],
+                enum: ["expansion", "compression", "neutral"],
               },
             },
             required: [
