@@ -16,7 +16,8 @@ const PILL_HEIGHT = 16;
 const PILL_RADIUS = 6;
 const PILL_PAD_X = 10;
 const PILL_MIN_WIDTH = 48;
-const SPINE_MARGIN = 6; // px from right edge of canvas
+const PRICE_AXIS_WIDTH = 70; // stay clear of the built-in price axis labels
+const SPINE_MARGIN = 6; // additional gap inside the chart pane
 const MIN_LABEL_SPACING = PILL_HEIGHT + 4;
 
 interface RenderTriggerAnnotation {
@@ -109,7 +110,7 @@ class TriggerAnnotationRenderer implements IPrimitivePaneRenderer {
       ctx.font = "600 10px sans-serif";
       ctx.textBaseline = "middle";
 
-      const spineX = mediaSize.width - SPINE_MARGIN;
+      const spineX = mediaSize.width - PRICE_AXIS_WIDTH - SPINE_MARGIN;
 
       for (const item of this._annotations) {
         const { annotation, x, levelY, anchorY, labelY } = item;
@@ -168,12 +169,13 @@ class TriggerAnnotationRenderer implements IPrimitivePaneRenderer {
         ctx.globalAlpha = 0.5;
         ctx.setLineDash([2, 3]);
         ctx.beginPath();
-        ctx.moveTo(spineX + SPINE_MARGIN, levelY);
-        ctx.lineTo(spineX, levelY);
+        // Horizontal from pill right edge at label Y
+        const connectorRight = pillX + pillWidth + 4;
+        ctx.moveTo(connectorRight, labelY);
         if (Math.abs(labelY - levelY) > 1) {
-          ctx.lineTo(spineX, labelY);
+          // Vertical jog to actual level Y
+          ctx.lineTo(connectorRight, levelY);
         }
-        ctx.lineTo(pillX + pillWidth, labelY);
         ctx.stroke();
 
         ctx.setLineDash([]);

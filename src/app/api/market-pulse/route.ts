@@ -173,12 +173,15 @@ async function getCandidateTickers(
 async function buildTickerState(
   ticker: string,
 ): Promise<MarketPulseApiTickerState> {
+  // Fetch the 2 most recent runs so we can fall back to the prior completed
+  // run's classifications/correlations/narrative when the latest is still
+  // running and hasn't produced any data yet.
   const runs = await db
     .select()
     .from(marketPulseRuns)
     .where(eq(marketPulseRuns.ticker, ticker))
     .orderBy(desc(marketPulseRuns.createdAt))
-    .limit(1);
+    .limit(2);
 
   const latestRun = runs[0] ?? null;
   if (!latestRun) {
@@ -218,7 +221,51 @@ async function buildTickerState(
       fetchIntraday15mCandles(ticker),
     ]);
 
-  const classifications = classificationRows
+  // When the latest run is still in-progress and has no data yet, carry
+  // forward the prior completed run's classifications/correlations/narrative
+  // so the UI doesn't flash empty while the new run is processing.
+  const priorRun = runs[1] ?? null;
+  const needsFullFallback =
+    latestRun.status === "running" &&
+    classificationRows.length === 0 &&
+    priorRun != null;
+
+  let effectiveClassificationRows = classificationRows;
+  let effectiveCorrelationRows = correlationRows;
+  let effectiveNarrativeRows = narrativeRows;
+
+  if (needsFullFallback) {
+    const [priorClassRows, priorCorrRows, priorNarrRows] = await Promise.all([
+      db
+        .select()
+        .from(marketPulseClassifications)
+        .where(eq(marketPulseClassifications.runId, priorRun.runId)),
+      db
+        .select()
+        .from(marketPulseCorrelations)
+        .where(eq(marketPulseCorrelations.runId, priorRun.runId)),
+      db
+        .select()
+        .from(marketPulseNarratives)
+        .where(eq(marketPulseNarratives.runId, priorRun.runId))
+        .limit(1),
+    ]);
+    effectiveClassificationRows = priorClassRows;
+    effectiveCorrelationRows = priorCorrRows;
+    effectiveNarrativeRows = priorNarrRows;
+  } else if (narrativeRows.length === 0 && priorRun != null) {
+    // Current run has classifications but no narrative yet — carry forward
+    // the prior run's narrative so the panel isn't blank while the new run's
+    // narrative stage is still processing.
+    const priorNarrRows = await db
+      .select()
+      .from(marketPulseNarratives)
+      .where(eq(marketPulseNarratives.runId, priorRun.runId))
+      .limit(1);
+    effectiveNarrativeRows = priorNarrRows;
+  }
+
+  const classifications = effectiveClassificationRows
     .map((row) => ({
       id: row.id,
       candleTime: row.candleTime,
@@ -231,7 +278,7 @@ async function buildTickerState(
     }))
     .sort((left, right) => left.candleTime.localeCompare(right.candleTime));
 
-  const correlations = correlationRows
+  const correlations = effectiveCorrelationRows
     .map((row) => ({
       id: row.id,
       candleTime: row.candleTime,
@@ -247,19 +294,34 @@ async function buildTickerState(
     }))
     .sort((left, right) => left.candleTime.localeCompare(right.candleTime));
 
-  const narrativeRow = narrativeRows[0] ?? null;
+  const narrativeRow = effectiveNarrativeRows[0] ?? null;
+
+  // If the current/effective run has no narrative, try the most recent
+  // narrative for this ticker across *any* prior run so the UI never shows a
+  // blank panel when historical narrative data exists.
+  let resolvedNarrativeRow = narrativeRow;
+  if (resolvedNarrativeRow == null) {
+    const [anyPriorNarrative] = await db
+      .select()
+      .from(marketPulseNarratives)
+      .where(eq(marketPulseNarratives.ticker, ticker))
+      .orderBy(desc(marketPulseNarratives.createdAt))
+      .limit(1);
+    resolvedNarrativeRow = anyPriorNarrative ?? null;
+  }
+
   const narrative =
-    narrativeRow == null
+    resolvedNarrativeRow == null
       ? null
       : {
-          currentControl: narrativeRow.currentControl,
-          controlStrength: narrativeRow.controlStrength,
-          marketPhase: narrativeRow.marketPhase,
-          expectedBehavior: narrativeRow.expectedBehavior,
-          narrativeSummary: narrativeRow.narrativeSummary,
-          keyConflicts: parseStringArray(narrativeRow.keyConflicts),
-          confidenceInAssessment: narrativeRow.confidenceInAssessment,
-          createdAt: narrativeRow.createdAt,
+          currentControl: resolvedNarrativeRow.currentControl,
+          controlStrength: resolvedNarrativeRow.controlStrength,
+          marketPhase: resolvedNarrativeRow.marketPhase,
+          expectedBehavior: resolvedNarrativeRow.expectedBehavior,
+          narrativeSummary: resolvedNarrativeRow.narrativeSummary,
+          keyConflicts: parseStringArray(resolvedNarrativeRow.keyConflicts),
+          confidenceInAssessment: resolvedNarrativeRow.confidenceInAssessment,
+          createdAt: resolvedNarrativeRow.createdAt,
         };
 
   // Safety net: if the DB says "running" but the run started more than 15 min

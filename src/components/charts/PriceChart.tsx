@@ -185,6 +185,11 @@ interface PriceChartProps {
   intradayResistanceLevels?: IntradayResistanceLevel[];
   /** Intraday-only support levels derived from session structure */
   intradaySupportLevels?: IntradaySupportLevel[];
+  /**
+   * When true, always call fitContent() on first mount instead of
+   * zooming to the last N bars for intraday timeframes.
+   */
+  fitContentOnInit?: boolean;
 }
 
 const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
@@ -210,6 +215,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       triggerAnnotations,
       intradayResistanceLevels,
       intradaySupportLevels,
+      fitContentOnInit,
     },
     ref,
   ) {
@@ -782,13 +788,18 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
 
       // Set initial viewport (only on first mount or structural rebuild)
       if (!hasSetInitialViewport.current) {
-        const VISIBLE_BAR_COUNT = 30;
-        if (isIntraday && candles.length > VISIBLE_BAR_COUNT) {
-          const from = candles[candles.length - VISIBLE_BAR_COUNT].time as Time;
-          const to = candles[candles.length - 1].time as Time;
-          chart.timeScale().setVisibleRange({ from, to });
-        } else {
+        if (fitContentOnInit) {
           chart.timeScale().fitContent();
+        } else {
+          const VISIBLE_BAR_COUNT = 30;
+          if (isIntraday && candles.length > VISIBLE_BAR_COUNT) {
+            const from = candles[candles.length - VISIBLE_BAR_COUNT]
+              .time as Time;
+            const to = candles[candles.length - 1].time as Time;
+            chart.timeScale().setVisibleRange({ from, to });
+          } else {
+            chart.timeScale().fitContent();
+          }
         }
         hasSetInitialViewport.current = true;
       } else if (savedRangeRef.current) {

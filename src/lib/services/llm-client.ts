@@ -1,8 +1,13 @@
 import OpenAI from "openai";
 
 const DEFAULT_OPEN_ROUTER_MODEL = "moonshotai/kimi-k2.5";
-// Used when the primary/default model repeatedly returns empty responses
-const EMPTY_RESPONSE_FALLBACK_MODEL = "google/gemini-2.0-flash-001";
+// Ordered fallback chain for both empty-response and rate-limit recovery.
+// Each model is tried in order; once exhausted, it's never revisited.
+const RATE_LIMIT_FALLBACK_CHAIN = [
+  "moonshotai/kimi-k2.5",
+  "google/gemini-2.0-flash-001",
+  "qwen/qwen3-30b-a3b",
+];
 
 let client: OpenAI | null = null;
 
@@ -233,6 +238,10 @@ export async function callLlmWithRetry<T>(
   const openai = getClient();
   let activeModel = requestedModel ?? getModel();
   let emptyResponseCount = 0;
+  let rateLimitSwitchCount = 0;
+  // Track models that have been exhausted (empty or rate-limited) so the
+  // fallback logic never cycles back to a known-bad model.
+  const exhaustedModels = new Set<string>();
 
   const schemaGuidance = `\n\nYou MUST respond with ONLY a valid JSON object matching this exact schema — no markdown, no commentary, no explanation:\n${JSON.stringify(responseSchema, null, 2)}`;
   const fullSystemPrompt = systemInstruction + schemaGuidance;
@@ -267,24 +276,23 @@ export async function callLlmWithRetry<T>(
 
       const result = await openai.chat.completions.create(
         params as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming,
+        { timeout: 60_000, signal: signal ?? undefined },
       );
 
       rawText = result.choices[0]?.message?.content ?? "";
       if (!rawText || rawText.trim().length === 0) {
         emptyResponseCount++;
-        // If we've gotten 2+ empty responses in a row, switch to a fallback.
-        // If already on the default model, escalate to the secondary fallback.
-        if (emptyResponseCount >= 2) {
-          const nextModel =
-            activeModel !== DEFAULT_OPEN_ROUTER_MODEL
-              ? DEFAULT_OPEN_ROUTER_MODEL
-              : EMPTY_RESPONSE_FALLBACK_MODEL;
-          if (activeModel !== nextModel) {
-            console.warn(
-              `[LLM] ${callType} got ${emptyResponseCount} empty responses from ${activeModel}; switching to ${nextModel}`,
-            );
-            activeModel = nextModel;
-          }
+        // Mark current model as exhausted and walk the fallback chain to find
+        // the next model that hasn't already failed.
+        exhaustedModels.add(activeModel);
+        const nextModel = RATE_LIMIT_FALLBACK_CHAIN.find(
+          (m) => !exhaustedModels.has(m),
+        );
+        if (nextModel && nextModel !== activeModel) {
+          console.warn(
+            `[LLM] ${callType} got ${emptyResponseCount} empty responses from ${activeModel}; switching to ${nextModel}`,
+          );
+          activeModel = nextModel;
         }
         throw new Error("Empty response from model — retrying");
       }
@@ -344,6 +352,24 @@ export async function callLlmWithRetry<T>(
         console.warn(
           `[LLM] ${callType} appears rate-limited on model ${activeModel}; backing off before retry`,
         );
+        // Mark current model as exhausted and walk the fallback chain to find
+        // the next model that hasn't already failed.
+        exhaustedModels.add(activeModel);
+        const nextModel = RATE_LIMIT_FALLBACK_CHAIN.find(
+          (m) => !exhaustedModels.has(m),
+        );
+        if (
+          nextModel &&
+          rateLimitSwitchCount < RATE_LIMIT_FALLBACK_CHAIN.length - 1
+        ) {
+          console.warn(
+            `[LLM] ${callType} switching from rate-limited ${activeModel} → ${nextModel}`,
+          );
+          activeModel = nextModel;
+          rateLimitSwitchCount++;
+          attempt = -1; // reset — loop increments to 0
+          continue;
+        }
       }
       if (rawText) {
         console.error(`[LLM] Raw response preview: ${rawText.slice(0, 400)}`);

@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, RefreshCw, Trash2 } from "lucide-react";
-import PriceChart, { type TriggerMarker } from "@/components/charts/PriceChart";
+import PriceChart, {
+  type IndicatorConfig,
+  type TriggerMarker,
+} from "@/components/charts/PriceChart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,9 +15,23 @@ import EventTimeline, {
 import NarrativePanel from "@/components/market-pulse/NarrativePanel";
 import InspectorDrawer from "@/components/market-pulse/InspectorDrawer";
 import RunHistory from "@/components/market-pulse/RunHistory";
+import { InfoTooltip } from "@/components/charts/IndicatorExplainers";
 import type { MarketPulseApiTickerState } from "@/app/api/market-pulse/route";
 
 type TickerState = MarketPulseApiTickerState;
+
+const INDICATOR_OPTIONS: {
+  key: keyof IndicatorConfig;
+  label: string;
+  color: string;
+}[] = [
+  { key: "ema9", label: "EMA 9", color: "bg-cyan-500" },
+  { key: "ema21", label: "EMA 21", color: "bg-orange-500" },
+  { key: "bollinger", label: "BB", color: "bg-blue-400" },
+  { key: "volumeMA", label: "Vol MA", color: "bg-white/60" },
+  { key: "rsi", label: "RSI", color: "bg-purple-500" },
+  { key: "macd", label: "MACD", color: "bg-blue-500" },
+];
 
 const STAGE_LABELS: Record<string, string> = {
   candles: "Fetching candles",
@@ -93,6 +110,10 @@ export default function TickerPulseCard({
   const [selectedTimelineId, setSelectedTimelineId] = useState<string | null>(
     timelineItems[0]?.id ?? null,
   );
+  const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig>({});
+  const toggleIndicator = useCallback((key: keyof IndicatorConfig) => {
+    setActiveIndicators((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   useEffect(() => {
     setSelectedTimelineId((current) =>
@@ -309,12 +330,40 @@ export default function TickerPulseCard({
 
           <div className="space-y-4">
             <div className="rounded-2xl border border-border/70 bg-[#07111b] p-3">
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {INDICATOR_OPTIONS.map(({ key, label, color }) => {
+                  const active = activeIndicators[key];
+                  return (
+                    <span
+                      key={key}
+                      className="inline-flex items-center gap-0.5"
+                    >
+                      <button
+                        onClick={() => toggleIndicator(key)}
+                        className={`flex items-center gap-1.5 px-2 py-0.5 text-xs rounded transition-colors ${
+                          active
+                            ? "bg-accent text-accent-foreground ring-1 ring-accent"
+                            : "bg-muted text-muted-foreground hover:bg-muted/80"
+                        }`}
+                        aria-pressed={!!active}
+                      >
+                        <span
+                          className={`w-2 h-2 rounded-full ${color} ${active ? "opacity-100" : "opacity-40"}`}
+                        />
+                        {label}
+                      </button>
+                      <InfoTooltip text="" indicatorKey={key} />
+                    </span>
+                  );
+                })}
+              </div>
               {state.candles.length > 0 ? (
                 <div className="relative">
                   <PriceChart
                     candles={state.candles}
                     height={360}
                     timeframe="1d"
+                    indicators={activeIndicators}
                     triggerMarkers={triggerMarkers}
                     onTriggerMarkerSelect={(markerId) => {
                       if (markerId) {
@@ -336,6 +385,7 @@ export default function TickerPulseCard({
                     candles={state.fallbackCandles}
                     height={352}
                     timeframe="1mo"
+                    indicators={activeIndicators}
                   />
                   <div className="mt-2 flex justify-center">
                     <div className="rounded-full border border-amber-500/30 bg-slate-950/90 px-3 py-1 text-[10px] font-medium tracking-[0.14em] text-amber-300/80 uppercase">
@@ -384,6 +434,7 @@ export default function TickerPulseCard({
                     narrative={state.narrative}
                     correlations={state.correlations}
                     runHistoryHref={`#${runHistoryId}`}
+                    status={state.status}
                   />
                 </div>
                 <div id={runHistoryId}>

@@ -41,12 +41,15 @@ export default function NarrativePanel({
   narrative,
   correlations = [],
   runHistoryHref,
+  status,
 }: {
   narrative: Narrative;
   correlations?: Correlation[];
   runHistoryHref?: string;
+  status?: string;
 }) {
   if (!narrative) {
+    const isRunning = status === "running";
     return (
       <Card
         size="sm"
@@ -57,8 +60,9 @@ export default function NarrativePanel({
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            The first Market Pulse narrative will appear after this ticker
-            completes its initial run.
+            {isRunning
+              ? "Narrative synthesis is in progress — it will appear once the current run completes."
+              : "No narrative available yet. Trigger a Market Pulse refresh to generate one."}
           </p>
         </CardContent>
       </Card>

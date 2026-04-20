@@ -56,10 +56,315 @@ import {
   type MarketPulsePreparedCandle,
 } from "@/types/market-pulse";
 
-const CLASSIFICATION_BATCH_SIZE = 16;
+const CLASSIFICATION_BATCH_SIZE = 32;
 const CLASSIFICATION_CALL_TYPE = "marketPulseClassify";
 const CORRELATION_CALL_TYPE = "marketPulseCorrelate";
 const SYNTHESIS_CALL_TYPE = "marketPulseNarrative";
+
+// ── LLM enum coercion ───────────────────────────────────────────────────────
+// Models sometimes return synonyms, capitalisations, or entirely novel values
+// for enum fields. This coercer normalises to the canonical Zod enum value,
+// falling back to a sensible default for anything truly unrecognisable.
+const VALID_VOLATILITY = new Set(["expansion", "compression", "neutral"]);
+const VOLATILITY_ALIASES: Record<string, string> = {
+  expanding: "expansion",
+  expand: "expansion",
+  contracting: "compression",
+  contraction: "compression",
+  compressing: "compression",
+  compressed: "compression",
+  stable: "neutral",
+  normal: "neutral",
+  low: "compression",
+  high: "expansion",
+};
+
+const VALID_MOMENTUM = new Set(["expanding", "weakening", "stable"]);
+const MOMENTUM_ALIASES: Record<string, string> = {
+  expansion: "expanding",
+  strong: "expanding",
+  growing: "expanding",
+  compression: "weakening",
+  weak: "weakening",
+  declining: "weakening",
+  fading: "weakening",
+  neutral: "stable",
+  flat: "stable",
+};
+
+const VALID_STRUCTURE = new Set([
+  "trend_continuation",
+  "pullback",
+  "consolidation",
+  "reversal_attempt",
+]);
+const STRUCTURE_ALIASES: Record<string, string> = {
+  continuation: "trend_continuation",
+  trend: "trend_continuation",
+  trending: "trend_continuation",
+  reversal: "reversal_attempt",
+  reversing: "reversal_attempt",
+  consolidating: "consolidation",
+  range: "consolidation",
+  ranging: "consolidation",
+  pullback_rally: "pullback",
+  retracement: "pullback",
+};
+
+// ── Narrative enum coercion ─────────────────────────────────────────────────
+const VALID_CURRENT_CONTROL = new Set(["buyers", "sellers", "neutral"]);
+const CURRENT_CONTROL_ALIASES: Record<string, string> = {
+  buy: "buyers",
+  buying: "buyers",
+  bulls: "buyers",
+  bullish: "buyers",
+  sell: "sellers",
+  selling: "sellers",
+  bears: "sellers",
+  bearish: "sellers",
+  mixed: "neutral",
+  balanced: "neutral",
+  flat: "neutral",
+  none: "neutral",
+};
+
+const VALID_MARKET_PHASE = new Set(["trend", "consolidation", "transition"]);
+const MARKET_PHASE_ALIASES: Record<string, string> = {
+  trending: "trend",
+  trend_continuation: "trend",
+  continuation: "trend",
+  consolidating: "consolidation",
+  range: "consolidation",
+  ranging: "consolidation",
+  reversal: "transition",
+  reversal_attempt: "transition",
+  shifting: "transition",
+  transitioning: "transition",
+};
+
+const VALID_EXPECTED_BEHAVIOR = new Set([
+  "continuation",
+  "range",
+  "reversal_risk",
+]);
+const EXPECTED_BEHAVIOR_ALIASES: Record<string, string> = {
+  continue: "continuation",
+  continued: "continuation",
+  trend_continuation: "continuation",
+  trending: "continuation",
+  ranging: "range",
+  consolidation: "range",
+  sideways: "range",
+  reversal: "reversal_risk",
+  reverse: "reversal_risk",
+  risk: "reversal_risk",
+};
+
+function coerceEnum(
+  value: string,
+  valid: Set<string>,
+  aliases: Record<string, string>,
+  fallback: string,
+): string {
+  const lower = value.toLowerCase().trim().replace(/-/g, "_");
+  if (valid.has(lower)) return lower;
+  return aliases[lower] ?? fallback;
+}
+
+function coerceClassificationEnums(data: unknown): unknown {
+  if (data == null || typeof data !== "object") return data;
+  const obj = data as Record<string, unknown>;
+  const classifications = obj.classifications;
+  if (!Array.isArray(classifications)) return data;
+
+  for (const item of classifications) {
+    if (item == null || typeof item !== "object") continue;
+    const cls = (item as Record<string, unknown>).classification;
+    if (cls == null || typeof cls !== "object") continue;
+    const c = cls as Record<string, unknown>;
+
+    if (typeof c.volatility_state === "string") {
+      c.volatility_state = coerceEnum(
+        c.volatility_state,
+        VALID_VOLATILITY,
+        VOLATILITY_ALIASES,
+        "neutral",
+      );
+    }
+    if (typeof c.momentum_state === "string") {
+      c.momentum_state = coerceEnum(
+        c.momentum_state,
+        VALID_MOMENTUM,
+        MOMENTUM_ALIASES,
+        "stable",
+      );
+    }
+    if (typeof c.structure_state === "string") {
+      c.structure_state = coerceEnum(
+        c.structure_state,
+        VALID_STRUCTURE,
+        STRUCTURE_ALIASES,
+        "consolidation",
+      );
+    }
+  }
+  return data;
+}
+
+function coerceNarrativeEnums(data: unknown): unknown {
+  if (data == null || typeof data !== "object") return data;
+  const obj = data as Record<string, unknown>;
+
+  if (typeof obj.current_control === "string") {
+    obj.current_control = coerceEnum(
+      obj.current_control,
+      VALID_CURRENT_CONTROL,
+      CURRENT_CONTROL_ALIASES,
+      "neutral",
+    );
+  }
+  if (typeof obj.market_phase === "string") {
+    obj.market_phase = coerceEnum(
+      obj.market_phase,
+      VALID_MARKET_PHASE,
+      MARKET_PHASE_ALIASES,
+      "consolidation",
+    );
+  }
+  if (typeof obj.expected_behavior === "string") {
+    obj.expected_behavior = coerceEnum(
+      obj.expected_behavior,
+      VALID_EXPECTED_BEHAVIOR,
+      EXPECTED_BEHAVIOR_ALIASES,
+      "range",
+    );
+  }
+
+  // Clamp control_strength to 1–10 integer
+  if (typeof obj.control_strength === "number") {
+    obj.control_strength = Math.max(
+      1,
+      Math.min(10, Math.round(obj.control_strength)),
+    );
+  }
+  // Clamp confidence_in_assessment to 0–1
+  if (typeof obj.confidence_in_assessment === "number") {
+    obj.confidence_in_assessment = Math.max(
+      0,
+      Math.min(1, obj.confidence_in_assessment),
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Build a basic narrative from classification data when the LLM narrative
+ * stage fails. This ensures users always see *something* after events are
+ * classified — no more blank "will appear after initial run" state.
+ */
+function buildFallbackNarrative(
+  classifications: MarketPulseClassificationPayload[],
+): MarketPulseNarrativePayload {
+  if (classifications.length === 0) {
+    return {
+      current_control: "neutral",
+      control_strength: 1,
+      narrative_summary: "No classification data available yet.",
+      market_phase: "consolidation",
+      expected_behavior: "range",
+      key_conflicts: [],
+      confidence_in_assessment: 0.1,
+    };
+  }
+
+  // Determine control from event keywords
+  let buyerSignals = 0;
+  let sellerSignals = 0;
+  for (const c of classifications) {
+    const ev = c.event.toLowerCase();
+    const cls = c.classification as Record<string, string> | undefined;
+    const control = cls?.control?.toLowerCase() ?? "";
+    if (
+      control.includes("buyer") ||
+      ev.includes("buyer") ||
+      ev.includes("absorption") ||
+      ev.includes("bullish")
+    ) {
+      buyerSignals += c.significance === "high" ? 2 : 1;
+    } else if (
+      control.includes("seller") ||
+      ev.includes("seller") ||
+      ev.includes("breakdown") ||
+      ev.includes("bearish")
+    ) {
+      sellerSignals += c.significance === "high" ? 2 : 1;
+    }
+  }
+
+  const current_control: "buyers" | "sellers" | "neutral" =
+    buyerSignals > sellerSignals + 2
+      ? "buyers"
+      : sellerSignals > buyerSignals + 2
+        ? "sellers"
+        : "neutral";
+
+  const total = buyerSignals + sellerSignals;
+  const control_strength = Math.max(
+    1,
+    Math.min(
+      10,
+      total > 0
+        ? Math.round((Math.abs(buyerSignals - sellerSignals) / total) * 10)
+        : 1,
+    ),
+  );
+
+  // Derive phase from structure_state distribution
+  const structureCounts: Record<string, number> = {};
+  for (const c of classifications) {
+    const cls = c.classification as Record<string, string> | undefined;
+    const state = cls?.structure_state ?? "consolidation";
+    structureCounts[state] = (structureCounts[state] ?? 0) + 1;
+  }
+  const topStructure = Object.entries(structureCounts).sort(
+    (a, b) => b[1] - a[1],
+  )[0]?.[0];
+
+  const market_phase: "trend" | "consolidation" | "transition" =
+    topStructure === "trend_continuation"
+      ? "trend"
+      : topStructure === "reversal_attempt"
+        ? "transition"
+        : "consolidation";
+
+  const expected_behavior: "continuation" | "range" | "reversal_risk" =
+    market_phase === "trend"
+      ? "continuation"
+      : market_phase === "transition"
+        ? "reversal_risk"
+        : "range";
+
+  const recentEvents = classifications.slice(-5).map((c) => c.event);
+  const narrative_summary = `Auto-generated summary from ${classifications.length} classified events. ${
+    current_control === "neutral"
+      ? "Neither buyers nor sellers have clear control."
+      : `${current_control === "buyers" ? "Buyers" : "Sellers"} appear to hold the edge.`
+  } Recent activity: ${recentEvents.join("; ")}.`;
+
+  return {
+    current_control,
+    control_strength,
+    narrative_summary,
+    market_phase,
+    expected_behavior,
+    key_conflicts:
+      current_control === "neutral"
+        ? ["Mixed buyer/seller signals — no clear directional conviction"]
+        : [],
+    confidence_in_assessment: 0.3,
+  };
+}
 
 type ClassificationRunStatus = "success" | "partial" | "error";
 
@@ -362,39 +667,55 @@ export async function classifyCandles(options: {
   const stageStartedAt = Date.now();
 
   const batches = batchCandles(candles, CLASSIFICATION_BATCH_SIZE);
+  const MAX_CONCURRENT_BATCHES = 3;
   activateStage(ticker, "classification", 0);
-  for (const [batchIndex, batch] of batches.entries()) {
-    // Check for cancellation before starting each LLM call
-    if (options.signal?.aborted) break;
-    try {
-      const prompt = buildClassifierPrompt(batch);
-      const response = await callLlmWithRetry(
-        MARKET_PULSE_CLASSIFIER_SYSTEM_INSTRUCTION,
-        prompt,
-        MARKET_PULSE_CLASSIFIER_RESPONSE_SCHEMA,
-        marketPulseClassifierZodSchema,
-        {
-          callType: CLASSIFICATION_CALL_TYPE,
-          model: getMarketPulseModel(),
-          temperature: 0,
-          maxOutputTokens: 16384,
-          signal: options.signal,
-        },
-      );
 
-      successfulClassifications.push(...validateBatchResponse(batch, response));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(
-        `[MarketPulse] Classification batch failed for ${ticker}:`,
-        error,
-      );
-      errors.push(message);
+  const batchEntries = [...batches.entries()];
+  for (let i = 0; i < batchEntries.length; i += MAX_CONCURRENT_BATCHES) {
+    if (options.signal?.aborted) break;
+
+    const chunk = batchEntries.slice(i, i + MAX_CONCURRENT_BATCHES);
+    const results = await Promise.allSettled(
+      chunk.map(async ([, batch]) => {
+        const prompt = buildClassifierPrompt(batch);
+        const response = await callLlmWithRetry(
+          MARKET_PULSE_CLASSIFIER_SYSTEM_INSTRUCTION,
+          prompt,
+          MARKET_PULSE_CLASSIFIER_RESPONSE_SCHEMA,
+          marketPulseClassifierZodSchema,
+          {
+            callType: CLASSIFICATION_CALL_TYPE,
+            model: getMarketPulseModel(),
+            temperature: 0,
+            maxOutputTokens: 16384,
+            signal: options.signal,
+            preprocessParsedJson: coerceClassificationEnums,
+          },
+        );
+        return validateBatchResponse(batch, response);
+      }),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        successfulClassifications.push(...result.value);
+      } else {
+        const message =
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason);
+        console.error(
+          `[MarketPulse] Classification batch failed for ${ticker}:`,
+          result.reason,
+        );
+        errors.push(message);
+      }
     }
     updateStageProgress(
       ticker,
       "classification",
-      (batchIndex + 1) / batches.length,
+      Math.min(i + MAX_CONCURRENT_BATCHES, batchEntries.length) /
+        batches.length,
     );
   }
 
@@ -640,6 +961,32 @@ export async function orchestrateTickerPulse(options: {
     failStage(ticker, "narrative");
     const message = error instanceof Error ? error.message : String(error);
     errors.push(`narrative: ${message}`);
+
+    // Fallback: carry forward prior narrative, or build a basic one from
+    // classification data so the user always sees *something*.
+    const fallback =
+      priorNarrative?.payload ?? buildFallbackNarrative(enrichedEvents);
+    narrative = fallback;
+
+    // Persist the fallback so the API can serve it
+    try {
+      await db.insert(marketPulseNarratives).values({
+        runId,
+        ticker,
+        currentControl: fallback.current_control,
+        controlStrength: fallback.control_strength,
+        marketPhase: fallback.market_phase,
+        expectedBehavior: fallback.expected_behavior,
+        narrativeSummary: fallback.narrative_summary,
+        keyConflicts: JSON.stringify(fallback.key_conflicts ?? []),
+        confidenceInAssessment: fallback.confidence_in_assessment ?? null,
+        structuredOutput: JSON.stringify(fallback),
+        inputEventCount: enrichedEvents.length,
+        priorRunId: priorNarrative?.runId ?? null,
+      });
+    } catch {
+      /* best-effort — don't crash the pipeline */
+    }
   }
 
   const correlationTokens =
@@ -902,6 +1249,7 @@ export async function synthesizeNarrative(options: {
       temperature: 0.3,
       maxOutputTokens: 2048,
       signal: options.signal,
+      preprocessParsedJson: coerceNarrativeEnums,
     },
   );
 

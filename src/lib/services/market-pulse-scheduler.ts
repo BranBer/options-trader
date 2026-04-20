@@ -19,8 +19,13 @@ const schedulerState = globalThis as typeof globalThis & {
 };
 
 const activeRuns = new Set<string>();
+/** Tracks when each in-memory run started for staleness detection */
+const activeRunStartTimes = new Map<string, number>();
+const STALE_RUN_THRESHOLD_MS = 10 * 60 * 1000;
 /** Maps ticker → AbortController for the in-flight orchestration promise */
 const activeCancellations = new Map<string, AbortController>();
+/** Maps ticker → completion promise for drain support */
+const activePromises = new Map<string, Promise<unknown>>();
 
 export class MarketPulseSubscriptionError extends Error {
   status: number;
@@ -215,7 +220,25 @@ export function isWithinMarketPulseWindow(now: Date = new Date()): boolean {
 
 export async function isMarketPulseRunActive(ticker: string): Promise<boolean> {
   const normalizedTicker = normalizeTicker(ticker);
+
+  // Evict stale in-memory entries (e.g. hung LLM calls from before a code reload)
+  const startedAt = activeRunStartTimes.get(normalizedTicker);
+  if (
+    activeRuns.has(normalizedTicker) &&
+    startedAt != null &&
+    Date.now() - startedAt > STALE_RUN_THRESHOLD_MS
+  ) {
+    activeRuns.delete(normalizedTicker);
+    activeRunStartTimes.delete(normalizedTicker);
+    activeCancellations.get(normalizedTicker)?.abort();
+    activeCancellations.delete(normalizedTicker);
+    activePromises.delete(normalizedTicker);
+  }
+
   if (activeRuns.has(normalizedTicker)) return true;
+
+  // Clear stale "running" rows from crashed/restarted processes before checking
+  await clearStaleRuns(normalizedTicker);
 
   const rows = await db
     .select()
@@ -318,27 +341,36 @@ async function runSingleTicker(
   }
 
   activeRuns.add(normalizedTicker);
+  activeRunStartTimes.set(normalizedTicker, Date.now());
   const controller = new AbortController();
   activeCancellations.set(normalizedTicker, controller);
-  try {
-    // For initial and scheduled triggers, check if we need a full 24h catch-up
-    const catchUp =
-      trigger === "initial" ||
-      (trigger === "scheduled" &&
-        (await needsInitialCatchUp(normalizedTicker)));
 
-    await orchestrateTickerPulse({
-      ticker: normalizedTicker,
-      trigger: trigger === "initial" ? "initial" : trigger,
-      windowSize: catchUp ? LOOKBACK_CANDLE_COUNT : undefined,
-      runId: finalRunId,
-      signal: controller.signal,
-    });
-    return finalRunId;
-  } finally {
-    activeRuns.delete(normalizedTicker);
-    activeCancellations.delete(normalizedTicker);
-  }
+  const work = (async () => {
+    try {
+      // For initial and scheduled triggers, check if we need a full 24h catch-up
+      const catchUp =
+        trigger === "initial" ||
+        (trigger === "scheduled" &&
+          (await needsInitialCatchUp(normalizedTicker)));
+
+      await orchestrateTickerPulse({
+        ticker: normalizedTicker,
+        trigger: trigger === "initial" ? "initial" : trigger,
+        windowSize: catchUp ? LOOKBACK_CANDLE_COUNT : undefined,
+        runId: finalRunId,
+        signal: controller.signal,
+      });
+      return finalRunId;
+    } finally {
+      activeRuns.delete(normalizedTicker);
+      activeRunStartTimes.delete(normalizedTicker);
+      activeCancellations.delete(normalizedTicker);
+      activePromises.delete(normalizedTicker);
+    }
+  })();
+
+  activePromises.set(normalizedTicker, work);
+  return work;
 }
 
 export async function runMarketPulseCycle(
@@ -352,16 +384,30 @@ export async function runMarketPulseCycle(
     return { attempted: tickers, completed, skipped: tickers };
   }
 
-  for (const ticker of tickers) {
-    try {
-      await runSingleTicker(ticker, trigger);
-      completed.push(ticker);
-    } catch (error) {
-      if (error instanceof MarketPulseSchedulerError && error.status === 409) {
-        skipped.push(ticker);
-        continue;
+  const results = await Promise.allSettled(
+    tickers.map(async (ticker) => {
+      try {
+        await runSingleTicker(ticker, trigger);
+        return { ticker, outcome: "completed" as const };
+      } catch (error) {
+        if (
+          error instanceof MarketPulseSchedulerError &&
+          error.status === 409
+        ) {
+          return { ticker, outcome: "skipped" as const };
+        }
+        console.error(`[MarketPulseScheduler] ${ticker} failed:`, error);
+        return { ticker, outcome: "failed" as const };
       }
-      console.error(`[MarketPulseScheduler] ${ticker} failed:`, error);
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      if (result.value.outcome === "completed")
+        completed.push(result.value.ticker);
+      else if (result.value.outcome === "skipped")
+        skipped.push(result.value.ticker);
     }
   }
 
@@ -418,6 +464,39 @@ export function stopMarketPulseScheduler(): void {
   }
   schedulerState.__marketPulseSchedulerInterval = undefined;
   schedulerState.__marketPulseSchedulerStarted = false;
+}
+
+/**
+ * Wait for all in-flight Market Pulse runs to finish (up to `timeoutMs`).
+ * Stops the scheduler first so no new runs start, then awaits active promises.
+ * Returns true if all runs drained within the timeout.
+ */
+export async function drainActiveRuns(timeoutMs = 60_000): Promise<boolean> {
+  stopMarketPulseScheduler();
+
+  const pending = [...activePromises.values()];
+  if (pending.length === 0) return true;
+
+  console.log(
+    `[MarketPulseScheduler] Draining ${pending.length} active run(s)…`,
+  );
+
+  const settled = Promise.allSettled(pending);
+  const timeout = new Promise<"timeout">((resolve) =>
+    setTimeout(() => resolve("timeout"), timeoutMs),
+  );
+
+  const result = await Promise.race([settled, timeout]);
+  if (result === "timeout") {
+    console.warn(
+      `[MarketPulseScheduler] Drain timed out after ${timeoutMs}ms — ` +
+        `${activePromises.size} run(s) still active`,
+    );
+    return false;
+  }
+
+  console.log("[MarketPulseScheduler] All runs drained successfully");
+  return true;
 }
 
 export function requestManualMarketPulseRefresh(ticker: string): {
