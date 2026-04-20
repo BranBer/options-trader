@@ -207,6 +207,31 @@ function coerceClassificationEnums(data: unknown): unknown {
         "consolidation",
       );
     }
+
+    // Handle non-string enum values (null/undefined/number) by falling back
+    if (c.volatility_state != null && typeof c.volatility_state !== "string") {
+      c.volatility_state = "neutral";
+    }
+    if (c.momentum_state != null && typeof c.momentum_state !== "string") {
+      c.momentum_state = "stable";
+    }
+    if (c.structure_state != null && typeof c.structure_state !== "string") {
+      c.structure_state = "consolidation";
+    }
+
+    // Clamp numeric fields to valid Zod ranges
+    if (typeof c.control_strength === "number") {
+      c.control_strength = Math.max(
+        1,
+        Math.min(10, Math.round(c.control_strength)),
+      );
+    }
+    if (typeof c.rejection_strength === "number") {
+      c.rejection_strength = Math.max(
+        0,
+        Math.min(10, Math.round(c.rejection_strength)),
+      );
+    }
   }
   return data;
 }
@@ -831,6 +856,22 @@ export async function orchestrateTickerPulse(options: {
       signal: options.signal,
     });
   } catch (err) {
+    // Update the DB row so it doesn't stay stuck at "running" forever
+    const message = err instanceof Error ? err.message : String(err);
+    await db
+      .update(marketPulseRuns)
+      .set({
+        status: "error",
+        errorMessage: message,
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - runStartedAtMs,
+      })
+      .where(
+        and(
+          eq(marketPulseRuns.runId, runId),
+          eq(marketPulseRuns.ticker, ticker),
+        ),
+      );
     finishTickerProgress(ticker, true);
     throw err;
   }
@@ -1247,7 +1288,7 @@ export async function synthesizeNarrative(options: {
       callType: SYNTHESIS_CALL_TYPE,
       model: getMarketPulseModel(),
       temperature: 0.3,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 4096,
       signal: options.signal,
       preprocessParsedJson: coerceNarrativeEnums,
     },
