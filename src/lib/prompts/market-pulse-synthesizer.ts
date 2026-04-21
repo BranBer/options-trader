@@ -17,7 +17,8 @@ Additional rules:
 - If prior narrative is provided, explicitly reflect what changed since that prior state.
 - When signals conflict, prefer neutral control or transition phase over forced certainty.
 - If high-confidence catalyst correlations exist, mention them as context, not as absolute proof.
-- Keep the output grounded in the structured event inputs.`;
+- Keep the output grounded in the structured event inputs.
+- Keep narrative_summary under 120 words. Be direct and concise.`;
 
 export const MARKET_PULSE_SYNTHESIZER_RESPONSE_SCHEMA = {
   type: "object" as const,
