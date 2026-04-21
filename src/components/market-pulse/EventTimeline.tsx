@@ -148,35 +148,37 @@ export default function EventTimeline({
             No {activeFilter} events are available for this ticker yet.
           </p>
         ) : (
-          filteredItems.map((item) => {
-            const selected = item.id === selectedId;
-            return (
-              <Button
-                key={item.id}
-                type="button"
-                variant="ghost"
-                onClick={() => onSelect(item.id)}
-                className={`h-auto w-full justify-start rounded-xl border p-3 text-left ${toneClasses(item.tone)} ${selected ? "ring-1 ring-primary/50" : ""}`}
-              >
-                <div className="w-full space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <Badge variant="outline">
-                      {normalizeLevelLabel(item.level)}
-                    </Badge>
-                    <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                      {formatTimeLabel(item.time)}
-                    </span>
+          <div className="max-h-105 space-y-2 overflow-y-auto pr-1">
+            {filteredItems.map((item) => {
+              const selected = item.id === selectedId;
+              return (
+                <Button
+                  key={item.id}
+                  type="button"
+                  variant="ghost"
+                  onClick={() => onSelect(item.id)}
+                  className={`h-auto w-full justify-start rounded-xl border p-3 text-left ${toneClasses(item.tone)} ${selected ? "ring-1 ring-primary/50" : ""}`}
+                >
+                  <div className="w-full space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge variant="outline">
+                        {normalizeLevelLabel(item.level)}
+                      </Badge>
+                      <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                        {formatTimeLabel(item.time)}
+                      </span>
+                    </div>
+                    <p className="whitespace-normal text-sm font-medium text-foreground">
+                      {item.title}
+                    </p>
+                    <p className="whitespace-normal text-xs text-muted-foreground">
+                      {item.detail}
+                    </p>
                   </div>
-                  <p className="whitespace-normal text-sm font-medium text-foreground">
-                    {item.title}
-                  </p>
-                  <p className="whitespace-normal text-xs text-muted-foreground">
-                    {item.detail}
-                  </p>
-                </div>
-              </Button>
-            );
-          })
+                </Button>
+              );
+            })}
+          </div>
         )}
       </CardContent>
     </Card>

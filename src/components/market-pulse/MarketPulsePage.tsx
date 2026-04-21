@@ -98,61 +98,125 @@ export default function MarketPulsePage() {
           {error.message}
         </div>
       ) : data != null && data.tickers.length > 0 ? (
-        <div className="space-y-6">
-          {data.tickers.map((state) => (
-            <TickerPulseCard
-              key={state.ticker}
-              state={state}
-              removing={
-                subscriptionMutation.isPending &&
-                subscriptionMutation.variables?.action === "remove" &&
-                subscriptionMutation.variables?.ticker === state.ticker
-              }
-              refreshing={
-                refreshMutation.isPending &&
-                refreshMutation.variables?.ticker === state.ticker
-              }
-              onRemove={(ticker) =>
-                subscriptionMutation.mutate(
-                  { ticker, action: "remove" },
-                  {
-                    onSuccess: () => {
-                      pushToast({
-                        tone: "info",
-                        message: `${ticker} was removed from Market Pulse.`,
-                      });
+        <>
+          <div className="hidden xl:flex gap-6">
+            {[
+              data.tickers.filter((_, i) => i % 2 === 0),
+              data.tickers.filter((_, i) => i % 2 === 1),
+            ].map((column, colIdx) => (
+              <div key={colIdx} className="flex flex-1 flex-col gap-6">
+                {column.map((state) => (
+                  <TickerPulseCard
+                    key={state.ticker}
+                    state={state}
+                    removing={
+                      subscriptionMutation.isPending &&
+                      subscriptionMutation.variables?.action === "remove" &&
+                      subscriptionMutation.variables?.ticker === state.ticker
+                    }
+                    refreshing={
+                      refreshMutation.isPending &&
+                      refreshMutation.variables?.ticker === state.ticker
+                    }
+                    onRemove={(ticker) =>
+                      subscriptionMutation.mutate(
+                        { ticker, action: "remove" },
+                        {
+                          onSuccess: () => {
+                            pushToast({
+                              tone: "info",
+                              message: `${ticker} was removed from Market Pulse.`,
+                            });
+                          },
+                          onError: (mutationError) => {
+                            pushToast({
+                              tone: "error",
+                              message: mutationError.message,
+                            });
+                          },
+                        },
+                      )
+                    }
+                    onRefresh={(ticker) =>
+                      refreshMutation.mutate(
+                        { ticker },
+                        {
+                          onSuccess: () => {
+                            pushToast({
+                              tone: "info",
+                              message: `Manual refresh queued for ${ticker}.`,
+                            });
+                          },
+                          onError: (mutationError) => {
+                            pushToast({
+                              tone: "error",
+                              message: mutationError.message,
+                            });
+                          },
+                        },
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-col gap-6 xl:hidden">
+            {data.tickers.map((state) => (
+              <TickerPulseCard
+                key={state.ticker}
+                state={state}
+                removing={
+                  subscriptionMutation.isPending &&
+                  subscriptionMutation.variables?.action === "remove" &&
+                  subscriptionMutation.variables?.ticker === state.ticker
+                }
+                refreshing={
+                  refreshMutation.isPending &&
+                  refreshMutation.variables?.ticker === state.ticker
+                }
+                onRemove={(ticker) =>
+                  subscriptionMutation.mutate(
+                    { ticker, action: "remove" },
+                    {
+                      onSuccess: () => {
+                        pushToast({
+                          tone: "info",
+                          message: `${ticker} was removed from Market Pulse.`,
+                        });
+                      },
+                      onError: (mutationError) => {
+                        pushToast({
+                          tone: "error",
+                          message: mutationError.message,
+                        });
+                      },
                     },
-                    onError: (mutationError) => {
-                      pushToast({
-                        tone: "error",
-                        message: mutationError.message,
-                      });
+                  )
+                }
+                onRefresh={(ticker) =>
+                  refreshMutation.mutate(
+                    { ticker },
+                    {
+                      onSuccess: () => {
+                        pushToast({
+                          tone: "info",
+                          message: `Manual refresh queued for ${ticker}.`,
+                        });
+                      },
+                      onError: (mutationError) => {
+                        pushToast({
+                          tone: "error",
+                          message: mutationError.message,
+                        });
+                      },
                     },
-                  },
-                )
-              }
-              onRefresh={(ticker) =>
-                refreshMutation.mutate(
-                  { ticker },
-                  {
-                    onSuccess: () => {
-                      pushToast({
-                        tone: "info",
-                        message: `Manual refresh queued for ${ticker}.`,
-                      });
-                    },
-                    onError: (mutationError) => {
-                      pushToast({
-                        tone: "error",
-                        message: mutationError.message,
-                      });
-                    },
-                  },
-                )
-              }
-            />
-          ))}
-        </div>
+                  )
+                }
+              />
+            ))}
+          </div>
+        </>
       ) : (
         <div className="rounded-[28px] border border-dashed border-border/70 bg-card/40 p-10 text-center">
           <p className="text-lg font-medium">No tickers tracked yet</p>
