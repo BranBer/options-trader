@@ -1225,7 +1225,7 @@ export async function correlateCatalysts(options: {
       callType: CORRELATION_CALL_TYPE,
       model: getMarketPulseModel(),
       temperature: 0,
-      maxOutputTokens: 3072,
+      maxOutputTokens: 6144,
       signal: options.signal,
     },
   );

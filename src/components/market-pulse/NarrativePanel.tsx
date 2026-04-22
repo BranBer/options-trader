@@ -148,8 +148,8 @@ export default function NarrativePanel({
               Key Conflicts
             </p>
             <ul className="space-y-1 text-sm text-amber-50/85">
-              {narrative.keyConflicts.map((item) => (
-                <li key={item}>{item}</li>
+              {narrative.keyConflicts.map((item, i) => (
+                <li key={i}>{item}</li>
               ))}
             </ul>
           </div>

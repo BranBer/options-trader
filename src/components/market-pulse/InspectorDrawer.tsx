@@ -113,7 +113,7 @@ export default function InspectorDrawer({
 
         <div className="flex-1 overflow-auto p-4">
           {isLoading ? (
-            <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
+            <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Loading run details...
             </div>

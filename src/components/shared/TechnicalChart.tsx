@@ -731,7 +731,9 @@ const TechnicalChart = forwardRef<TechnicalChartHandle, TechnicalChartProps>(
               triggerAnnotations={triggerAnnotations}
               intradayResistanceLevels={intradayResistanceLevels}
               intradaySupportLevels={intradaySupportLevels}
-              fitContentOnInit
+              fitContentOnInit={
+                activeTimeframe !== "1d" && activeTimeframe !== "1wk"
+              }
             />
             <ChartLegend
               supportResistance={supportResistance}

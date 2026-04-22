@@ -254,9 +254,21 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
     }, [onTriggerMarkerSelect]);
     // Track whether chart has been initialized at least once (for viewport)
     const hasSetInitialViewport = useRef(false);
+    // Track the last timeframe so we can detect changes and reset viewport state
+    const prevTimeframeRef = useRef<string | undefined>(undefined);
 
     const initChart = useCallback(() => {
       if (!containerRef.current || candles.length === 0) return;
+
+      // If the timeframe changed, the saved range is from a different time
+      // domain (e.g. YYYY-MM-DD strings vs unix timestamps) and is incompatible.
+      // Reset both the saved range and the initial-viewport flag so the correct
+      // default viewport for the new timeframe is applied from scratch.
+      if (prevTimeframeRef.current !== timeframe) {
+        savedRangeRef.current = null;
+        hasSetInitialViewport.current = false;
+        prevTimeframeRef.current = timeframe;
+      }
 
       // Reset legend when chart reinitializes
       onCalloutEntries?.([]);
@@ -886,6 +898,7 @@ const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       optionsContext,
       indicators,
       timeframe,
+      fitContentOnInit,
       minConfidence,
       onCalloutEntries,
       triggerAnnotations,
