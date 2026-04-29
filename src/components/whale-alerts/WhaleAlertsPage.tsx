@@ -27,6 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { SkeletonTable } from "@/components/shared/Skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useWhaleAlerts, type WhaleAlert } from "@/hooks/useApiData";
@@ -46,7 +47,7 @@ export default function WhaleAlertsPage() {
   const [newCount, setNewCount] = useState(0);
   const seenMaxIdRef = useRef<number | null>(null);
 
-  const { data, isLoading, refetch } = useWhaleAlerts({
+  const { data, isLoading, isError, refetch } = useWhaleAlerts({
     ticker: filters.ticker || undefined,
     sentiment: filters.sentiment || undefined,
     minPremium: filters.minPremium || undefined,
@@ -114,7 +115,11 @@ export default function WhaleAlertsPage() {
 
       {/* New trades notification banner */}
       {newCount > 0 && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5">
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5"
+        >
           <div className="flex items-center gap-2 text-sm text-emerald-400">
             <Zap className="h-4 w-4 shrink-0" />
             <span>
@@ -179,7 +184,7 @@ export default function WhaleAlertsPage() {
                               side="top"
                               className="max-w-60 text-xs"
                             >
-                              Trade quality score (0â€“100) based on Volume/OI
+                              Trade quality score (0–100) based on Volume/OI
                               ratio, OTM distance, premium size, expiry timing,
                               and sweep likelihood. Higher = stronger conviction
                               signal.
@@ -192,7 +197,23 @@ export default function WhaleAlertsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {alerts.length === 0 && !isLoading ? (
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="p-0">
+                        <SkeletonTable rows={8} />
+                      </TableCell>
+                    </TableRow>
+                  ) : isError ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={10}
+                        className="text-center text-destructive py-8"
+                        role="alert"
+                      >
+                        Failed to load whale alerts. Please refresh.
+                      </TableCell>
+                    </TableRow>
+                  ) : alerts.length === 0 ? (
                     <TableRow>
                       <TableCell
                         colSpan={10}
@@ -231,21 +252,21 @@ export default function WhaleAlertsPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {alert.strike ? formatCurrency(alert.strike) : "â€”"}
+                          {alert.strike ? formatCurrency(alert.strike) : "–"}
                         </TableCell>
                         <TableCell className="text-xs">
-                          {alert.expiry ?? "â€”"}
+                          {alert.expiry ?? "–"}
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          {alert.premium ? formatPremium(alert.premium) : "â€”"}
+                          {alert.premium ? formatPremium(alert.premium) : "–"}
                         </TableCell>
                         <TableCell className="text-right">
-                          {alert.volume ? formatNumber(alert.volume) : "â€”"}
+                          {alert.volume ? formatNumber(alert.volume) : "–"}
                         </TableCell>
                         <TableCell className="text-right">
                           {alert.openInterest
                             ? formatNumber(alert.openInterest)
-                            : "â€”"}
+                            : "–"}
                         </TableCell>
                         <TableCell>
                           <SentimentBadge alert={alert} />
@@ -254,14 +275,14 @@ export default function WhaleAlertsPage() {
                           {alert.qualityScore != null ? (
                             <QualityBadge score={alert.qualityScore} />
                           ) : (
-                            "â€”"
+                            "–"
                           )}
                         </TableCell>
                         <TableCell
                           className="text-xs text-muted-foreground"
                           suppressHydrationWarning
                         >
-                          {alert.detectedAt ? timeAgo(alert.detectedAt) : "â€”"}
+                          {alert.detectedAt ? timeAgo(alert.detectedAt) : "–"}
                         </TableCell>
                       </TableRow>
                     ))

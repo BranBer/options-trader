@@ -6,6 +6,7 @@ import QueryProvider from "@/components/shared/QueryProvider";
 import Navbar from "@/components/shared/Navbar";
 import { IndicatorModalProvider } from "@/components/charts/IndicatorExplainers";
 import { ToastProvider } from "@/components/shared/ToastProvider";
+import ErrorBoundary from "@/components/shared/ErrorBoundary";
 
 const analyticsSans = IBM_Plex_Sans({
   variable: "--font-analytics-sans",
@@ -52,7 +53,9 @@ export default function RootLayout({
                   id="main-content"
                   className="flex-1 container mx-auto px-4 py-6"
                 >
-                  {children}
+                  <ErrorBoundary>
+                    {children}
+                  </ErrorBoundary>
                 </main>
               </IndicatorModalProvider>
             </TooltipProvider>

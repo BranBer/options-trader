@@ -45,6 +45,7 @@ import type { ExportProgress } from "@/hooks/useExportPdf";
 
 interface WhaleDeepDiveProps {
   ticker: string;
+  autoGenerateIfMissing?: boolean;
 }
 
 /** Map Gemini indicator names to our explainer keys */
@@ -59,11 +60,15 @@ function matchIndicatorKey(name: string): string | null {
   return null;
 }
 
-export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
+export default function WhaleDeepDive({
+  ticker,
+  autoGenerateIfMissing = false,
+}: WhaleDeepDiveProps) {
   const [hoveredPatternIndex, setHoveredPatternIndex] = useState<number | null>(
     null,
   );
   const [timeframe, setTimeframe] = useState<ChartHistoryPeriod>("3mo");
+  const [autoRefreshAttempted, setAutoRefreshAttempted] = useState(false);
 
   const { data: deepDiveData, isLoading: ddLoading } = useDeepDive(ticker);
   const { data: cascadeData } = useActiveCascades();
@@ -162,6 +167,28 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
     error: refreshError,
   } = useRefreshDeepDive(ticker);
 
+  useEffect(() => {
+    if (
+      !autoGenerateIfMissing ||
+      autoRefreshAttempted ||
+      ddLoading ||
+      deepDive ||
+      isRefreshing
+    ) {
+      return;
+    }
+
+    setAutoRefreshAttempted(true);
+    refreshDeepDive();
+  }, [
+    autoGenerateIfMissing,
+    autoRefreshAttempted,
+    ddLoading,
+    deepDive,
+    isRefreshing,
+    refreshDeepDive,
+  ]);
+
   const handleExport = useCallback(() => {
     if (!deepDive) return;
     exportPdf({
@@ -191,9 +218,35 @@ export default function WhaleDeepDive({ ticker }: WhaleDeepDiveProps) {
 
   if (!deepDive) {
     return (
-      <div className="p-4 text-sm text-muted-foreground">
-        No deep dive analysis available for {ticker} yet. It will be generated
-        during the next pipeline refresh.
+      <div className="space-y-4 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Target className="h-4 w-4" />
+              Deep Dive: {ticker}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              {isRefreshing
+                ? `Generating deep dive analysis for ${ticker}...`
+                : `No deep dive analysis is stored for ${ticker} yet.`}
+            </p>
+          </div>
+          <RefreshDeepDiveButton
+            isRefreshing={isRefreshing}
+            refreshSuccess={refreshSuccess}
+            onClick={() => refreshDeepDive()}
+          />
+        </div>
+
+        {refreshError && (
+          <p className="text-xs text-red-400">Refresh failed: {refreshError.message}</p>
+        )}
+
+        <div className="rounded-md border border-dashed border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
+          {isRefreshing
+            ? "The analysis will appear here as soon as the refresh completes."
+            : "Generate the deep dive to inspect the thesis, trigger context, technical chart, options context, and risk assessment without leaving the short-squeeze page."}
+        </div>
       </div>
     );
   }

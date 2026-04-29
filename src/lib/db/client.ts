@@ -248,3 +248,52 @@ if (
 
 export const db = drizzle(sqlite, { schema });
 export { sqlite };
+
+// Epic 51 Sprint 1 — add short_volume_pct / short_volume_date to short_interest
+const shortInterestColumns = sqlite
+  .prepare("PRAGMA table_info(short_interest)")
+  .all() as Array<{ name: string }>;
+
+if (
+  shortInterestColumns.length > 0 &&
+  !shortInterestColumns.some((col) => col.name === "short_volume_pct")
+) {
+  sqlite.exec(
+    "ALTER TABLE short_interest ADD COLUMN short_volume_pct real;",
+  );
+}
+
+if (
+  shortInterestColumns.length > 0 &&
+  !shortInterestColumns.some((col) => col.name === "short_volume_date")
+) {
+  sqlite.exec(
+    "ALTER TABLE short_interest ADD COLUMN short_volume_date text;",
+  );
+}
+
+// Epic 51 Sprint 1 — add avg_volume to market_snapshots
+const marketSnapshotColumns = sqlite
+  .prepare("PRAGMA table_info(market_snapshots)")
+  .all() as Array<{ name: string }>;
+
+if (
+  marketSnapshotColumns.length > 0 &&
+  !marketSnapshotColumns.some((col) => col.name === "avg_volume")
+) {
+  sqlite.exec("ALTER TABLE market_snapshots ADD COLUMN avg_volume integer;");
+}
+
+// Epic 51 Sprint 2 — short_volume_history table
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS short_volume_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    date TEXT NOT NULL,
+    short_volume_pct REAL NOT NULL,
+    fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(ticker, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_short_volume_history_ticker
+    ON short_volume_history (ticker);
+`);

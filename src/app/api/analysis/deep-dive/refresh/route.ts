@@ -11,10 +11,24 @@ export const maxDuration = 120;
 const lastRefreshMap = new Map<string, number>();
 const COOLDOWN_MS = 60_000; // 1 minute per ticker
 
-export async function POST(req: NextRequest) {
+async function readTicker(req: NextRequest): Promise<string | null> {
+  const queryTicker = req.nextUrl.searchParams.get("ticker")?.trim().toUpperCase();
+  if (queryTicker) return queryTicker;
+
+  const contentLength = req.headers.get("content-length");
+  if (contentLength === "0") return null;
+
   try {
     const body = (await req.json()) as { ticker?: string };
-    const ticker = body.ticker?.trim().toUpperCase();
+    return body.ticker?.trim().toUpperCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const ticker = await readTicker(req);
 
     if (!ticker || ticker.length > 10) {
       return NextResponse.json(

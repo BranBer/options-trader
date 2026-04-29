@@ -8,6 +8,7 @@ import type { ShortInterestData } from "@/lib/services/market-fetcher";
 import type { CascadeContext } from "@/lib/utils/cascade-detector";
 import type { SignalScorecard } from "@/lib/utils/signal-scorecard";
 import type { TriggerReport } from "@/lib/utils/trigger-engine";
+import type { InsiderSentiment } from "@/types/insider";
 import { buildTradeAnalyzerPrompt } from "@/lib/prompts/trade-analyzer";
 
 export interface RecommendationMarketData {
@@ -48,6 +49,7 @@ export interface RecommendationMarketData {
   deepDiveSummary?: DeepDiveSummary | null;
   scorecard?: SignalScorecard | null;
   triggerReport?: TriggerReport | null;
+  insiderSentiment?: InsiderSentiment | null;
 }
 
 export function buildRecommendationPromptContext(
@@ -73,6 +75,7 @@ export function buildRecommendationPromptContext(
     marketData.deepDiveSummary,
     marketData.scorecard,
     marketData.triggerReport,
+    marketData.insiderSentiment,
   );
 }
 

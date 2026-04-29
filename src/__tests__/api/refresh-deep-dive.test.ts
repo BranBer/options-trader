@@ -29,9 +29,16 @@ import { POST } from "@/app/api/analysis/deep-dive/refresh/route";
 import { BudgetExceededError } from "@/lib/services/refresh-deep-dive";
 
 // Helper to create a mock NextRequest
-function makeRequest(body: unknown) {
+function makeRequest(body: unknown, url = "http://localhost/api/analysis/deep-dive/refresh") {
   return {
     json: async () => body,
+    nextUrl: new URL(url),
+    headers: {
+      get: (name: string) => {
+        if (name.toLowerCase() === "content-length") return body == null ? "0" : "1";
+        return null;
+      },
+    },
   } as any;
 }
 
@@ -93,6 +100,17 @@ describe("POST /api/analysis/deep-dive/refresh", () => {
   it("normalizes ticker to uppercase", async () => {
     await POST(makeRequest({ ticker: "msft" }));
     expect(mockRefreshTickerDeepDive).toHaveBeenCalledWith("MSFT");
+  });
+
+  it("accepts ticker from query string when POST body is empty", async () => {
+    const response = await POST(
+      makeRequest(
+        null,
+        "http://localhost/api/analysis/deep-dive/refresh?ticker=FLWS",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(mockRefreshTickerDeepDive).toHaveBeenCalledWith("FLWS");
   });
 
   it("rate-limits repeated calls for the same ticker", async () => {

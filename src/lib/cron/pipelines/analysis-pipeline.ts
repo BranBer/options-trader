@@ -11,7 +11,6 @@ import {
   generateDeepDive,
 } from "@/lib/services/llm-analyzer";
 import {
-  fetchMarketData,
   fetchVIX,
   fetchEarningsDate,
   getOrFetchShortInterest,
@@ -21,7 +20,6 @@ import * as progress from "@/lib/cron/pipeline-progress";
 import { buildVIXContext } from "@/lib/utils/vix-regimes";
 import { getEarningsProximity } from "@/lib/utils/earnings-proximity";
 import { getFOMCProximity } from "@/lib/utils/fomc-calendar";
-import { computeConfidenceAdjustment } from "@/lib/utils/confidence-adjuster";
 import {
   fetchInsiderTransactions,
   computeInsiderSentiment,
@@ -154,6 +152,7 @@ async function persistMarketSnapshot(
       ticker: marketData.ticker,
       price: marketData.price,
       volume: marketData.volume,
+      avgVolume: marketData.avgVolume ?? null,
       iv: ctx.atmIV ?? marketData.iv ?? null,
       ivRank: marketData.ivRank ?? null,
       dayChangePct: marketData.dayChangePct,
@@ -169,6 +168,7 @@ async function processRecommendationItems(args: {
   items: RecommendationInput[];
   contextCache: Map<string, TickerAnalysisContext>;
   deepDiveMap: Map<string, DeepDiveAnalysis>;
+  insiderSentimentMap: Map<string, InsiderSentiment>;
   macroBase: {
     vixLevel: number | null;
     vixRegime?: string;
@@ -266,6 +266,7 @@ async function processRecommendationItems(args: {
           deepDiveSummary,
           scorecard,
           triggerReport,
+          insiderSentiment: args.insiderSentimentMap.get(ticker) ?? null,
         });
 
         await persistMarketSnapshot(ctx);
@@ -667,6 +668,7 @@ export async function runAnalysisPipeline(options?: {
       items: recommendationItems,
       contextCache,
       deepDiveMap,
+      insiderSentimentMap,
       macroBase,
       sectorRotationPrompt,
       recentNexusEarnings,

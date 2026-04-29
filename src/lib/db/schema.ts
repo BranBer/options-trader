@@ -91,6 +91,7 @@ export const marketSnapshots = sqliteTable("market_snapshots", {
   realizedVol: real("realized_vol"),
   ivRvSpread: real("iv_rv_spread"),
   ivPercentileMethod: text("iv_percentile_method"),
+  avgVolume: integer("avg_volume"),
   capturedAt: text("captured_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -123,6 +124,9 @@ export const shortInterest = sqliteTable(
     squeezePressure: text("squeeze_pressure").notNull(), // 'extreme'|'high'|'moderate'|'low'
     dateShortInterest: text("date_short_interest"),
     fetchedAt: text("fetched_at").notNull(),
+    // Epic 51 Sprint 1 — FINRA daily short volume (T+1 freshness signal)
+    shortVolumePct: real("short_volume_pct"), // fraction of day's volume that was short (0-1)
+    shortVolumeDate: text("short_volume_date"), // 'YYYY-MM-DD' of the FINRA reading
   },
   (table) => [uniqueIndex("idx_short_interest_ticker").on(table.ticker)],
 );
@@ -271,5 +275,24 @@ export const marketPulseNarratives = sqliteTable(
       table.ticker,
       table.createdAt,
     ),
+  ],
+);
+
+// Epic 51 Sprint 2 — FINRA short volume history
+export const shortVolumeHistory = sqliteTable(
+  "short_volume_history",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ticker: text("ticker").notNull(),
+    date: text("date").notNull(), // YYYY-MM-DD
+    shortVolumePct: real("short_volume_pct").notNull(),
+    fetchedAt: text("fetched_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_short_volume_history_ticker_date").on(
+      table.ticker,
+      table.date,
+    ),
+    index("idx_short_volume_history_ticker").on(table.ticker),
   ],
 );

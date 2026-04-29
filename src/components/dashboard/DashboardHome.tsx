@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useNews, useWhaleAlerts, useAnalyses } from "@/hooks/useApiData";
+import { SkeletonCard } from "@/components/shared/Skeletons";
 import {
   formatPremium,
   timeAgo,
@@ -51,11 +52,11 @@ interface DashboardPipelineHealth {
 }
 
 export default function DashboardHome() {
-  const { data: newsData, isLoading: newsLoading } = useNews(5, 10);
-  const { data: whaleData, isLoading: whalesLoading } = useWhaleAlerts({
+  const { data: newsData, isLoading: newsLoading, isError: newsError } = useNews(5, 10);
+  const { data: whaleData, isLoading: whalesLoading, isError: whalesError } = useWhaleAlerts({
     limit: 10,
   });
-  const { data: analysisData, isLoading: analysisLoading } = useAnalyses(
+  const { data: analysisData, isLoading: analysisLoading, isError: analysisError } = useAnalyses(
     undefined,
     5,
   );
@@ -243,12 +244,10 @@ export default function DashboardHome() {
           <CardContent>
             <ScrollArea className="h-72">
               {whalesLoading ? (
-                <p
-                  className="text-sm text-muted-foreground"
-                  role="status"
-                  aria-live="polite"
-                >
-                  Loading recent whale alerts...
+                <SkeletonCard />
+              ) : whalesError ? (
+                <p className="text-sm text-destructive" role="alert">
+                  Failed to load whale alerts. Please refresh.
                 </p>
               ) : whales.length === 0 ? (
                 <div className="space-y-2 text-sm text-muted-foreground">
@@ -308,12 +307,10 @@ export default function DashboardHome() {
           <CardContent>
             <ScrollArea className="h-72">
               {newsLoading ? (
-                <p
-                  className="text-sm text-muted-foreground"
-                  role="status"
-                  aria-live="polite"
-                >
-                  Loading high-impact news...
+                <SkeletonCard />
+              ) : newsError ? (
+                <p className="text-sm text-destructive" role="alert">
+                  Failed to load news. Please refresh.
                 </p>
               ) : news.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
@@ -365,12 +362,10 @@ export default function DashboardHome() {
           </CardHeader>
           <CardContent>
             {analysisLoading ? (
-              <p
-                className="text-sm text-muted-foreground"
-                role="status"
-                aria-live="polite"
-              >
-                Loading AI analyses...
+              <SkeletonCard />
+            ) : analysisError ? (
+              <p className="text-sm text-destructive" role="alert">
+                Failed to load analyses. Please refresh.
               </p>
             ) : allAnalyses.length === 0 ? (
               <div className="space-y-2 text-sm text-muted-foreground">

@@ -33,6 +33,7 @@ import { IndicatorGuide } from "@/components/charts/IndicatorExplainers";
 import { InfiniteScrollTrigger } from "@/components/shared/InfiniteScrollTrigger";
 import { VirtualizedAnalysisList } from "@/components/shared/VirtualizedAnalysisList";
 import { ConfidenceBreakdownPanel } from "@/components/shared/ConfidenceBreakdownPanel";
+import { SkeletonCard } from "@/components/shared/Skeletons";
 import {
   ChevronDown,
   ChevronUp,
@@ -51,6 +52,7 @@ export default function AnalysisPage() {
   const {
     data: xrefData,
     isLoading: xrefLoading,
+    isError: xrefError,
     hasNextPage: xrefHasMore,
     isFetchingNextPage: xrefFetchingNext,
     fetchNextPage: xrefFetchNext,
@@ -58,6 +60,7 @@ export default function AnalysisPage() {
   const {
     data: recData,
     isLoading: recLoading,
+    isError: recError,
     hasNextPage: recHasMore,
     isFetchingNextPage: recFetchingNext,
     fetchNextPage: recFetchNext,
@@ -109,12 +112,10 @@ export default function AnalysisPage() {
 
         <TabsContent value="correlations" className="mt-4">
           {xrefLoading ? (
-            <p
-              className="text-sm text-muted-foreground"
-              role="status"
-              aria-live="polite"
-            >
-              Loading cross-reference analyses...
+            <SkeletonCard />
+          ) : xrefError ? (
+            <p className="text-sm text-destructive" role="alert">
+              Failed to load analyses. Please refresh.
             </p>
           ) : crossRefs.length === 0 ? (
             <EmptyState message="No cross-reference analyses yet. Run a pipeline refresh with enough news & whale data." />
@@ -137,12 +138,10 @@ export default function AnalysisPage() {
 
         <TabsContent value="recommendations" className="mt-4">
           {recLoading ? (
-            <p
-              className="text-sm text-muted-foreground"
-              role="status"
-              aria-live="polite"
-            >
-              Loading trade recommendations...
+            <SkeletonCard />
+          ) : recError ? (
+            <p className="text-sm text-destructive" role="alert">
+              Failed to load recommendations. Please refresh.
             </p>
           ) : recommendations.length === 0 ? (
             <EmptyState message="No trade recommendations yet. Run a pipeline refresh to generate them." />

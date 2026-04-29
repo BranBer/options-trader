@@ -11,8 +11,11 @@ import {
   type SectorPerformance,
 } from "@/lib/utils/sector-rotation";
 import { db } from "@/lib/db/client";
-import { shortInterest as shortInterestTable } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import {
+  shortInterest as shortInterestTable,
+  shortVolumeHistory,
+} from "@/lib/db/schema";
+import { eq, desc, and } from "drizzle-orm";
 
 // yahoo-finance2 v3 class API — types export `never` but methods exist at runtime
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -138,6 +141,7 @@ export async function fetchMarketData(
           ticker: q.symbol,
           price: q.regularMarketPrice ?? 0,
           volume: q.regularMarketVolume ?? 0,
+          avgVolume: q.averageDailyVolume3Month ?? undefined,
           dayChangePct: q.regularMarketChangePercent ?? 0,
         });
       }
@@ -511,6 +515,16 @@ export interface ShortInterestData {
   squeezePressure: "extreme" | "high" | "moderate" | "low";
 }
 
+const shortInterestMissCache = new Map<string, number>();
+
+function isExpectedMissingShortInterestError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("quote not found for symbol") ||
+    message.includes("no fundamentals data found for symbol")
+  );
+}
+
 /**
  * Fetch short interest data for a ticker using yahoo-finance2 defaultKeyStatistics.
  * Returns null if the data is unavailable or the fetch fails.
@@ -545,6 +559,12 @@ export async function fetchShortInterest(
       squeezePressure,
     };
   } catch (err) {
+    if (isExpectedMissingShortInterestError(err)) {
+      console.info(
+        `[market-fetcher] Short interest unavailable for ${ticker}; suppressing retries temporarily.`,
+      );
+      return null;
+    }
     console.warn(
       `[market-fetcher] Short interest fetch failed for ${ticker}:`,
       err,
@@ -554,6 +574,7 @@ export async function fetchShortInterest(
 }
 
 const SHORT_INTEREST_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SHORT_INTEREST_MISS_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 /**
  * Returns cached short interest data for a ticker if fresher than 24 hours,
@@ -563,6 +584,11 @@ const SHORT_INTEREST_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 export async function getOrFetchShortInterest(
   ticker: string,
 ): Promise<ShortInterestData | null> {
+  const missExpiresAt = shortInterestMissCache.get(ticker);
+  if (missExpiresAt && Date.now() < missExpiresAt) {
+    return null;
+  }
+
   const cached = await db
     .select()
     .from(shortInterestTable)
@@ -591,6 +617,7 @@ export async function getOrFetchShortInterest(
   const fresh = await fetchShortInterest(ticker);
 
   if (fresh) {
+    shortInterestMissCache.delete(ticker);
     const fetchedAt = new Date().toISOString();
     await db
       .insert(shortInterestTable)
@@ -621,6 +648,8 @@ export async function getOrFetchShortInterest(
     return fresh;
   }
 
+  shortInterestMissCache.set(ticker, Date.now() + SHORT_INTEREST_MISS_TTL_MS);
+
   // Fetch failed — return stale cache if available
   if (row) {
     console.warn(
@@ -640,4 +669,302 @@ export async function getOrFetchShortInterest(
   }
 
   return null;
+}
+
+// ---------- FINRA Daily Short Volume (Epic 51 Sprint 1) ----------
+
+export interface FinraShortVolumeData {
+  ticker: string;
+  shortVolumePct: number; // 0-1, fraction of day's volume that was short-side
+  shortVolumeDate: string; // YYYY-MM-DD
+}
+
+/**
+ * Fetch daily short sale volume from FINRA's public CDN (no API key required).
+ * FINRA publishes T+1 consolidated short volume data aggregating all major venues.
+ *
+ * URL pattern: https://cdn.finra.org/equity/short_sale/CNMSshvol{YYYYMMDD}.txt
+ * Format (pipe-delimited): Symbol|ShortVolume|ShortExemptVolume|TotalVolume|Market
+ *
+ * Returns null on network failure or if the ticker is not found in the file.
+ */
+export async function fetchFinraShortVolume(
+  ticker: string,
+): Promise<FinraShortVolumeData | null> {
+  // Build last 5 trading-day date strings (skip weekends)
+  const candidates: string[] = [];
+  const now = new Date();
+  for (let offset = 1; offset <= 10 && candidates.length < 5; offset++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - offset);
+    const day = d.getDay();
+    if (day === 0 || day === 6) continue;
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    candidates.push(`${yyyy}${mm}${dd}`);
+  }
+
+  let mostRecent: FinraShortVolumeData | null = null;
+
+  for (const dateStr of candidates) {
+    const isoDate = `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+
+    // Check if we already have this day in history
+    const existing = await db
+      .select()
+      .from(shortVolumeHistory)
+      .where(
+        and(
+          eq(shortVolumeHistory.ticker, ticker.toUpperCase()),
+          eq(shortVolumeHistory.date, isoDate),
+        ),
+      )
+      .limit(1);
+
+    if (existing.length > 0) {
+      if (!mostRecent) {
+        mostRecent = {
+          ticker,
+          shortVolumePct: existing[0].shortVolumePct,
+          shortVolumeDate: existing[0].date,
+        };
+      }
+      continue;
+    }
+
+    const url = `https://cdn.finra.org/equity/short_sale/CNMSshvol${dateStr}.txt`;
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: { "User-Agent": "options-dashboard/1.0" },
+      });
+      if (!res.ok) continue;
+
+      const text = await res.text();
+      const upperTicker = ticker.toUpperCase();
+
+      let shortVol = 0;
+      let totalVol = 0;
+
+      for (const line of text.split("\n")) {
+        const parts = line.trim().split("|");
+        if (parts.length < 4) continue;
+        if (parts[0].toUpperCase() !== upperTicker) continue;
+        const sv = parseInt(parts[1], 10);
+        const tv = parseInt(parts[3], 10);
+        if (!isNaN(sv)) shortVol += sv;
+        if (!isNaN(tv)) totalVol += tv;
+      }
+
+      if (totalVol === 0) continue;
+
+      const pct = shortVol / totalVol;
+      console.log(
+        `[market-fetcher] FINRA short vol for ${ticker} on ${isoDate}: ${shortVol}/${totalVol} = ${(pct * 100).toFixed(1)}%`,
+      );
+
+      // Persist to history table (upsert on conflict)
+      await db
+        .insert(shortVolumeHistory)
+        .values({
+          ticker: upperTicker,
+          date: isoDate,
+          shortVolumePct: pct,
+        })
+        .onConflictDoNothing();
+
+      if (!mostRecent) {
+        mostRecent = { ticker, shortVolumePct: pct, shortVolumeDate: isoDate };
+      }
+    } catch (err) {
+      console.warn(
+        `[market-fetcher] FINRA short vol fetch failed for date ${dateStr}:`,
+        err,
+      );
+    }
+  }
+
+  return mostRecent;
+}
+
+const SHORT_VOLUME_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours (FINRA updates T+1)
+
+/**
+ * Returns cached FINRA short volume for a ticker if fresh, otherwise fetches
+ * from FINRA CDN and persists to the short_interest row's new columns.
+ * Returns null if the ticker has no short_interest row yet or FINRA fetch fails.
+ */
+export async function getOrFetchFinraShortVolume(
+  ticker: string,
+): Promise<FinraShortVolumeData | null> {
+  const cached = await db
+    .select()
+    .from(shortInterestTable)
+    .where(eq(shortInterestTable.ticker, ticker))
+    .limit(1);
+
+  const row = cached[0] ?? null;
+
+  // Use cached FINRA data if it was fetched today
+  if (row?.shortVolumeDate) {
+    const today = new Date().toISOString().split("T")[0];
+    if (row.shortVolumeDate === today && row.shortVolumePct != null) {
+      return {
+        ticker,
+        shortVolumePct: row.shortVolumePct,
+        shortVolumeDate: row.shortVolumeDate,
+      };
+    }
+    // Also accept yesterday's data if fetched within TTL
+    const age = Date.now() - new Date(row.fetchedAt).getTime();
+    if (age < SHORT_VOLUME_TTL_MS && row.shortVolumePct != null) {
+      return {
+        ticker,
+        shortVolumePct: row.shortVolumePct,
+        shortVolumeDate: row.shortVolumeDate,
+      };
+    }
+  }
+
+  const fresh = await fetchFinraShortVolume(ticker);
+  if (!fresh) return null;
+
+  // Persist into existing short_interest row if it exists
+  if (row) {
+    await db
+      .update(shortInterestTable)
+      .set({
+        shortVolumePct: fresh.shortVolumePct,
+        shortVolumeDate: fresh.shortVolumeDate,
+      })
+      .where(eq(shortInterestTable.ticker, ticker));
+  }
+
+  return fresh;
+}
+
+/**
+ * S51-1: Batch fetch short interest for all tracked tickers.
+ * Calls getOrFetchShortInterest() for each and returns a map of
+ * ticker → ShortInterestData. Tickers that fail are omitted from the map.
+ */
+export async function fetchAllTrackedSI(
+  tickers: string[],
+): Promise<Map<string, ShortInterestData>> {
+  const result = new Map<string, ShortInterestData>();
+  for (const ticker of tickers) {
+    const si = await getOrFetchShortInterest(ticker);
+    if (si) result.set(ticker, si);
+  }
+  console.log(
+    `[market-fetcher] fetchAllTrackedSI: ${result.size}/${tickers.length} tickers resolved`,
+  );
+  return result;
+}
+
+/**
+ * S51-20: Returns up to `days` rows of short volume history for a ticker,
+ * ordered oldest-first (for trend computation).
+ */
+export async function getShortVolumeHistory(
+  ticker: string,
+  days: number = 5,
+): Promise<{ date: string; shortVolumePct: number }[]> {
+  const rows = await db
+    .select({ date: shortVolumeHistory.date, shortVolumePct: shortVolumeHistory.shortVolumePct })
+    .from(shortVolumeHistory)
+    .where(eq(shortVolumeHistory.ticker, ticker.toUpperCase()))
+    .orderBy(desc(shortVolumeHistory.date))
+    .limit(days);
+
+  // Return oldest-first for slope computation
+  return rows.reverse();
+}
+
+// ---------- Squeeze Universe (Epic 51 expansion) ----------
+
+interface SqueezeUniverseResult {
+  /** Deduplicated tickers from screeners + seed list */
+  tickers: string[];
+  /** Volume data extracted from screener response (avoids extra DB round-trips) */
+  volumeData: Map<string, { volume: number | null; avgVolume: number | null }>;
+}
+
+// 1-hour in-memory cache so we don't hit Yahoo screener on every request
+let _squeezeUniverseCache: { result: SqueezeUniverseResult; expiresAt: number } | null = null;
+
+/**
+ * Returns a broad universe of squeeze candidates by combining:
+ *  1. Yahoo Finance "most_shorted_stocks" screener (up to 100 tickers)
+ *  2. Yahoo Finance "aggressive_small_caps" screener (up to 50 tickers)
+ *  3. A curated seed list of perennially high-SI stocks
+ *
+ * Cached in-memory for 1 hour. Volume data (regularMarketVolume /
+ * averageDailyVolume3Month) is extracted from the screener response and
+ * returned alongside the ticker list so the caller can compute volume-spike
+ * ratios without additional DB queries.
+ */
+export async function fetchSqueezeUniverse(): Promise<SqueezeUniverseResult> {
+  if (_squeezeUniverseCache && Date.now() < _squeezeUniverseCache.expiresAt) {
+    return _squeezeUniverseCache.result;
+  }
+
+  const tickerSet = new Set<string>();
+  const volumeData = new Map<string, { volume: number | null; avgVolume: number | null }>();
+
+  function absorb(quotes: Array<{ symbol?: string; quoteType?: string; regularMarketVolume?: number; averageDailyVolume3Month?: number }>) {
+    for (const q of quotes) {
+      if (!q.symbol || q.quoteType !== "EQUITY") continue;
+      const sym = q.symbol.toUpperCase();
+      tickerSet.add(sym);
+      if (!volumeData.has(sym)) {
+        volumeData.set(sym, {
+          volume: q.regularMarketVolume ?? null,
+          avgVolume: q.averageDailyVolume3Month ?? null,
+        });
+      }
+    }
+  }
+
+  // Most-shorted (primary universe — sorted by SI% of float by Yahoo)
+  try {
+    const r = await (yf as any).screener({ scrIds: "most_shorted_stocks", count: 100 });
+    absorb(r?.quotes ?? []);
+    console.log(`[market-fetcher] most_shorted_stocks screener: ${r?.quotes?.length ?? 0} tickers`);
+  } catch (err) {
+    console.warn("[market-fetcher] most_shorted_stocks screener failed:", err);
+  }
+
+  // Aggressive small-caps — volatile float, high squeeze velocity potential
+  try {
+    const r = await (yf as any).screener({ scrIds: "aggressive_small_caps", count: 50 });
+    absorb(r?.quotes ?? []);
+    console.log(`[market-fetcher] aggressive_small_caps screener: ${r?.quotes?.length ?? 0} tickers`);
+  } catch (err) {
+    console.warn("[market-fetcher] aggressive_small_caps screener failed:", err);
+  }
+
+  // Curated seed list — perennially high-SI names that may drop off Yahoo's
+  // dynamic screener on quiet days but remain structurally squeeze-prone
+  const SQUEEZE_SEEDS = [
+    "GME", "AMC", "MSTR", "BYND", "UPST", "SOFI", "HOOD", "RIVN", "LCID",
+    "CVNA", "SIRI", "HIMS", "IONQ", "RKLB", "BBAI", "SPCE",
+    "CLOV", "WKHS", "OPEN", "OFED", "BBIG", "ATER", "CXAI", "FFIE",
+    "SPGX", "BNED", "TPVG", "NEWT", "SHIP", "SNDL", "TLRY", "AFRM",
+    "DKNG", "CHWY", "PLTR", "COIN", "SNAP", "RBLX", "UBER", "LYFT",
+  ];
+  for (const sym of SQUEEZE_SEEDS) {
+    tickerSet.add(sym);
+    if (!volumeData.has(sym)) volumeData.set(sym, { volume: null, avgVolume: null });
+  }
+
+  const result: SqueezeUniverseResult = {
+    tickers: Array.from(tickerSet),
+    volumeData,
+  };
+
+  _squeezeUniverseCache = { result, expiresAt: Date.now() + 60 * 60 * 1000 };
+  console.log(`[market-fetcher] squeeze universe: ${result.tickers.length} total tickers`);
+  return result;
 }

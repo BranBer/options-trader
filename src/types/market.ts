@@ -5,6 +5,7 @@ export const marketSnapshotSchema = z.object({
   ticker: z.string(),
   price: z.number(),
   volume: z.number().int(),
+  avgVolume: z.number().int().optional(),
   iv: z.number().optional(),
   ivRank: z.number().optional(),
   dayChangePct: z.number(),
@@ -92,6 +93,7 @@ export interface MarketSnapshotRow {
   ticker: string;
   price: number | null;
   volume: number | null;
+  avgVolume: number | null;
   iv: number | null;
   ivRank: number | null;
   dayChangePct: number | null;

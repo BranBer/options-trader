@@ -339,19 +339,19 @@ export default function GlobePage() {
           />
         )}
 
-      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+      <div className="flex items-center gap-4 text-xs text-muted-foreground" role="img" aria-label="Impact level color legend">
         <span>Impact:</span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-cyan-400" /> High (8-10)
+          <span className="w-3 h-3 rounded-full bg-cyan-400" aria-hidden="true" /> High (8–10)
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-blue-500" /> Medium (6-7)
+          <span className="w-2.5 h-2.5 rounded-full bg-blue-500" aria-hidden="true" /> Medium (6–7)
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-indigo-500" /> Low (4-5)
+          <span className="w-2 h-2 rounded-full bg-indigo-500" aria-hidden="true" /> Low (4–5)
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-violet-500" /> Minimal (1-3)
+          <span className="w-1.5 h-1.5 rounded-full bg-violet-500" aria-hidden="true" /> Minimal (1–3)
         </span>
       </div>
     </div>

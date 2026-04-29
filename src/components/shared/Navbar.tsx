@@ -17,6 +17,7 @@ import {
   Circle,
   AlertTriangle,
   Cpu,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +61,7 @@ const navLinks = [
   { href: "/tech-globe", label: "Tech Globe", icon: Cpu },
   { href: "/analysis", label: "Analysis", icon: BarChart3 },
   { href: "/market-pulse", label: "Market Pulse", icon: Radar },
+  { href: "/short-squeeze", label: "Squeeze Scan", icon: Zap },
 ];
 
 function NavItems({

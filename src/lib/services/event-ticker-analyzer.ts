@@ -462,6 +462,7 @@ async function persistEventTickerAnalysis(args: {
       ticker: marketSnapshot.ticker,
       price: marketSnapshot.price,
       volume: marketSnapshot.volume,
+      avgVolume: marketSnapshot.avgVolume ?? null,
       iv: marketSnapshot.iv ?? null,
       ivRank: marketSnapshot.ivRank ?? null,
       dayChangePct: marketSnapshot.dayChangePct,

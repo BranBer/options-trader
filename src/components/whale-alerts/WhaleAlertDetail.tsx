@@ -365,7 +365,7 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   Trade Quality Score
-                  <InfoTip text="A 0â€“100 composite score measuring the conviction behind this trade. Factors in volume/OI ratio, how far out-of-the-money the strike is, premium size, time to expiration, and sweep likelihood." />
+                  <InfoTip text="A 0–100 composite score measuring the conviction behind this trade. Factors in volume/OI ratio, how far out-of-the-money the strike is, premium size, time to expiration, and sweep likelihood." />
                 </span>
                 <span
                   className={`text-sm font-bold ${
@@ -386,10 +386,10 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
               />
               <p className="text-xs text-muted-foreground">
                 {alert.qualityScore >= 70
-                  ? "High conviction â€” strong signals across multiple factors"
+                  ? "High conviction – strong signals across multiple factors"
                   : alert.qualityScore >= 40
-                    ? "Moderate conviction â€” some positive signals detected"
-                    : "Low conviction â€” may be hedging or routine activity"}
+                    ? "Moderate conviction – some positive signals detected"
+                    : "Low conviction – may be hedging or routine activity"}
               </p>
             </div>
           </>
@@ -438,7 +438,7 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
               <InfoTip text="The price at which the option holder can buy (call) or sell (put) the underlying stock. Compared to the current stock price, this tells you how aggressive the bet is." />
             </p>
             <p className="font-medium">
-              {alert.strike ? formatCurrency(alert.strike) : "â€”"}
+              {alert.strike ? formatCurrency(alert.strike) : "–"}
               {otmPct != null && (
                 <span
                   className={`ml-1 text-xs ${
@@ -453,10 +453,10 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
           <div>
             <p className="text-muted-foreground text-xs flex items-center gap-1">
               Expiry
-              <InfoTip text="When the option contract expires. Shorter timeframes (under 7 days) suggest higher conviction â€” traders are paying for a quick directional bet." />
+              <InfoTip text="When the option contract expires. Shorter timeframes (under 7 days) suggest higher conviction – traders are paying for a quick directional bet." />
             </p>
             <p className="font-medium">
-              {alert.expiry ?? "â€”"}
+              {alert.expiry ?? "–"}
               {dte != null && (
                 <span
                   className={`ml-1 text-xs ${
@@ -474,7 +474,7 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
               <InfoTip text="Total dollar amount spent on this options trade. Large premiums ($100K+) indicate institutional-level bets, not retail traders." />
             </p>
             <p className="font-medium">
-              {alert.premium ? formatPremium(alert.premium) : "â€”"}
+              {alert.premium ? formatPremium(alert.premium) : "–"}
             </p>
           </div>
           <div>
@@ -483,7 +483,7 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
               <InfoTip text="Number of contracts traded today. High volume relative to open interest suggests new positioning rather than closing existing trades." />
             </p>
             <p className="font-medium">
-              {alert.volume ? formatNumber(alert.volume) : "â€”"}
+              {alert.volume ? formatNumber(alert.volume) : "–"}
             </p>
           </div>
           <div>
@@ -492,13 +492,13 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
               <InfoTip text="Total number of outstanding contracts for this strike/expiry. This represents existing positions that haven't been closed yet." />
             </p>
             <p className="font-medium">
-              {alert.openInterest ? formatNumber(alert.openInterest) : "â€”"}
+              {alert.openInterest ? formatNumber(alert.openInterest) : "–"}
             </p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs flex items-center gap-1">
               Vol/OI Ratio
-              <InfoTip text="Volume divided by Open Interest. A ratio above 1.0 means today's trading exceeded all existing positions â€” a strong signal of new money entering. Above 3.0 is very aggressive." />
+              <InfoTip text="Volume divided by Open Interest. A ratio above 1.0 means today's trading exceeded all existing positions – a strong signal of new money entering. Above 3.0 is very aggressive." />
             </p>
             <p className="font-medium">
               {volOiRatio ? (
@@ -514,7 +514,7 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
                   {volOiRatio}x
                 </span>
               ) : (
-                "â€”"
+                "–"
               )}
             </p>
           </div>
@@ -529,13 +529,13 @@ export default function WhaleAlertDetail({ alert, onClose }: Props) {
             <p className="font-medium">
               {alert.underlyingPrice
                 ? formatCurrency(alert.underlyingPrice)
-                : "â€”"}
+                : "–"}
             </p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs">Current Price</p>
             <p className="font-medium">
-              {alert.currentPrice ? formatCurrency(alert.currentPrice) : "â€”"}
+              {alert.currentPrice ? formatCurrency(alert.currentPrice) : "–"}
               {alert.dayChangePct != null && (
                 <span
                   className={`ml-1 text-xs ${

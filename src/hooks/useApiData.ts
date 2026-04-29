@@ -107,6 +107,7 @@ export function useNews(
 ) {
   return useQuery<{ events: NewsEvent[]; count: number }>({
     queryKey: ["news", minImpact, limit, category],
+    staleTime: 2 * 60 * 1000, // 2 minutes
     queryFn: async () => {
       const sp = new URLSearchParams({
         minImpact: String(minImpact),
@@ -137,6 +138,7 @@ export function useWhaleAlerts(params?: {
 
   return useQuery<{ alerts: WhaleAlert[]; marketPulse: MarketPulse }>({
     queryKey: ["whaleAlerts", queryParams],
+    staleTime: 60 * 1000, // 1 minute — matches the 60s refetchInterval on the alerts page
     queryFn: async () => {
       const res = await fetch(`/api/whales?${sp.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch whale alerts");
@@ -153,6 +155,7 @@ export function useAnalyses(type?: string, limit = 20) {
 
   return useQuery<{ analyses: Analysis[] }>({
     queryKey: ["analyses", type, limit],
+    staleTime: 5 * 60 * 1000, // 5 minutes — analyses change only when pipeline runs
     queryFn: async () => {
       const res = await fetch(`/api/analysis?${sp.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch analyses");
@@ -335,3 +338,42 @@ export function useActiveCascades() {
     refetchInterval: 10 * 60 * 1000, // auto-refresh every 10 min
   });
 }
+
+// ---- Epic 51 — Short Squeeze ----
+
+import type { SqueezeRankingEntry } from "@/types/squeeze";
+
+export interface SqueezeDataResponse {
+  tickers: SqueezeRankingEntry[];
+  generatedAt: string;
+  count: number;
+  /** Total tickers scanned before filtering to those with SI data */
+  universeSize?: number;
+}
+
+export function useSqueezeData(refresh = false) {
+  const queryClient = useQueryClient();
+
+  const query = useQuery<SqueezeDataResponse>({
+    queryKey: ["shortSqueeze", refresh],
+    queryFn: async () => {
+      const url = refresh
+        ? "/api/short-squeeze?refresh=true"
+        : "/api/short-squeeze";
+      const res = await fetch(url);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Squeeze scan failed (${res.status})`);
+      }
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000, // 5 min
+    refetchInterval: 5 * 60 * 1000,
+  });
+
+  const refresh$ = () =>
+    queryClient.invalidateQueries({ queryKey: ["shortSqueeze"] });
+
+  return { ...query, refresh: refresh$ };
+}
+

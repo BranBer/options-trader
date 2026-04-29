@@ -2,6 +2,7 @@ import type { IndicatorPatternReport } from "@/lib/utils/indicator-patterns";
 import type { ShortInterestData } from "@/lib/services/market-fetcher";
 import type { CascadeContext } from "@/lib/utils/cascade-detector";
 import type { DeepDiveSummary } from "@/types/analysis";
+import type { InsiderSentiment } from "@/types/insider";
 import {
   type SignalScorecard,
   formatScorecardForPrompt,
@@ -105,6 +106,7 @@ export function buildTradeAnalyzerPrompt(
   deepDiveSummary?: DeepDiveSummary | null,
   scorecard?: SignalScorecard | null,
   triggerReport?: TriggerReport | null,
+  insiderSentiment?: InsiderSentiment | null,
 ): string {
   const todayStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/New_York",
@@ -341,6 +343,26 @@ Market Data for ${ticker}:
     const triggerBlock = formatTriggerReportForPrompt(triggerReport);
     if (triggerBlock) {
       prompt += `\n\n${triggerBlock}`;
+    }
+  }
+
+  if (insiderSentiment) {
+    const ins = insiderSentiment;
+    const totalTxns = ins.buyCount + ins.sellCount;
+    if (totalTxns > 0) {
+      const buyPct = Math.round((ins.buyCount / totalTxns) * 100);
+      const netValueStr =
+        ins.buyValue - ins.sellValue >= 0
+          ? `+$${((ins.buyValue - ins.sellValue) / 1e6).toFixed(2)}M net buying`
+          : `-$${((ins.sellValue - ins.buyValue) / 1e6).toFixed(2)}M net selling`;
+      prompt += `\n\nInsider Activity (last ${ins.periodDays} days): ${ins.sentiment.toUpperCase()}`;
+      prompt += `\n- Transactions: ${ins.buyCount} buys / ${ins.sellCount} sells (${buyPct}% buy ratio)`;
+      prompt += `\n- Net Flow: ${netValueStr}`;
+      if (ins.sentiment === "bullish") {
+        prompt += `\n- Signal: Insiders buying their own stock is a strong conviction signal — they rarely buy unless they expect price appreciation. Corroborates any bullish thesis.`;
+      } else if (ins.sentiment === "bearish") {
+        prompt += `\n- Signal: Net insider selling — may indicate executives distributing shares. Consider as a headwind against bullish setups. Note: insider selling is less definitive than buying (can be estate planning, diversification, etc.).`;
+      }
     }
   }
 

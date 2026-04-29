@@ -87,7 +87,9 @@ ${JSON.stringify(eventPayload, null, 2)}
 Catalyst correlations:
 ${JSON.stringify(correlationPayload, null, 2)}
 
-Summarize the evolution of control, identify whether the market is trending, consolidating, or transitioning, and explain what changed since the prior narrative.`;
+Summarize the evolution of control, identify whether the market is trending, consolidating, or transitioning, and explain what changed since the prior narrative.
+
+Required output fields: current_control ("buyers"|"sellers"|"neutral"), control_strength (1-10), narrative_summary, market_phase ("trend"|"consolidation"|"transition"), expected_behavior ("continuation"|"range"|"reversal_risk"), key_conflicts (array), confidence_in_assessment (0.0-1.0). All fields are mandatory.`;  
 }
 
 export { marketPulseNarrativeResponseSchema as marketPulseSynthesizerZodSchema };

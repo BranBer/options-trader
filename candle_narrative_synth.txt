@@ -13,8 +13,11 @@ Focus on:
 Do NOT repeat events.
 Summarize the evolution.
 
-Output:
-- current_control
-- narrative_summary (3–5 sentences)
+Output (ALL fields are required):
+- current_control: "buyers" | "sellers" | "neutral"  (use exactly one of these three strings)
+- control_strength: integer 1–10  (how strongly the controlling side dominates)
+- narrative_summary: string, 3–5 sentences summarising the evolution of control
 - market_phase: "trend" | "consolidation" | "transition"
 - expected_behavior: "continuation" | "range" | "reversal_risk"
+- key_conflicts: array of strings (empty array [] if none)
+- confidence_in_assessment: float 0.0–1.0

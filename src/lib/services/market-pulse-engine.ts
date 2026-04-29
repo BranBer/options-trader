@@ -308,8 +308,8 @@ function buildFallbackNarrative(
   let sellerSignals = 0;
   for (const c of classifications) {
     const ev = c.event.toLowerCase();
-    const cls = c.classification as Record<string, string> | undefined;
-    const control = cls?.control?.toLowerCase() ?? "";
+    const cls = c.classification as unknown as Record<string, unknown> | undefined;
+    const control = (cls?.control as string | undefined)?.toLowerCase() ?? "";
     if (
       control.includes("buyer") ||
       ev.includes("buyer") ||
@@ -348,8 +348,8 @@ function buildFallbackNarrative(
   // Derive phase from structure_state distribution
   const structureCounts: Record<string, number> = {};
   for (const c of classifications) {
-    const cls = c.classification as Record<string, string> | undefined;
-    const state = cls?.structure_state ?? "consolidation";
+    const cls = c.classification as unknown as Record<string, unknown> | undefined;
+    const state = (cls?.structure_state as string | undefined) ?? "consolidation";
     structureCounts[state] = (structureCounts[state] ?? 0) + 1;
   }
   const topStructure = Object.entries(structureCounts).sort(
