@@ -27,13 +27,25 @@ export function formatNumber(value: number): string {
 }
 
 /**
+ * Parse a timestamp from the DB or an API. SQLite's CURRENT_TIMESTAMP writes UTC with no zone
+ * ("2026-09-27 04:53:20"), which `new Date()` would read as local time — hours off outside UTC.
+ */
+export function parseDbTime(value: string): Date {
+  return new Date(
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value)
+      ? `${value.replace(" ", "T")}Z`
+      : value,
+  );
+}
+
+/**
  * Format ISO timestamp to relative time: "2m ago", "1h ago", "3d ago".
  * NOTE: This uses Date.now() so the result is non-deterministic.
  * When used in SSR-rendered JSX, wrap the output element with
  * suppressHydrationWarning to avoid server/client mismatch.
  */
 export function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  const diff = Date.now() - parseDbTime(iso).getTime();
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
@@ -47,7 +59,7 @@ export function timeAgo(iso: string): string {
  * Format ISO timestamp to short date/time.
  */
 export function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("en-US", {
+  return parseDbTime(iso).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",

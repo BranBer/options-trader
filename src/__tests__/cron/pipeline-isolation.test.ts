@@ -43,6 +43,17 @@ vi.mock("@/lib/services/nexus-earnings-cache", () => ({
     mockRefreshNexusEarnings(...args),
 }));
 
+vi.mock("@/lib/desk/run-desk", () => ({
+  runDesk: vi.fn().mockResolvedValue({
+    startedAt: "2026-04-02T12:00:00.000Z",
+    completedAt: "2026-04-02T12:00:01.000Z",
+    opened: 0,
+    marked: 0,
+    closed: 0,
+    errors: [],
+  }),
+}));
+
 vi.mock("node-cron", () => ({
   default: { schedule: (...args: unknown[]) => mockCronSchedule(...args) },
 }));
@@ -157,7 +168,9 @@ describe("Story 17.1 — Per-Stage Try/Catch Isolation", () => {
   it("warms nexus earnings cache on scheduler startup", async () => {
     startScheduler();
 
-    expect(mockCronSchedule).toHaveBeenCalledTimes(3);
+    // 10-min pipeline, daily calendar refresh, 2h nexus earnings refresh,
+    // (Story S4) daily Jev judgment scoring, and (Story S6) the daily desk run.
+    expect(mockCronSchedule).toHaveBeenCalledTimes(5);
     expect(mockRefreshNexusEarnings).toHaveBeenCalledTimes(1);
   });
 });

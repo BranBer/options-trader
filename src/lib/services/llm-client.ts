@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { callClaudeCli, ClaudeCliError } from "./claude-cli";
 
 const DEFAULT_OPEN_ROUTER_MODEL = "moonshotai/kimi-k2.5";
 // Ordered fallback chain for both empty-response and rate-limit recovery.
@@ -21,6 +22,68 @@ interface TokenUsageRecord {
 
 const tokenUsageLog: TokenUsageRecord[] = [];
 const MAX_TOKEN_LOG_SIZE = 200;
+
+// ---------------------------------------------------------------------------
+// Claude-first routing (Story S3)
+// ---------------------------------------------------------------------------
+// Primary provider: env LLM_PRIMARY ("claude" | "openrouter"), default
+// "claude" — EXCEPT default "openrouter" under vitest (process.env.VITEST)
+// so no existing test suite ever spawns the real Claude CLI.
+const CLAUDE_USAGE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
+const CLAUDE_AUTH_COOLDOWN_MS = 60 * 60 * 1000;
+
+let claudeCooldownUntil = 0;
+let lastClaudeError: string | null = null;
+
+// The Max plan's limits are shared with the owner's interactive Claude Code sessions; a 10-minute pipeline
+// left unrationed could spend them and lock those sessions out for hours. Calls past the hourly cap go to
+// OpenRouter until the window rolls.
+const claudeCallTimes: number[] = [];
+function getClaudeHourlyCap(): number {
+  const cap = Number(process.env.CLAUDE_MAX_CALLS_PER_HOUR);
+  return Number.isFinite(cap) && cap >= 0 ? cap : 30;
+}
+// Bulk labelling (20 headlines or a day of candles per call, ~10k output tokens) took ~2.5 min per call on Claude,
+// stretching the 10-minute pipeline past 25 minutes and spending the hourly budget before the reasoning calls ran.
+// Those call types stay on OpenRouter unless CLAUDE_SKIP_CALL_TYPES says otherwise ("" = everything on Claude).
+function getClaudeSkipCallTypes(): Set<string> {
+  const raw = process.env.CLAUDE_SKIP_CALL_TYPES ?? "classifyNews,marketPulseClassify";
+  return new Set(raw.split(",").map((t) => t.trim()).filter(Boolean));
+}
+function claudeCallsLastHour(): number {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  while (claudeCallTimes.length && claudeCallTimes[0] < cutoff) claudeCallTimes.shift();
+  return claudeCallTimes.length;
+}
+
+function getLlmPrimary(): "claude" | "openrouter" {
+  const configured = process.env.LLM_PRIMARY;
+  if (configured === "claude" || configured === "openrouter") return configured;
+  return process.env.VITEST ? "openrouter" : "claude";
+}
+
+export function getClaudeModel(): string {
+  return process.env.CLAUDE_MODEL ?? "sonnet";
+}
+
+/** Diagnostic snapshot of the Claude/OpenRouter routing state. */
+export function getLlmRoutingStatus(): {
+  primary: "claude" | "openrouter";
+  claudeModel: string;
+  claudeCooldownUntil: number;
+  lastClaudeError: string | null;
+  claudeCallsLastHour: number;
+  claudeHourlyCap: number;
+} {
+  return {
+    primary: getLlmPrimary(),
+    claudeModel: getClaudeModel(),
+    claudeCooldownUntil,
+    lastClaudeError,
+    claudeCallsLastHour: claudeCallsLastHour(),
+    claudeHourlyCap: getClaudeHourlyCap(),
+  };
+}
 
 function isPreviewModel(model: string): boolean {
   return model.toLowerCase().includes("preview");
@@ -61,7 +124,16 @@ function isPreviewRateLimitError(error: unknown): boolean {
 }
 
 function extractJson(text: string): string {
-  const trimmed = text.trim();
+  // Strip chain-of-thought blocks emitted by reasoning models
+  // (kimi-k2.5, qwen3, deepseek-r1, etc.) before searching for JSON.
+  // Handles both complete <think>…</think> and unclosed tags where the model
+  // ran out of tokens mid-reasoning.
+  const stripped = text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*/gi, "") // incomplete think block
+    .trim();
+
+  const trimmed = stripped.length > 0 ? stripped : text.trim();
   let json: string;
 
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -234,6 +306,71 @@ export async function callLlmWithRetry<T>(
     preprocessParsedJson,
     signal,
   } = options;
+
+  if (
+    getLlmPrimary() === "claude" &&
+    !getClaudeSkipCallTypes().has(callType) &&
+    Date.now() >= claudeCooldownUntil &&
+    claudeCallsLastHour() < getClaudeHourlyCap()
+  ) {
+    const claudeModel = getClaudeModel();
+    claudeCallTimes.push(Date.now());
+    try {
+      const claudeResult = await callClaudeCli({
+        system: systemInstruction,
+        prompt: userPrompt,
+        jsonSchema: responseSchema,
+        model: claudeModel,
+        signal,
+      });
+
+      const parsed = preprocessParsedJson
+        ? preprocessParsedJson(claudeResult.structured)
+        : claudeResult.structured;
+      const validated = zodSchema.parse(parsed);
+
+      const outputTokens = claudeResult.usage.output_tokens ?? 0;
+      tokenUsageLog.push({
+        callType,
+        outputTokens,
+        maxOutputTokens,
+        usagePct: Math.round((outputTokens / maxOutputTokens) * 100),
+        timestamp: new Date().toISOString(),
+      });
+      if (tokenUsageLog.length > MAX_TOKEN_LOG_SIZE) {
+        tokenUsageLog.splice(0, tokenUsageLog.length - MAX_TOKEN_LOG_SIZE);
+      }
+
+      console.log(
+        `[LLM] ${callType} served by claude:${claudeModel} (${outputTokens} output tokens)`,
+      );
+      return validated;
+    } catch (error) {
+      if (signal?.aborted) {
+        throw new DOMException("LLM call cancelled", "AbortError");
+      }
+
+      const errMsg = error instanceof Error ? error.message : String(error);
+      lastClaudeError = errMsg.slice(0, 500);
+
+      if (error instanceof ClaudeCliError && error.kind === "usage_limit") {
+        claudeCooldownUntil = Date.now() + CLAUDE_USAGE_LIMIT_COOLDOWN_MS;
+        console.warn(
+          `[LLM] ${callType} Claude CLI hit a usage limit; cooling down 30m and falling back to OpenRouter — ${errMsg.slice(0, 200)}`,
+        );
+      } else if (error instanceof ClaudeCliError && error.kind === "auth") {
+        claudeCooldownUntil = Date.now() + CLAUDE_AUTH_COOLDOWN_MS;
+        console.warn(
+          `[LLM] ${callType} Claude CLI auth error; cooling down 60m and falling back to OpenRouter — ${errMsg.slice(0, 200)}`,
+        );
+      } else {
+        console.warn(
+          `[LLM] ${callType} Claude CLI call failed; falling back to OpenRouter for this call — ${errMsg.slice(0, 200)}`,
+        );
+      }
+      // Fall through to the existing OpenRouter retry loop below, unchanged.
+    }
+  }
 
   const openai = getClient();
   let activeModel = requestedModel ?? getModel();

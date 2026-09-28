@@ -9,6 +9,7 @@ import {
 import type { NexusDriftAnalysis } from "@/types/analysis";
 import type { ActiveCascadesResponse } from "@/app/api/analysis/active-cascades/route";
 import type { EconomicEvent } from "@/lib/utils/economic-calendar";
+import type { DeskResponse, DeskRunSummary } from "@/types/desk";
 
 export interface NewsEvent {
   id: number;
@@ -375,5 +376,45 @@ export function useSqueezeData(refresh = false) {
     queryClient.invalidateQueries({ queryKey: ["shortSqueeze"] });
 
   return { ...query, refresh: refresh$ };
+}
+
+// ---- Story S8 — The Desk ----
+
+export function useDeskData() {
+  return useQuery<DeskResponse>({
+    queryKey: ["desk"],
+    queryFn: async () => {
+      const res = await fetch("/api/desk");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Failed to load the desk (${res.status})`);
+      }
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+export function useRunDesk() {
+  const queryClient = useQueryClient();
+
+  return useMutation<DeskRunSummary, Error>({
+    mutationKey: ["runDesk"],
+    mutationFn: async () => {
+      const res = await fetch("/api/desk/run", { method: "POST" });
+      if (res.status === 409) {
+        throw new Error("A run is already in progress");
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Desk run failed (${res.status})`);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["desk"] });
+    },
+  });
 }
 

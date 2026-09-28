@@ -1,0 +1,1 @@
+export { DeskSkeleton } from "./DeskSkeleton";

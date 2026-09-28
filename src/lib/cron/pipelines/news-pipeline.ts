@@ -14,6 +14,14 @@ import {
   TECH_NEWS_CLASSIFIER_SYSTEM_INSTRUCTION,
   buildTechNewsClassifierPrompt,
 } from "@/lib/prompts/tech-news-classifier";
+import {
+  getJudgedContextRefs,
+  judgeNewsForTicker,
+} from "@/lib/services/jev-judgments";
+
+// Story S4 — cap Jev work per cycle so it never noticeably slows the pipeline.
+const JEV_MAX_PAIRS_PER_CYCLE = 15;
+const JEV_MIN_IMPACT_SCORE = 4;
 
 interface ClassifyAndStoreNewsOptions {
   category?: "general" | "tech";
@@ -57,6 +65,66 @@ async function getInsertedNewsEvents(
   }
 
   return [];
+}
+
+/**
+ * Story S4 — judge up to JEV_MAX_PAIRS_PER_CYCLE (news row, ticker) pairs
+ * per cycle: rows with impact_score >= JEV_MIN_IMPACT_SCORE and a non-empty
+ * tickers array, skipping pairs already judged (same context_ref+ticker).
+ */
+async function judgeInsertedNewsForJev(
+  insertedEvents: Awaited<ReturnType<typeof getInsertedNewsEvents>>,
+): Promise<number> {
+  const candidates: Array<{
+    row: (typeof insertedEvents)[number];
+    ticker: string;
+  }> = [];
+
+  for (const row of insertedEvents) {
+    if ((row.impactScore ?? 0) < JEV_MIN_IMPACT_SCORE) continue;
+
+    let tickers: unknown;
+    try {
+      tickers = JSON.parse(row.tickers ?? "[]");
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(tickers) || tickers.length === 0) continue;
+
+    for (const ticker of tickers) {
+      if (typeof ticker === "string" && ticker.trim()) {
+        candidates.push({ row, ticker: ticker.trim().toUpperCase() });
+      }
+    }
+  }
+
+  if (candidates.length === 0) return 0;
+
+  const judgedPairs = await getJudgedContextRefs(
+    "news",
+    candidates.map((c) => String(c.row.id)),
+  );
+
+  let judged = 0;
+  for (const candidate of candidates) {
+    if (judged >= JEV_MAX_PAIRS_PER_CYCLE) break;
+    const key = `${candidate.row.id}:${candidate.ticker}`;
+    if (judgedPairs.has(key)) continue;
+
+    const count = await judgeNewsForTicker(
+      {
+        id: candidate.row.id,
+        headline: candidate.row.headline,
+        rawSummary: candidate.row.rawSummary,
+        source: candidate.row.source,
+        publishedAt: candidate.row.publishedAt,
+      },
+      candidate.ticker,
+    );
+    if (count > 0) judged++;
+  }
+
+  return judged;
 }
 
 /**
@@ -172,6 +240,20 @@ export async function classifyAndStoreNews(
     } catch (error) {
       console.warn(
         `[NewsPipeline:${category}] Event auto-trigger failed`,
+        error,
+      );
+    }
+
+    try {
+      const judged = await judgeInsertedNewsForJev(insertedEvents);
+      if (judged > 0) {
+        console.log(
+          `[NewsPipeline:${category}] Jev judged ${judged} (news, ticker) pair(s)`,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[NewsPipeline:${category}] Jev judging failed (non-critical)`,
         error,
       );
     }

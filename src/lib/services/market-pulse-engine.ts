@@ -712,7 +712,7 @@ export async function classifyCandles(options: {
             callType: CLASSIFICATION_CALL_TYPE,
             model: getMarketPulseModel(),
             temperature: 0,
-            maxOutputTokens: 32768,
+            maxOutputTokens: 8192,
             signal: options.signal,
             preprocessParsedJson: coerceClassificationEnums,
           },

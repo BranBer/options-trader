@@ -16,6 +16,7 @@ import {
   shortVolumeHistory,
 } from "@/lib/db/schema";
 import { eq, desc, and } from "drizzle-orm";
+import { getTickerUniverse } from "@/lib/services/ticker-universe";
 
 // yahoo-finance2 v3 class API — types export `never` but methods exist at runtime
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -945,18 +946,37 @@ export async function fetchSqueezeUniverse(): Promise<SqueezeUniverseResult> {
     console.warn("[market-fetcher] aggressive_small_caps screener failed:", err);
   }
 
+  // Dynamic candidates — the ticker universe (whale-alert / high-impact-news
+  // derived, see ticker-universe.ts) adds names the Yahoo screeners miss.
+  // UW does not document a Basic-tier market-wide short-interest screener
+  // (only a per-ticker `/api/shorts/{ticker}/interest-float/v2`, see
+  // docs/research/unusual-whales-api.md row #13), so it is not queried here.
+  try {
+    const universeTickers = await getTickerUniverse();
+    for (const sym of universeTickers) {
+      tickerSet.add(sym);
+      if (!volumeData.has(sym)) volumeData.set(sym, { volume: null, avgVolume: null });
+    }
+  } catch (err) {
+    console.warn("[market-fetcher] ticker-universe lookup failed:", err);
+  }
+
   // Curated seed list — perennially high-SI names that may drop off Yahoo's
-  // dynamic screener on quiet days but remain structurally squeeze-prone
-  const SQUEEZE_SEEDS = [
-    "GME", "AMC", "MSTR", "BYND", "UPST", "SOFI", "HOOD", "RIVN", "LCID",
-    "CVNA", "SIRI", "HIMS", "IONQ", "RKLB", "BBAI", "SPCE",
-    "CLOV", "WKHS", "OPEN", "OFED", "BBIG", "ATER", "CXAI", "FFIE",
-    "SPGX", "BNED", "TPVG", "NEWT", "SHIP", "SNDL", "TLRY", "AFRM",
-    "DKNG", "CHWY", "PLTR", "COIN", "SNAP", "RBLX", "UBER", "LYFT",
-  ];
-  for (const sym of SQUEEZE_SEEDS) {
-    tickerSet.add(sym);
-    if (!volumeData.has(sym)) volumeData.set(sym, { volume: null, avgVolume: null });
+  // dynamic screener on quiet days but remain structurally squeeze-prone.
+  // Used ONLY as a last-resort fallback when every dynamic source above
+  // (screeners + ticker universe) came back empty.
+  if (tickerSet.size === 0) {
+    const SQUEEZE_SEEDS = [
+      "GME", "AMC", "MSTR", "BYND", "UPST", "SOFI", "HOOD", "RIVN", "LCID",
+      "CVNA", "SIRI", "HIMS", "IONQ", "RKLB", "BBAI", "SPCE",
+      "CLOV", "WKHS", "OPEN", "OFED", "BBIG", "ATER", "CXAI", "FFIE",
+      "SPGX", "BNED", "TPVG", "NEWT", "SHIP", "SNDL", "TLRY", "AFRM",
+      "DKNG", "CHWY", "PLTR", "COIN", "SNAP", "RBLX", "UBER", "LYFT",
+    ];
+    for (const sym of SQUEEZE_SEEDS) {
+      tickerSet.add(sym);
+      if (!volumeData.has(sym)) volumeData.set(sym, { volume: null, avgVolume: null });
+    }
   }
 
   const result: SqueezeUniverseResult = {

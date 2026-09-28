@@ -144,6 +144,64 @@ sqlite.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_market_pulse_narratives_run_ticker ON market_pulse_narratives (run_id, ticker);
   CREATE INDEX IF NOT EXISTS idx_market_pulse_narratives_ticker_created ON market_pulse_narratives (ticker, created_at);
+  CREATE TABLE IF NOT EXISTS jev_judgments (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    created_at text DEFAULT CURRENT_TIMESTAMP,
+    context_type text NOT NULL,
+    context_ref text NOT NULL,
+    ticker text NOT NULL,
+    question_id text NOT NULL,
+    question_type text NOT NULL,
+    model text NOT NULL,
+    answer text NOT NULL,
+    state_hash text NOT NULL,
+    horizon_days integer,
+    outcome text,
+    scored_at text
+  );
+  CREATE INDEX IF NOT EXISTS idx_jev_judgments_context_created ON jev_judgments (context_type, created_at);
+  CREATE INDEX IF NOT EXISTS idx_jev_judgments_ticker_created ON jev_judgments (ticker, created_at);
+  CREATE TABLE IF NOT EXISTS paper_trades (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    strategy text NOT NULL,
+    ticker text NOT NULL,
+    status text NOT NULL DEFAULT 'open',
+    entry_date text NOT NULL,
+    planned_exit text NOT NULL,
+    exit_date text,
+    exit_reason text,
+    legs text NOT NULL,
+    entry_value real NOT NULL,
+    risk real NOT NULL,
+    mark_value real,
+    pnl real,
+    ret real,
+    context text NOT NULL DEFAULT '{}',
+    created_at text DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades (status);
+  CREATE INDEX IF NOT EXISTS idx_paper_trades_strategy ON paper_trades (strategy);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_trades_dedupe ON paper_trades (strategy, ticker, entry_date);
+  CREATE TABLE IF NOT EXISTS desk_runs (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    started_at text NOT NULL,
+    completed_at text,
+    opened integer NOT NULL DEFAULT 0,
+    marked integer NOT NULL DEFAULT 0,
+    closed integer NOT NULL DEFAULT 0,
+    errors text NOT NULL DEFAULT '[]'
+  );
+  CREATE TABLE IF NOT EXISTS hype_snapshots (
+    id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+    date text NOT NULL,
+    ticker text NOT NULL,
+    rank integer NOT NULL,
+    mentions integer NOT NULL,
+    mentions_24h_ago integer,
+    rank_24h_ago integer,
+    upvotes integer
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_hype_snapshots_date_ticker ON hype_snapshots (date, ticker);
 `);
 
 const newsEventColumns = sqlite

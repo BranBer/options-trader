@@ -278,6 +278,102 @@ export const marketPulseNarratives = sqliteTable(
   ],
 );
 
+// Story S4 — Jev (TypeSafe System One) judgment ledger.
+// Every question answered for a piece of news or a recommendation is logged
+// here so it can later be scored against realized returns. Jev's raw
+// probabilities are evidence readings, NOT calibrated market probabilities
+// (see src/lib/services/AGENTS.md) — this table is what makes that claim
+// checkable instead of assumed.
+export const jevJudgments = sqliteTable(
+  "jev_judgments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+    contextType: text("context_type").notNull(), // 'news' | 'recommendation' | 'desk' (Story S6)
+    contextRef: text("context_ref").notNull(), // news_events.id or analyses.id, as text
+    ticker: text("ticker").notNull(),
+    questionId: text("question_id").notNull(),
+    questionType: text("question_type").notNull(), // 'choice' | 'score' | 'noul'
+    model: text("model").notNull(), // the resolved model string Jev returned
+    answer: text("answer").notNull(), // JSON: the raw JevAnswer
+    stateHash: text("state_hash").notNull(), // sha256 of the exact state JSON sent
+    horizonDays: integer("horizon_days"), // trading days until this answer matures, if directional
+    outcome: text("outcome"), // JSON: { ret, spyRet, excess, label } once scored
+    scoredAt: text("scored_at"),
+  },
+  (table) => [
+    index("idx_jev_judgments_context_created").on(
+      table.contextType,
+      table.createdAt,
+    ),
+    index("idx_jev_judgments_ticker_created").on(
+      table.ticker,
+      table.createdAt,
+    ),
+  ],
+);
+
+// Story S6 — Paper-trading desk. Forward-tests the four strategies in
+// docs/research/backtest-findings.md with the same cost model as the
+// backtests. `legs`/`context` are JSON text columns (see src/types/desk.ts
+// for the shapes) — SQLite has no native JSON column type here.
+export const paperTrades = sqliteTable(
+  "paper_trades",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    strategy: text("strategy").notNull(), // StrategyId
+    ticker: text("ticker").notNull(),
+    status: text("status").notNull().default("open"), // 'open' | 'closed'
+    entryDate: text("entry_date").notNull(), // YYYY-MM-DD (NY session date)
+    plannedExit: text("planned_exit").notNull(), // YYYY-MM-DD
+    exitDate: text("exit_date"),
+    exitReason: text("exit_reason"),
+    legs: text("legs").notNull(), // JSON PaperLeg[]
+    entryValue: real("entry_value").notNull(),
+    risk: real("risk").notNull(),
+    markValue: real("mark_value"),
+    pnl: real("pnl"),
+    ret: real("ret"),
+    context: text("context").notNull().default("{}"), // JSON PaperTradeContext
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_paper_trades_status").on(table.status),
+    index("idx_paper_trades_strategy").on(table.strategy),
+    uniqueIndex("idx_paper_trades_dedupe").on(
+      table.strategy,
+      table.ticker,
+      table.entryDate,
+    ),
+  ],
+);
+
+export const deskRuns = sqliteTable("desk_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  startedAt: text("started_at").notNull(),
+  completedAt: text("completed_at"),
+  opened: integer("opened").notNull().default(0),
+  marked: integer("marked").notNull().default(0),
+  closed: integer("closed").notNull().default(0),
+  errors: text("errors").notNull().default("[]"), // JSON string[]
+});
+
+// Daily Reddit-mention snapshots (ApeWisdom serves no history, so this table is the history).
+export const hypeSnapshots = sqliteTable(
+  "hype_snapshots",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    date: text("date").notNull(), // NY date the snapshot was taken
+    ticker: text("ticker").notNull(),
+    rank: integer("rank").notNull(),
+    mentions: integer("mentions").notNull(),
+    mentions24hAgo: integer("mentions_24h_ago"),
+    rank24hAgo: integer("rank_24h_ago"),
+    upvotes: integer("upvotes"),
+  },
+  (table) => [uniqueIndex("idx_hype_snapshots_date_ticker").on(table.date, table.ticker)],
+);
+
 // Epic 51 Sprint 2 — FINRA short volume history
 export const shortVolumeHistory = sqliteTable(
   "short_volume_history",

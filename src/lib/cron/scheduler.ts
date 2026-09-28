@@ -17,6 +17,8 @@ import {
 } from "./pipeline-run-store";
 import { refreshCalendarCache } from "@/lib/services/live-economic-calendar";
 import { refreshNexusEarnings } from "@/lib/services/nexus-earnings-cache";
+import { scoreMaturedJudgments } from "@/lib/services/jev-judgments";
+import { runDesk } from "@/lib/desk/run-desk";
 
 let lastRefreshAt: string | null = null;
 let isRunning = false;
@@ -200,6 +202,28 @@ export function startScheduler() {
       console.error("[Scheduler] Nexus earnings refresh failed:", err),
     );
   });
+
+  // Story S4 — score matured Jev judgments once daily at 05:30 UTC
+  // (after the calendar refresh, off the hot 10-minute cycle).
+  cron.schedule("30 5 * * *", async () => {
+    console.log("[Scheduler] Daily Jev judgment scoring");
+    await scoreMaturedJudgments().catch((err) =>
+      console.error("[Scheduler] Jev judgment scoring failed:", err),
+    );
+  });
+
+  // Story S6 — run the paper-trading desk once daily, weekdays at 16:35 ET
+  // (after the close, before the after-hours cutoff used for asOf resolution).
+  cron.schedule(
+    "35 16 * * 1-5",
+    async () => {
+      console.log("[Scheduler] Daily desk run");
+      await runDesk().catch((err) =>
+        console.error("[Scheduler] Desk run failed:", err),
+      );
+    },
+    { timezone: "America/New_York" },
+  );
 
   // Cold-start: warm the calendar cache immediately so callers have live data
   // as soon as the first pipeline run or API call occurs.

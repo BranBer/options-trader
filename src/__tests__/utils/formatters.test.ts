@@ -5,6 +5,7 @@ import {
   formatNumber,
   timeAgo,
   confidenceLabel,
+  parseDbTime,
 } from "@/lib/utils/formatters";
 import { getFOMCProximity } from "@/lib/utils/fomc-calendar";
 
@@ -86,6 +87,26 @@ describe("timeAgo", () => {
       Date.now() - 3 * 24 * 60 * 60_000,
     ).toISOString();
     expect(timeAgo(threeDaysAgo)).toBe("3d ago");
+  });
+});
+
+describe("parseDbTime", () => {
+  it("reads SQLite CURRENT_TIMESTAMP values as UTC", () => {
+    expect(parseDbTime("2026-09-27 04:53:20").toISOString()).toBe(
+      "2026-09-27T04:53:20.000Z",
+    );
+  });
+
+  it("leaves ISO strings with a zone untouched", () => {
+    expect(parseDbTime("2026-09-27T04:53:20-04:00").toISOString()).toBe(
+      "2026-09-27T08:53:20.000Z",
+    );
+  });
+
+  it("makes timeAgo agree for DB and ISO forms of the same instant", () => {
+    const iso = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+    const db = iso.slice(0, 19).replace("T", " ");
+    expect(timeAgo(db)).toBe(timeAgo(iso));
   });
 });
 

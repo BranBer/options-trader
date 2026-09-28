@@ -42,3 +42,7 @@ yarn-error.log*
 # local database
 /data/
 next-env.d.ts
+
+# personal brokerage exports (financial data)
+/rh-history*.html
+/rh-history*.csv

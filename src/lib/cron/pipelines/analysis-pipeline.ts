@@ -59,6 +59,7 @@ import {
   getCachedNexusEarnings,
   getNexusEarningsAge,
 } from "@/lib/services/nexus-earnings-cache";
+import { judgeRecommendation } from "@/lib/services/jev-judgments";
 
 const MIN_CORRELATION_CONFIDENCE = 0.5;
 const RECOMMEND_CONCURRENCY = 2;
@@ -270,15 +271,35 @@ async function processRecommendationItems(args: {
         });
 
         await persistMarketSnapshot(ctx);
-        await db.insert(analyses).values({
-          type: "trade_recommendation",
-          inputRefs: JSON.stringify({
-            ...item.inputRefs,
-            triggerReport,
-          }),
-          output: JSON.stringify(recommendation),
-          confidence: recommendation.confidence,
-        });
+        const [insertedAnalysis] = await db
+          .insert(analyses)
+          .values({
+            type: "trade_recommendation",
+            inputRefs: JSON.stringify({
+              ...item.inputRefs,
+              triggerReport,
+            }),
+            output: JSON.stringify(recommendation),
+            confidence: recommendation.confidence,
+          })
+          .returning({ id: analyses.id, createdAt: analyses.createdAt });
+
+        // Story S4 — independent Jev judgment of this recommendation.
+        // Never allowed to break or slow the pipeline.
+        if (insertedAnalysis) {
+          try {
+            await judgeRecommendation({
+              id: insertedAnalysis.id,
+              createdAt: insertedAnalysis.createdAt,
+              output: JSON.stringify(recommendation),
+            });
+          } catch (err) {
+            console.warn(
+              `[AnalysisPipeline] Jev judging failed for recommendation ${insertedAnalysis.id} (non-critical)`,
+              err,
+            );
+          }
+        }
 
         console.log(
           `[AnalysisPipeline] ${item.source === "whale_signal" ? "Whale-signal recommendation" : "Recommendation"} for ${ticker}: ${recommendation.direction} ` +

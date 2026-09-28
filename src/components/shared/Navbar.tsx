@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Cpu,
   Zap,
+  Briefcase,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +57,7 @@ interface PipelineStatus {
 
 const navLinks = [
   { href: "/", label: "Dashboard", icon: Home },
+  { href: "/desk", label: "Desk", icon: Briefcase },
   { href: "/whale-alerts", label: "Whale Alerts", icon: Activity },
   { href: "/globe", label: "Globe", icon: Globe },
   { href: "/tech-globe", label: "Tech Globe", icon: Cpu },

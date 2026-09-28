@@ -21,6 +21,12 @@ vi.mock("@/lib/services/event-ticker-analyzer", () => ({
 vi.mock("@/lib/services/news-fetcher", () => ({
   fetchAllNews: vi.fn(),
 }));
+// Story S4 — Jev judging is covered independently in jev-judgments.test.ts;
+// stub it out here so it never touches mockDb (and its call-count assertions).
+vi.mock("@/lib/services/jev-judgments", () => ({
+  getJudgedContextRefs: vi.fn().mockResolvedValue(new Set()),
+  judgeNewsForTicker: vi.fn().mockResolvedValue(0),
+}));
 
 import { classifyAndStoreNews } from "@/lib/cron/pipelines/news-pipeline";
 
